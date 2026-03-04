@@ -1,0 +1,15 @@
+flowchart TD
+  A[Google Sheet: HiringCafe search links] --> B[n8n Workflow 01: Ingest Jobs]
+  B --> C[jobscraper service (Playwright)]
+  C --> D[(n8n Data Table: job_postings)]
+
+  D --> E[n8n Workflow 02: Score Jobs]
+  F[(n8n Data Table: prompt_library)] --> E
+
+  E --> G[Ollama (local LLM)\nStructured JSON scoring]
+  G --> H[Update job_postings with score + eval]
+
+  H --> I{Score ≥ 20?}
+  I -- Yes --> J[Append row to Google Sheet: Application Tracker]
+  I -- Yes --> K[Email summary alert]
+  I -- No --> L[No alert (kept as scored)]

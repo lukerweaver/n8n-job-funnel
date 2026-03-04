@@ -1,0 +1,23 @@
+{
+  "name": "job_postings",
+  "columns": [
+    { "name": "status", "type": "string", "index": 0 },
+    { "name": "score", "type": "number", "index": 1 },
+    { "name": "apply_url", "type": "string", "index": 2 },
+    { "name": "company_name", "type": "string", "index": 3 },
+    { "name": "title", "type": "string", "index": 4 },
+    { "name": "job_id", "type": "string", "index": 5 },
+    { "name": "recommendation", "type": "string", "index": 6 },
+    { "name": "yearly_min_compensation", "type": "number", "index": 7 },
+    { "name": "yearly_max_compensation", "type": "number", "index": 8 },
+    { "name": "description", "type": "string", "index": 9 },
+    { "name": "scored_at", "type": "date", "index": 10 },
+    { "name": "prompt_key", "type": "string", "index": 11 },
+    { "name": "tailored_resume", "type": "string", "index": 12 },
+    { "name": "strengths", "type": "string", "index": 13 },
+    { "name": "gaps", "type": "string", "index": 14 },
+    { "name": "missing_from_jd", "type": "string", "index": 15 },
+    { "name": "justification", "type": "string", "index": 16 },
+    { "name": "prompt_version", "type": "number", "index": 17 }
+  ]
+}
