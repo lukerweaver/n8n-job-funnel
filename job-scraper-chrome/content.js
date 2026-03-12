@@ -297,6 +297,35 @@
     return items
       .map((item) => {
         const info = item?.job_information || {};
+        const hiringCompanyName = (() => {
+          const companyCandidates = [
+            item?.company_name,
+            item?.companyName,
+            item?.company?.name,
+            item?.company?.title,
+            item?.employer_name,
+            item?.employer?.name,
+            item?.employerName,
+            item?.organization,
+            item?.job_board?.name,
+            info?.company_name,
+            info?.companyName,
+            info?.company,
+            info?.employer_name,
+            info?.employerName,
+            info?.organization
+          ];
+
+          for (const candidate of companyCandidates) {
+            if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+            if (candidate && typeof candidate === 'object' && typeof candidate.name === 'string' && candidate.name.trim()) {
+              return candidate.name.trim();
+            }
+          }
+
+          return '';
+        })();
+
         const rawDescription = info.description || '';
         const compensationText = extractCompensationFromHiringInfo(info) || stripHtml(String(rawDescription || ''));
         const compensation = parseCompensation(compensationText);
@@ -304,7 +333,7 @@
 
         return {
           job_id: item?.id ? `hiring_${item.id}` : `hiring_${Math.random().toString(36).slice(2, 11)}`,
-          company_name: item?.company_name || info?.company_name || info?.companyName || item?.source || 'Unknown Company',
+          company_name: hiringCompanyName || 'Unknown Company',
           title: item?.job_title || item?.title || info?.title || info?.job_title_raw || 'Unknown Title',
           yearly_min_compensation: compensation.min || 0,
           yearly_max_compensation: compensation.max || 0,
