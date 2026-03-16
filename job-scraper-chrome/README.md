@@ -22,7 +22,7 @@ This extension scrapes LinkedIn job pages and sends this payload:
 
 ## Setup
 1. Edit `background.js`:
-   - Replace `POST_ENDPOINT` with your real URL.
+   - Replace `POST_ENDPOINT` with your real URL, typically `http://localhost:8000/jobs/ingest`.
 2. Update selectors in `content.js` if your LinkedIn layout differs.
 3. Go to `chrome://extensions`, enable Developer mode, and load unpacked this folder.
 4. Open a LinkedIn job page and click **Scrape this job**.

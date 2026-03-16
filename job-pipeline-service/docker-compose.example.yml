@@ -1,0 +1,13 @@
+services:
+  job-pipeline-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job-pipeline-service
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////app/data/jobs.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

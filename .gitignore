@@ -1,0 +1,24 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local databases and service data
+*.db
+*.sqlite
+*.sqlite3
+job-pipeline-service/data/
+
+# Environment files
+.env
+.env.*
+
+# Editor / OS
+.idea/
+.vscode/

@@ -6,6 +6,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY database.py .
+COPY models.py .
+COPY schemas.py .
 
 EXPOSE 8000
 

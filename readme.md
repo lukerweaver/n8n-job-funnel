@@ -1,6 +1,6 @@
 # Automated Job Funnel (n8n + LLM)
 
-An automated job search pipeline built with **n8n workflows, a local LLM, and a lightweight scraping service**.
+An automated job search pipeline built with **n8n workflows, a local LLM, and a lightweight job pipeline API**.
 
 The system continuously ingests job postings, evaluates them against a resume using a structured scoring rubric, and surfaces the best opportunities automatically.
 
@@ -29,14 +29,13 @@ The system is designed as a lightweight **workflow orchestration pipeline** rath
 ```
 HiringCafe Searches
         │
-        ▼
-n8n Ingestion Workflow
+job-scraper-chrome / HiringCafe
         │
         ▼
-jobscraper service (Playwright)
+job-pipeline-service
         │
         ▼
-job_postings Data Table
+SQLite job store
         │
         ▼
 n8n Scoring Workflow
@@ -80,19 +79,11 @@ Runs multiple times per day to collect new job postings.
 ### Flow
 
 ```
-Schedule Trigger
+Job scraper / source system
     ↓
-Get search URLs from Google Sheets
+POST to job-pipeline-service
     ↓
-Call jobscraper service
-    ↓
-Flatten API results
-    ↓
-Extract key fields
-    ↓
-Check if job already exists
-    ↓
-Insert new job into job_postings table
+Upsert into SQLite job store
 ```
 
 ### Purpose
@@ -100,7 +91,7 @@ Insert new job into job_postings table
 - Automatically import new postings
 - Normalize job data
 - Deduplicate using `job_id`
-- Store in the pipeline's working data table
+- Store jobs in the service's database
 
 Example stored fields:
 
@@ -128,7 +119,7 @@ Evaluates new job postings using an LLM scoring rubric.
 ```
 Schedule Trigger
     ↓
-Retrieve new job postings
+Retrieve `new` job postings from job-pipeline-service
     ↓
 Retrieve prompt template and resume
     ↓
@@ -140,7 +131,7 @@ Send to local LLM (Ollama)
     ↓
 Parse structured JSON output
     ↓
-Store score and evaluation
+Write score and evaluation back to job-pipeline-service
     ↓
 Filter high scores
     ↓
@@ -166,7 +157,7 @@ Jobs scoring **≥20** are surfaced as strong opportunities.
 
 # Data Model
 
-The system uses n8n Data Tables as lightweight storage.
+The system now uses `job-pipeline-service` as the system of record for jobs and scoring output.
 
 ---
 
@@ -192,6 +183,8 @@ Array outputs from the LLM are serialized to strings for storage.
 ---
 
 ## prompt_library
+
+`prompt_library` can still live in n8n Data Tables or another prompt store. n8n remains responsible for prompt selection and LLM orchestration.
 
 Stores prompts and resume templates used by the pipeline.
 

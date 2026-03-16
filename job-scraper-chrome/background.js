@@ -1,4 +1,4 @@
-const POST_ENDPOINT = 'PLACEHOLDER_POST_ENDPOINT';
+const POST_ENDPOINT = 'http://localhost:8000/jobs/ingest';
 
 chrome.runtime.onMessage.addListener(async (message, _sender, sendResponse) => {
   if (!message || message.type !== 'postJobPayload') return;
