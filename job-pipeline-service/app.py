@@ -4,6 +4,7 @@ from typing import Annotated
 from urllib.parse import urlparse
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 from sqlalchemy import select
@@ -84,6 +85,13 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Job Pipeline Service", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
