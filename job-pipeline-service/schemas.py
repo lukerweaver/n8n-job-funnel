@@ -38,12 +38,13 @@ class JobScoreWrite(BaseModel):
 
 
 class JobScoreBatchItem(JobScoreWrite):
-    job_id: str
+    id: int
 
 
 class JobRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: int
     job_id: str
     source: str
     status: str
@@ -73,6 +74,7 @@ class JobListResponse(BaseModel):
 
 
 class JobScoreResponse(BaseModel):
+    id: int
     job_id: str
     status: str
     score: float | None = None
@@ -82,7 +84,7 @@ class JobScoreResponse(BaseModel):
 
 class JobsBatchScoreResponse(BaseModel):
     updated: int
-    jobs: list[str]
+    jobs: list[int]
 
 
 class JobNotifyWrite(BaseModel):
@@ -91,10 +93,11 @@ class JobNotifyWrite(BaseModel):
 
 
 class JobNotifyBatchItem(JobNotifyWrite):
-    job_id: str
+    id: int
 
 
 class JobNotifyResponse(BaseModel):
+    id: int
     job_id: str
     status: str
     notified_at: datetime | None = None
@@ -102,4 +105,37 @@ class JobNotifyResponse(BaseModel):
 
 class JobsBatchNotifyResponse(BaseModel):
     updated: int
-    jobs: list[str]
+    jobs: list[int]
+
+
+class PromptLibraryBase(BaseModel):
+    prompt_key: str
+    prompt_version: int
+    system_prompt: str
+    user_prompt_template: str
+    base_resume_template: str
+    is_active: bool = True
+
+
+class PromptLibraryCreate(PromptLibraryBase):
+    pass
+
+
+class PromptLibraryUpdate(BaseModel):
+    prompt_key: str | None = None
+    prompt_version: int | None = None
+    system_prompt: str | None = None
+    user_prompt_template: str | None = None
+    base_resume_template: str | None = None
+    is_active: bool | None = None
+
+
+class PromptLibraryRead(PromptLibraryBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
+class PromptLibraryListResponse(BaseModel):
+    total: int
+    items: list[PromptLibraryRead]

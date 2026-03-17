@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -42,3 +42,16 @@ class JobPosting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+
+
+class PromptLibrary(Base):
+    __tablename__ = "prompt_library"
+    __table_args__ = (UniqueConstraint("prompt_key", "prompt_version", name="uq_prompt_library_key_version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    prompt_key: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    user_prompt_template: Mapped[str] = mapped_column(Text, nullable=False)
+    base_resume_template: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
