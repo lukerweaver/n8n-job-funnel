@@ -20,9 +20,12 @@ LinkedIn job page or Hiring Cafe search page
         -> POST /jobs/ingest
             -> job-pipeline-service
                 -> SQLite by default, Postgres when DATABASE_URL is set
+                    -> service-side scoring
+                        -> active prompt from prompt_library
+                        -> configured LLM provider
+                        -> score/error persistence
                     -> n8n scoring workflow
-                        -> Ollama or another LLM
-                            -> score/error writeback to API
+                        -> POST /jobs/score/run
                     -> n8n notification workflow
                         -> tracker + email + notify writeback to API
 ```
@@ -74,6 +77,11 @@ LinkedIn job page or Hiring Cafe search page
 - `missing_from_jd`
 - `prompt_key`
 - `prompt_version`
+- `score_provider`
+- `score_model`
+- `score_error`
+- `score_raw_response`
+- `score_attempts`
 - `scored_at`
 - `notified_at`
 - `error_at`
@@ -112,6 +120,15 @@ By default the service uses SQLite:
 - `sqlite:///./data/jobs.db` if `job-pipeline-service/data/jobs.db` already exists
 
 Set `DATABASE_URL` to use Postgres or another supported SQLAlchemy database.
+
+Service-side scoring is configured with environment variables such as:
+
+- `SCORING_PROVIDER` default `ollama`
+- `SCORING_MODEL`
+- `OLLAMA_BASE_URL`
+- `OLLAMA_NUM_CTX`
+- `LLM_TIMEOUT_SECONDS`
+- `DEFAULT_PROMPT_KEY`
 
 ### Option 2: Run the API with the included compose example
 
@@ -160,7 +177,7 @@ The repo includes these exports:
 
 These exports target the current API-backed flow, but they are checked in with placeholder hosts, credential IDs, recipient addresses, and external document IDs. Reconfigure those values in n8n after import.
 
-If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id` and internal numeric `id`. `Job Scoring.json` now acts as a thin trigger that calls `/jobs/score/run`. `Job Notification.json` reads recently scored jobs above a threshold, appends them to a tracker, emails a digest, and calls `/jobs/{id}/notify`.
+If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id` and internal numeric `id`. `Job Scoring.json` now acts as a thin trigger that calls `/jobs/score/run`, while prompt rendering, LLM calls, parsing, and score/error persistence happen inside the service. `Job Notification.json` reads recently scored jobs above a threshold, appends them to a tracker, emails a digest, and calls `/jobs/{id}/notify`.
 
 ## Notes
 

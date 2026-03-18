@@ -4,7 +4,7 @@ FastAPI service for:
 
 1. ingesting normalized jobs from the Chrome extension
 2. storing job records and prompt templates
-3. exposing routes that n8n can use to fetch jobs and write scores back
+3. exposing routes that n8n can use to trigger scoring and write notification state back
 4. keeping a legacy Hiring Cafe Playwright capture route available
 
 The primary ingestion path is `POST /jobs/ingest` from `job-scraper-chrome`.
@@ -23,6 +23,21 @@ This service supports both SQLite and Postgres.
 - Otherwise it uses `sqlite:///./jobs.db`.
 
 Tables are created automatically on startup.
+
+## Scoring configuration
+
+The service can score jobs directly using a configured LLM provider.
+
+Supported environment variables:
+
+- `SCORING_PROVIDER` default `ollama`
+- `SCORING_MODEL` default `qwen2.5:14b-instruct`
+- `OLLAMA_BASE_URL` default `http://localhost:11434`
+- `OLLAMA_NUM_CTX` default `50000`
+- `LLM_TIMEOUT_SECONDS` default `180`
+- `DEFAULT_PROMPT_KEY` optional
+
+The current implementation supports `ollama` as the scoring provider.
 
 ## Local run
 
@@ -234,6 +249,8 @@ Example payload:
 
 The batch response includes `selected`, `scored`, `errored`, `skipped`, and the processed internal job IDs.
 
+Batch scoring uses the same service-side prompt resolution, rendering, LLM call, parsing, and persistence logic as the single-job route.
+
 ### `POST /job/{id}/error`
 
 Marks a job as error and sets `error_at`.
@@ -268,7 +285,7 @@ Batch notification writeback route. Each item must include numeric `id`.
 
 ### Prompt library routes
 
-Use the prompt-library endpoints to manage versioned prompt templates inside the service database rather than n8n Data Tables.
+Use the prompt-library endpoints to manage versioned prompt templates inside the service database rather than n8n Data Tables. The service-side scoring routes resolve active prompts from this table.
 
 ### `GET /jobs/hiringcafe`
 
