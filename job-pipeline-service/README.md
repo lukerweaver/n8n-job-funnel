@@ -110,6 +110,8 @@ The compose example:
 - `POST /jobs/ingest`
 - `GET /jobs`
 - `GET /jobs/{id}`
+- `POST /jobs/{id}/score/run`
+- `POST /jobs/score/run`
 - `POST /jobs/{id}/score`
 - `POST /job/{id}/error`
 - `POST /jobs/scores`
@@ -179,7 +181,7 @@ GET http://localhost:8000/jobs?status=new&limit=25
 
 ### `POST /jobs/{id}/score`
 
-Stores scoring output for a single job identified by internal numeric `id`.
+Stores scoring output for a single job identified by internal numeric `id`. This is now the legacy/manual writeback route; the preferred scoring path is the service-side `/jobs/{id}/score/run` or `/jobs/score/run` endpoints.
 
 Example payload:
 
@@ -201,6 +203,36 @@ If `scored_at` is omitted, the service uses the current UTC time. The response i
 ### `POST /jobs/scores`
 
 Batch score writeback route. Each item must include numeric `id`.
+
+### `POST /jobs/{id}/score/run`
+
+Triggers scoring for a single job inside the service. The service resolves the active prompt, renders the prompt body, calls the configured LLM provider, validates the response, and persists either scored or error state.
+
+Example payload:
+
+```json
+{
+  "prompt_key": "product",
+  "force": false
+}
+```
+
+### `POST /jobs/score/run`
+
+Triggers a batch scoring run inside the service.
+
+Example payload:
+
+```json
+{
+  "limit": 25,
+  "status": "new",
+  "dry_run": false,
+  "force": false
+}
+```
+
+The batch response includes `selected`, `scored`, `errored`, `skipped`, and the processed internal job IDs.
 
 ### `POST /job/{id}/error`
 

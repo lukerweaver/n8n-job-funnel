@@ -80,9 +80,11 @@ class JobScoreResponse(BaseModel):
     job_id: str
     status: str
     score: float | None = None
+    recommendation: str | None = None
     scored_at: datetime | None = None
     notified_at: datetime | None = None
     error_at: datetime | None = None
+    score_error: str | None = None
 
 
 class JobsBatchScoreResponse(BaseModel):
@@ -116,6 +118,29 @@ class JobErrorResponse(BaseModel):
     job_id: str
     status: str
     error_at: datetime | None = None
+    score_error: str | None = None
+
+
+class JobScoreRunRequest(BaseModel):
+    prompt_key: str | None = None
+    force: bool = False
+
+
+class JobsScoreRunRequest(BaseModel):
+    limit: int = 25
+    status: str = "new"
+    source: str | None = None
+    prompt_key: str | None = None
+    dry_run: bool = False
+    force: bool = False
+
+
+class JobsScoreRunResponse(BaseModel):
+    selected: int
+    scored: int
+    errored: int
+    skipped: int
+    jobs: list[int]
 
 
 class JobsBatchNotifyResponse(BaseModel):

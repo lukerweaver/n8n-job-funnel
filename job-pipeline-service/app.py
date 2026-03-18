@@ -26,9 +26,12 @@ from schemas import (
     JobNotifyResponse,
     JobNotifyWrite,
     JobRead,
+    JobScoreRunRequest,
     JobScoreBatchItem,
     JobScoreResponse,
     JobScoreWrite,
+    JobsScoreRunRequest,
+    JobsScoreRunResponse,
     PromptLibraryCreate,
     PromptLibraryListResponse,
     PromptLibraryRead,
@@ -36,6 +39,9 @@ from schemas import (
     JobsBatchNotifyResponse,
     JobsBatchScoreResponse,
 )
+from services.llm_client import LlmRequestError
+from services.prompt_service import PromptResolutionError
+from services.scoring_service import BatchScoringResult, JobScoringSkipped, score_job, score_jobs
 
 
 def merge_responses(existing, incoming):
@@ -80,6 +86,8 @@ def apply_score(job: JobPosting, score_payload: JobScoreWrite) -> None:
     job.prompt_key = score_payload.prompt_key
     job.prompt_version = score_payload.prompt_version
     job.scored_at = score_payload.scored_at or utcnow()
+    job.score_error = None
+    job.error_at = None
     job.status = score_payload.status
 
 
@@ -90,6 +98,7 @@ def apply_notification(job: JobPosting, notify_payload: JobNotifyWrite) -> None:
 
 def apply_error(job: JobPosting, error_payload: JobErrorWrite) -> None:
     job.error_at = error_payload.error_at or utcnow()
+    job.score_error = None
     job.status = error_payload.status
 
 
@@ -116,16 +125,28 @@ def _commit_or_fail(session: Session) -> None:
 def ensure_job_postings_schema() -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("job_postings")}
-    if "error_at" in columns:
+
+    type_map = {
+        "error_at": "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME",
+        "score_provider": "VARCHAR(100)",
+        "score_model": "VARCHAR(255)",
+        "score_error": "TEXT",
+        "score_raw_response": "TEXT",
+        "score_attempts": "INTEGER",
+    }
+
+    statements = [
+        f"ALTER TABLE job_postings ADD COLUMN {column_name} {column_type}"
+        for column_name, column_type in type_map.items()
+        if column_name not in columns
+    ]
+
+    if not statements:
         return
 
-    if engine.dialect.name == "postgresql":
-        add_column_sql = "ALTER TABLE job_postings ADD COLUMN error_at TIMESTAMP WITH TIME ZONE"
-    else:
-        add_column_sql = "ALTER TABLE job_postings ADD COLUMN error_at DATETIME"
-
     with engine.begin() as connection:
-        connection.execute(text(add_column_sql))
+        for statement in statements:
+            connection.execute(text(statement))
 
 
 @asynccontextmanager
@@ -151,6 +172,16 @@ async def operational_error_handler(_: Request, exc: OperationalError) -> JSONRe
     if "disk i/o error" in message or "database is locked" in message:
         return JSONResponse(status_code=503, content={"detail": "Database is temporarily unavailable"})
     return JSONResponse(status_code=500, content={"detail": "Database error"})
+
+
+@app.exception_handler(PromptResolutionError)
+async def prompt_resolution_error_handler(_: Request, exc: PromptResolutionError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(LlmRequestError)
+async def llm_request_error_handler(_: Request, exc: LlmRequestError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 @app.get("/health")
@@ -252,9 +283,61 @@ def store_job_score(job_id: int, score_payload: JobScoreWrite, session: Session 
         job_id=job.job_id,
         status=job.status,
         score=job.score,
+        recommendation=job.recommendation,
         scored_at=job.scored_at,
         notified_at=job.notified_at,
         error_at=job.error_at,
+        score_error=job.score_error,
+    )
+
+
+@app.post("/jobs/{job_id}/score/run", response_model=JobScoreResponse)
+def run_job_score(job_id: int, payload: JobScoreRunRequest, session: Session = Depends(get_session)):
+    job = _get_job_by_id(session, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
+
+    try:
+        result = score_job(session, job, prompt_key=payload.prompt_key, force=payload.force)
+    except JobScoringSkipped as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    _commit_or_fail(session)
+
+    return JobScoreResponse(
+        id=result.job.id,
+        job_id=result.job.job_id,
+        status=result.job.status,
+        score=result.job.score,
+        recommendation=result.job.recommendation,
+        scored_at=result.job.scored_at,
+        notified_at=result.job.notified_at,
+        error_at=result.job.error_at,
+        score_error=result.job.score_error,
+    )
+
+
+@app.post("/jobs/score/run", response_model=JobsScoreRunResponse)
+def run_jobs_score(payload: JobsScoreRunRequest, session: Session = Depends(get_session)):
+    result: BatchScoringResult = score_jobs(
+        session,
+        limit=payload.limit,
+        status=payload.status,
+        source=payload.source,
+        prompt_key=payload.prompt_key,
+        dry_run=payload.dry_run,
+        force=payload.force,
+    )
+
+    if not payload.dry_run:
+        _commit_or_fail(session)
+
+    return JobsScoreRunResponse(
+        selected=result.selected,
+        scored=result.scored,
+        errored=result.errored,
+        skipped=result.skipped,
+        jobs=result.job_ids,
     )
 
 
@@ -309,6 +392,7 @@ def mark_job_error(job_id: int, error_payload: JobErrorWrite, session: Session =
         job_id=job.job_id,
         status=job.status,
         error_at=job.error_at,
+        score_error=job.score_error,
     )
 
 
