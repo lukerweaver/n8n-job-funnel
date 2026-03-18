@@ -299,6 +299,9 @@
         const info = item?.job_information || {};
         const hiringCompanyName = (() => {
           const companyCandidates = [
+            item?.v5_processed_job_data?.company_name,
+            item?.v5_processed_job_data?.companyName,
+            item?.v5_processed_job_data?.company?.name,
             item?.company_name,
             item?.companyName,
             item?.company?.name,
@@ -600,4 +603,3 @@
     installLinkedInAutoScrapeHooks();
   }
 })();
-
