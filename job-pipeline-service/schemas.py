@@ -20,6 +20,7 @@ class JobIngestResponse(BaseModel):
     received: int
     created: int
     updated: int
+    skipped: int
     jobs: list[str]
 
 
@@ -64,6 +65,7 @@ class JobRead(BaseModel):
     prompt_version: int | None
     scored_at: datetime | None
     notified_at: datetime | None
+    error_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -80,6 +82,7 @@ class JobScoreResponse(BaseModel):
     score: float | None = None
     scored_at: datetime | None = None
     notified_at: datetime | None = None
+    error_at: datetime | None = None
 
 
 class JobsBatchScoreResponse(BaseModel):
@@ -101,6 +104,18 @@ class JobNotifyResponse(BaseModel):
     job_id: str
     status: str
     notified_at: datetime | None = None
+
+
+class JobErrorWrite(BaseModel):
+    error_at: datetime | None = None
+    status: str = "error"
+
+
+class JobErrorResponse(BaseModel):
+    id: int
+    job_id: str
+    status: str
+    error_at: datetime | None = None
 
 
 class JobsBatchNotifyResponse(BaseModel):

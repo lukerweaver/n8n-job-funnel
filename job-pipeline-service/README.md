@@ -2,21 +2,31 @@
 
 FastAPI service for:
 
-1. ingesting scraped jobs
-2. storing jobs and scoring results in SQLite
-3. exposing routes that n8n can use to fetch jobs to score and write scores back
-4. keeping the legacy Hiring Cafe scrape route available
+1. ingesting normalized jobs from the Chrome extension
+2. storing job records and prompt templates
+3. exposing routes that n8n can use to fetch jobs and write scores back
+4. keeping a legacy Hiring Cafe Playwright capture route available
 
-The Hiring Cafe route is still present, but Hiring Cafe bot detection currently makes it unreliable. The primary ingestion path should now be `POST /jobs/ingest` from `job-scraper-chrome`.
+The primary ingestion path is `POST /jobs/ingest` from `job-scraper-chrome`.
 
 ## Requirements
 
 - Python 3.11+
-- Docker Desktop (optional, recommended for deployment)
+- Docker Desktop or another Docker runtime if you want to use the compose example
 
-## Local Run
+## Database behavior
 
-The service can run without Docker. By default it uses a local SQLite database file, so no separate database server is required.
+This service supports both SQLite and Postgres.
+
+- If `DATABASE_URL` is set, that value is used.
+- If `DATABASE_URL` is not set and `./data/jobs.db` already exists, the service uses `sqlite:///./data/jobs.db`.
+- Otherwise it uses `sqlite:///./jobs.db`.
+
+Tables are created automatically on startup.
+
+## Local run
+
+From `job-pipeline-service/`:
 
 ### 1. Create and activate a virtual environment
 
@@ -36,15 +46,6 @@ source .venv/bin/activate
 
 ### 2. Install dependencies
 
-Windows PowerShell:
-
-```powershell
-pip install -r requirements.txt
-playwright install chromium
-```
-
-macOS / Linux:
-
 ```bash
 pip install -r requirements.txt
 playwright install chromium
@@ -52,114 +53,83 @@ playwright install chromium
 
 ### 3. Start the API
 
-Windows PowerShell:
-
-```powershell
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
-macOS / Linux:
-
 ```bash
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
 ### 4. Verify it is running
 
-Windows PowerShell:
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/health"
-```
-
-macOS / Linux:
-
 ```bash
 curl http://localhost:8000/health
 ```
 
-### Notes
+## Docker
 
-- The SQLite database will be created automatically as `jobs.db` in `job-pipeline-service/`.
-- If you want the DB somewhere else, set `DATABASE_URL` before starting the server.
-- If `playwright install chromium` fails, make sure Playwright is installed in the active virtual environment first.
+Build the image:
 
-## Docker Run
-
-Build image:
-
-```powershell
-docker build -t jobscraper:latest .
+```bash
+docker build -t job-pipeline-service:latest .
 ```
 
-Run container:
+Run the image directly:
 
-```powershell
-docker run -d --name jobscraper -p 8000:8000 `
-  jobscraper:latest
+```bash
+docker run -d --name job-pipeline-service -p 8000:8000 \
+  job-pipeline-service:latest
 ```
 
-Persist the SQLite database:
-
-```powershell
-docker run -d --name jobscraper -p 8000:8000 `
-  -v ${PWD}/data:/app `
-  jobscraper:latest
-```
-
-View logs:
-
-```powershell
-docker logs -f jobscraper
-```
-
-Stop/remove:
-
-```powershell
-docker stop jobscraper
-docker rm jobscraper
-```
+To run with Postgres, use the compose example instead of a standalone container.
 
 ## Docker Compose
 
-An example compose file is included at [docker-compose.example.yml](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/docker-compose.example.yml).
+The included compose file is `docker-compose-example.yml`.
 
-Run it from `job-pipeline-service/`:
+From `job-pipeline-service/`:
 
-```powershell
-docker compose -f docker-compose.example.yml up --build -d
+```bash
+docker compose -f docker-compose-example.yml up --build -d
 ```
 
 Stop it:
 
-```powershell
-docker compose -f docker-compose.example.yml down
+```bash
+docker compose -f docker-compose-example.yml down
 ```
 
 The compose example:
 
 - builds the local `Dockerfile`
 - exposes the API on `localhost:8000`
-- persists SQLite data in `./data/jobs.db`
-- sets `restart: unless-stopped`
-
-## Database
-
-- Default database: `sqlite:///./jobs.db`
-- Override with `DATABASE_URL`
-- Tables are created automatically on startup
+- starts Postgres `17` on `localhost:5432`
+- sets `DATABASE_URL` to the Postgres service
+- waits for Postgres to become healthy before starting the API
 
 ## API
 
 - `GET /health`
 - `POST /jobs/ingest`
 - `GET /jobs`
-- `GET /jobs/{job_id}`
-- `POST /jobs/{job_id}/score`
+- `GET /jobs/{id}`
+- `POST /jobs/{id}/score`
+- `POST /job/{id}/error`
 - `POST /jobs/scores`
-- `POST /jobs/{job_id}/notify`
+- `POST /jobs/{id}/notify`
 - `POST /jobs/notify`
+- `GET /prompt-library`
+- `GET /prompt-library/{prompt_id}`
+- `POST /prompt-library`
+- `PUT /prompt-library/{prompt_id}`
+- `DELETE /prompt-library/{prompt_id}`
 - `GET /jobs/hiringcafe?search_url=<HIRING_CAFE_URL>`
+
+### ID semantics
+
+The service uses two job identifiers:
+
+- `job_id` - external string identifier used for ingest dedupe
+- `id` - internal numeric database primary key used by `GET /jobs/{id}`, score routes, and notify routes
+
+That distinction matters for n8n integrations. Ingest works with external `job_id`, while score and notify writeback routes work with internal numeric `id`.
 
 ### `POST /jobs/ingest`
 
@@ -176,11 +146,19 @@ Example payload:
   "yearly_max_compensation": 180000,
   "apply_url": "https://example.com/jobs/123",
   "description": "Full job description",
-  "source": "job-scraper-chrome"
+  "source": "linkedin"
 }
 ```
 
-Each ingest upserts by `job_id` and sets the job status to `new`.
+Each ingest inserts only new jobs. If a row with the same `job_id` already exists, the service skips it and leaves the existing status and timestamps unchanged.
+
+Response fields:
+
+- `received` - number of payload items received
+- `created` - number of new rows inserted
+- `updated` - currently always `0`; retained for compatibility with the earlier upsert response shape
+- `skipped` - number of duplicate `job_id` values ignored
+- `jobs` - the created `job_id` values
 
 ### `GET /jobs`
 
@@ -188,6 +166,8 @@ Supported query parameters:
 
 - `status`
 - `source`
+- `score`
+- `scored_since`
 - `limit`
 - `offset`
 
@@ -197,9 +177,9 @@ Example:
 GET http://localhost:8000/jobs?status=new&limit=25
 ```
 
-### `POST /jobs/{job_id}/score`
+### `POST /jobs/{id}/score`
 
-Stores scoring output for a single job and updates the job's latest score fields.
+Stores scoring output for a single job identified by internal numeric `id`.
 
 Example payload:
 
@@ -216,11 +196,27 @@ Example payload:
 }
 ```
 
+If `scored_at` is omitted, the service uses the current UTC time. The response includes the current `status`, `score`, `scored_at`, `notified_at`, and `error_at` values for that row.
+
 ### `POST /jobs/scores`
 
-Batch version of the score writeback route. Each item must include `job_id`.
+Batch score writeback route. Each item must include numeric `id`.
 
-### `POST /jobs/{job_id}/notify`
+### `POST /job/{id}/error`
+
+Marks a job as error and sets `error_at`.
+
+Example payload:
+
+```json
+{
+  "status": "error"
+}
+```
+
+If `error_at` is omitted, the service uses the current UTC time.
+
+### `POST /jobs/{id}/notify`
 
 Marks a job as notified and sets `notified_at`.
 
@@ -236,49 +232,14 @@ If `notified_at` is omitted, the service uses the current UTC time.
 
 ### `POST /jobs/notify`
 
-Batch version of the notification writeback route. Each item must include `job_id`.
+Batch notification writeback route. Each item must include numeric `id`.
 
-### Hiring Cafe query parameter
+### Prompt library routes
 
-- `search_url` (required): URL opened by Playwright before capturing `/api/search-jobs`.
+Use the prompt-library endpoints to manage versioned prompt templates inside the service database rather than n8n Data Tables.
 
-### Build the `search_url` from Hiring Cafe
+### `GET /jobs/hiringcafe`
 
-1. Open `https://hiring.cafe/` in your browser.
-2. Set your filters (role, location, compensation, remote, date range, etc.).
-3. Copy the full URL from the browser address bar after filters are applied.
-4. URL-encode that copied URL.
-5. Pass the encoded value as `search_url` to this service.
+This is a legacy route that launches Playwright, opens a Hiring Cafe search page, and captures `/api/search-jobs` responses while scrolling.
 
-Example:
-
-```text
-GET http://localhost:8000/jobs/hiringcafe?search_url=https%3A%2F%2Fhiring.cafe%2F%3FsearchState%3D...
-```
-
-Quick test:
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/health"
-Invoke-RestMethod -Method Post -Uri "http://localhost:8000/jobs/ingest" -ContentType "application/json" -Body '{"job_id":"linkedin_123","company_name":"Example Co","title":"PM","source":"job-scraper-chrome"}'
-Invoke-RestMethod -Uri "http://localhost:8000/jobs?status=new"
-```
-
-## Response
-
-- `POST /jobs/ingest`: returns counts of received, created, and updated jobs
-- `GET /jobs`: returns stored jobs and the total count for the applied filters
-- score routes: return the updated job IDs and current score state
-- notify routes: mark jobs as notified and set `notified_at`
-- Hiring Cafe route: returns raw JSON from `/api/search-jobs` when Playwright capture still works
-
-## Troubleshooting
-
-- If endpoint behavior seems old after code changes, rebuild the image and recreate the container:
-
-```powershell
-docker stop jobscraper
-docker rm jobscraper
-docker build -t jobscraper:latest .
-docker run -d --name jobscraper -p 8000:8000 jobscraper:latest
-```
+It is not the preferred ingest path. Browser-side capture through the Chrome extension is the current primary approach.

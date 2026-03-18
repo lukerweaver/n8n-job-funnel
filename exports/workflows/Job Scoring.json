@@ -1,0 +1,569 @@
+{
+  "name": "Job Scoring",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -16,
+        -192
+      ],
+      "id": "fb965bdf-d92f-4024-9f71-39a8e98ba358",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "qwen2.5:14b-instruct",
+          "mode": "list",
+          "cachedResultName": "qwen2.5:14b-instruct"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.rendered_user_prompt }}"
+            }
+          ]
+        },
+        "simplify": false,
+        "options": {
+          "system": "={{ $json.system_prompt }}",
+          "num_ctx": 50000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.ollama",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        -272
+      ],
+      "id": "2dfbed2e-129e-410f-9b15-18e9115dd746",
+      "name": "Resume Scoring",
+      "alwaysOutputData": false,
+      "notesInFlow": false,
+      "credentials": {
+        "ollamaApi": {
+          "id": "REPLACE_WITH_YOUR_OLLAMA_CREDENTIAL_ID",
+          "name": "Replace with your Ollama credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        656,
+        -192
+      ],
+      "id": "1fc0bf4e-b709-4221-affe-e4ca6b9c0c2d",
+      "name": "Pre Prompt Merge"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.parse($json.message.content) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1456,
+        -272
+      ],
+      "id": "223a1727-311e-4c0a-9e53-0e9f592e4219",
+      "name": "Extract Response",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Run once for EACH item\n\nconst template = String($json.user_prompt_template ?? \"\");\n\nconst rendered = template\n  .replace(/{{\\s*job_id\\s*}}/g, String($json.job_id ?? \"\"))\n  .replace(/{{\\s*resume\\s*}}/g, String($json.base_resume_template ?? \"\"))\n  .replace(/{{\\s*description\\s*}}/g, String($json.description ?? \"\"));\n\n// IMPORTANT: return ONE item (not an array) in this mode\nreturn {\n  json: {\n    ...$json,\n    rendered_user_prompt: rendered,\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -272
+      ],
+      "id": "18eaae8a-23cb-4394-b0fa-33d3e71735d7",
+      "name": "Prepare Prompt"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {
+          "clashHandling": {
+            "values": {
+              "resolveClash": "preferInput1"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1680,
+        -192
+      ],
+      "id": "9bf898bb-d90e-4365-916a-7c46b2d6b261",
+      "name": "Merge Job Posting with LLM"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -80
+      ],
+      "id": "e431b815-c50b-428c-aa4d-2f159108b649",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "url": "http://<job-pipeline-service-host>:8000/jobs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "new"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        -96
+      ],
+      "id": "79a7e3c1-1d2e-408f-9bb0-18c86446ad15",
+      "name": "Get New Jobs"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cda618b9-9f63-4b7d-b0fe-f8dba17e8052",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": "={{ false }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1984,
+        -592
+      ],
+      "id": "4f6ff80b-f978-4b1c-b544-9a1806f96507",
+      "name": "Filter Successful Calls"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1dbb0c85-ad2a-4cdb-a0ea-a6f2a790611b",
+              "name": "score",
+              "value": "={{ $json.total_score }}",
+              "type": "number"
+            },
+            {
+              "id": "73f2a32e-d498-4780-877a-02899de5b58c",
+              "name": "recommendation",
+              "value": "={{ $json.recommendation }}",
+              "type": "string"
+            },
+            {
+              "id": "26309dec-b82a-4a97-ba48-6d01ffab873f",
+              "name": "justification",
+              "value": "={{ $json.justification }}",
+              "type": "string"
+            },
+            {
+              "id": "4a46ffee-0307-49c9-b0b6-32a8db8053c4",
+              "name": "strengths",
+              "value": "={{ $json.strengths }}",
+              "type": "array"
+            },
+            {
+              "id": "2744d67a-b51b-4782-b491-06353e1c5696",
+              "name": "gaps",
+              "value": "={{ $json.gaps }}",
+              "type": "array"
+            },
+            {
+              "id": "dfab81b3-236b-4425-a2c5-85ad0d4dce15",
+              "name": "missing_from_jd",
+              "value": "={{ $json.missing_from_jd }}",
+              "type": "array"
+            },
+            {
+              "id": "bfb036b4-e57a-4688-9d5f-df64c2a53024",
+              "name": "prompt_key",
+              "value": "={{ $json.prompt_key }}",
+              "type": "string"
+            },
+            {
+              "id": "1a21d46e-4af0-4996-bd59-6c4a926a7d6d",
+              "name": "prompt_version",
+              "value": "={{ $json.prompt_version }}",
+              "type": "string"
+            },
+            {
+              "id": "78e2a73c-4302-4275-8485-39b83e9f8fb0",
+              "name": "scored_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            },
+            {
+              "id": "a40686b6-b016-47ea-9717-b6881855df0d",
+              "name": "status",
+              "value": "=scored",
+              "type": "string"
+            },
+            {
+              "id": "15f772a7-2bdc-4156-bff4-e8a49a0bc987",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2160,
+        -224
+      ],
+      "id": "9fadcf2c-4e53-446d-9215-d458d3afe50e",
+      "name": "Prep Scoring Call",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://<job-pipeline-service-host>:8000/jobs/{{ $json.id }}/score",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2432,
+        -224
+      ],
+      "id": "d9b0a6c6-515a-4ce6-8386-076a17445c7b",
+      "name": "Mark Jobs as Scored",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "http://<job-pipeline-service-host>:8000/prompt-library",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        -368
+      ],
+      "id": "443b1949-302a-4484-8d4c-28572d2f2523",
+      "name": "Get Prompts"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        416,
+        -368
+      ],
+      "id": "562bcc85-d882-4feb-8f49-0792db4f7634",
+      "name": "Split Out1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9f41d34d-1237-4115-a925-525602a8e52c",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1904,
+        -192
+      ],
+      "id": "410ead5c-551c-4017-88d7-038621275795",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://<job-pipeline-service-host>:8000/jobs/{{ $json.id }}/error",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "error_at",
+              "value": "={{ $now }}"
+            },
+            {
+              "name": "status",
+              "value": "error"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2160,
+        32
+      ],
+      "id": "82c836cb-8039-4045-afc0-6dd5b05da6ee",
+      "name": "Mark as error",
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get New Jobs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume Scoring": {
+      "main": [
+        [
+          {
+            "node": "Extract Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre Prompt Merge": {
+      "main": [
+        [
+          {
+            "node": "Prepare Prompt",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Job Posting with LLM",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Extract Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Posting with LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Prompt": {
+      "main": [
+        [
+          {
+            "node": "Resume Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Job Posting with LLM": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Pre Prompt Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get New Jobs": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Successful Calls": {
+      "main": [
+        []
+      ]
+    },
+    "Prep Scoring Call": {
+      "main": [
+        [
+          {
+            "node": "Mark Jobs as Scored",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Prompts": {
+      "main": [
+        [
+          {
+            "node": "Split Out1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out1": {
+      "main": [
+        [
+          {
+            "node": "Pre Prompt Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Prep Scoring Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark as error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1b444e49-59dc-4485-b402-a05ca7a8607f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4b822023187a5edc90d108fd34ec387e96fd3f58e06d64a8f9f7e008f280d4e3"
+  },
+  "id": "F0TMoxmJhHodyYuS",
+  "tags": []
+}

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 from sqlalchemy import func, select
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,8 @@ from models import JobPosting, PromptLibrary
 from schemas import (
     JobIngestItem,
     JobIngestResponse,
+    JobErrorResponse,
+    JobErrorWrite,
     JobListResponse,
     JobNotifyBatchItem,
     JobNotifyResponse,
@@ -85,6 +88,11 @@ def apply_notification(job: JobPosting, notify_payload: JobNotifyWrite) -> None:
     job.status = notify_payload.status
 
 
+def apply_error(job: JobPosting, error_payload: JobErrorWrite) -> None:
+    job.error_at = error_payload.error_at or utcnow()
+    job.status = error_payload.status
+
+
 def _get_job_by_id(session: Session, job_pk: int) -> JobPosting | None:
     return session.get(JobPosting, job_pk)
 
@@ -105,9 +113,25 @@ def _commit_or_fail(session: Session) -> None:
             time.sleep(0.2 * (attempt + 1))
 
 
+def ensure_job_postings_schema() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("job_postings")}
+    if "error_at" in columns:
+        return
+
+    if engine.dialect.name == "postgresql":
+        add_column_sql = "ALTER TABLE job_postings ADD COLUMN error_at TIMESTAMP WITH TIME ZONE"
+    else:
+        add_column_sql = "ALTER TABLE job_postings ADD COLUMN error_at DATETIME"
+
+    with engine.begin() as connection:
+        connection.execute(text(add_column_sql))
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_job_postings_schema()
     yield
 
 
@@ -143,6 +167,7 @@ def ingest_jobs(
 
     created = 0
     updated = 0
+    skipped = 0
     job_ids: list[str] = []
 
     for item in items:
@@ -152,11 +177,10 @@ def ingest_jobs(
             apply_job_updates(job, item)
             session.add(job)
             created += 1
-        else:
-            apply_job_updates(job, item)
-            updated += 1
+            job_ids.append(item.job_id)
+            continue
 
-        job_ids.append(item.job_id)
+        skipped += 1
 
     _commit_or_fail(session)
 
@@ -164,6 +188,7 @@ def ingest_jobs(
         received=len(items),
         created=created,
         updated=updated,
+        skipped=skipped,
         jobs=job_ids,
     )
 
@@ -173,6 +198,8 @@ def list_jobs(
     session: Session = Depends(get_session),
     status: str | None = Query(default=None),
     source: str | None = Query(default=None),
+    score: float | None = Query(default=None),
+    scored_since: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -187,6 +214,14 @@ def list_jobs(
     if source:
         query = query.where(JobPosting.source == source)
         count_query = count_query.where(JobPosting.source == source)
+
+    if score is not None:
+        query = query.where(JobPosting.score.is_not(None), JobPosting.score >= score)
+        count_query = count_query.where(JobPosting.score.is_not(None), JobPosting.score >= score)
+
+    if scored_since is not None:
+        query = query.where(JobPosting.scored_at.is_not(None), JobPosting.scored_at > scored_since)
+        count_query = count_query.where(JobPosting.scored_at.is_not(None), JobPosting.scored_at > scored_since)
 
     items = session.scalars(query.offset(offset).limit(limit)).all()
     total = len(session.scalars(count_query).all())
@@ -219,6 +254,7 @@ def store_job_score(job_id: int, score_payload: JobScoreWrite, session: Session 
         score=job.score,
         scored_at=job.scored_at,
         notified_at=job.notified_at,
+        error_at=job.error_at,
     )
 
 
@@ -256,6 +292,23 @@ def mark_job_notified(job_id: int, notify_payload: JobNotifyWrite, session: Sess
         job_id=job.job_id,
         status=job.status,
         notified_at=job.notified_at,
+    )
+
+
+@app.post("/jobs/{job_id}/error", response_model=JobErrorResponse)
+def mark_job_error(job_id: int, error_payload: JobErrorWrite, session: Session = Depends(get_session)):
+    job = _get_job_by_id(session, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
+
+    apply_error(job, error_payload)
+    _commit_or_fail(session)
+
+    return JobErrorResponse(
+        id=job.id,
+        job_id=job.job_id,
+        status=job.status,
+        error_at=job.error_at,
     )
 
 

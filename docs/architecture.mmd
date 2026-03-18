@@ -1,15 +1,25 @@
 flowchart TD
-  A[Google Sheet: HiringCafe search links] --> B[n8n Workflow 01: Ingest Jobs]
-  B --> C[jobscraper service (Playwright)]
-  C --> D[(n8n Data Table: job_postings)]
+  A[LinkedIn job page] --> B[job-scraper-chrome]
+  A2[Hiring Cafe search page] --> C[page-hook.js captures /api/search-jobs]
+  C --> B
 
-  D --> E[n8n Workflow 02: Score Jobs]
-  F[(n8n Data Table: prompt_library)] --> E
+  B --> D[POST /jobs/ingest]
+  D --> E[job-pipeline-service]
 
-  E --> G[Ollama (local LLM)\nStructured JSON scoring]
-  G --> H[Update job_postings with score + eval]
+  E --> F[(job_postings)]
+  E --> G[(prompt_library)]
 
-  H --> I{Score ≥ 20?}
-  I -- Yes --> J[Append row to Google Sheet: Application Tracker]
-  I -- Yes --> K[Email summary alert]
-  I -- No --> L[No alert (kept as scored)]
+  F --> H[n8n scoring workflow]
+  G --> H
+
+  H --> I[Ollama or external LLM]
+  I --> J[POST /jobs/{id}/score]
+  J --> E
+
+  E --> K{Score passes threshold?}
+  K -- Yes --> L[Tracker sync]
+  K -- Yes --> M[POST /jobs/{id}/notify]
+  M --> E
+  K -- No --> N[Remain scored only]
+
+  O[Legacy GET /jobs/hiringcafe route\nPlaywright capture] -. optional / fallback .-> E
