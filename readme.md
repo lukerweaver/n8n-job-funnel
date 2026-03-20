@@ -46,6 +46,8 @@ LinkedIn job page or Hiring Cafe search page
 - `POST /jobs/notify` - batch notification writeback; each item must include numeric `id`
 - `GET /jobs/hiringcafe` - legacy Playwright capture route for Hiring Cafe search responses
 
+Scoring accepts both legacy and expanded JSON output shapes from the LLM. Old prompt fields continue to work unchanged, while optional new fields (`role_type`, `screening_likelihood`, `dimension_scores`, `gating_flags`) are persisted when present.
+
 ### Prompt library
 
 - `GET /prompt-library`
@@ -75,6 +77,10 @@ LinkedIn job page or Hiring Cafe search page
 - `strengths`
 - `gaps`
 - `missing_from_jd`
+- `role_type`
+- `screening_likelihood`
+- `dimension_scores`
+- `gating_flags`
 - `prompt_key`
 - `prompt_version`
 - `score_provider`

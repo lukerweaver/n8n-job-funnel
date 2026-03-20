@@ -31,6 +31,10 @@ class JobScoreWrite(BaseModel):
     strengths: list[Any] | dict[str, Any] | None = None
     gaps: list[Any] | dict[str, Any] | None = None
     missing_from_jd: list[Any] | dict[str, Any] | None = None
+    role_type: str | None = None
+    screening_likelihood: float | None = None
+    dimension_scores: dict[str, float] | None = None
+    gating_flags: list[str] | None = None
     prompt_key: str | None = None
     prompt_version: int | None = None
     scored_at: datetime | None = None
@@ -61,6 +65,10 @@ class JobRead(BaseModel):
     strengths: list[Any] | dict[str, Any] | None
     gaps: list[Any] | dict[str, Any] | None
     missing_from_jd: list[Any] | dict[str, Any] | None
+    role_type: str | None = None
+    screening_likelihood: float | None = None
+    dimension_scores: dict[str, float] | None = None
+    gating_flags: list[str] | None = None
     prompt_key: str | None
     prompt_version: int | None
     scored_at: datetime | None
@@ -81,6 +89,10 @@ class JobScoreResponse(BaseModel):
     status: str
     score: float | None = None
     recommendation: str | None = None
+    role_type: str | None = None
+    screening_likelihood: float | None = None
+    dimension_scores: dict[str, float] | None = None
+    gating_flags: list[str] | None = None
     scored_at: datetime | None = None
     notified_at: datetime | None = None
     error_at: datetime | None = None

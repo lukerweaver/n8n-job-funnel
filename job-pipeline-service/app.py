@@ -80,6 +80,10 @@ def apply_score(job: JobPosting, score_payload: JobScoreWrite) -> None:
     job.score = score_payload.score
     job.recommendation = score_payload.recommendation
     job.justification = score_payload.justification
+    job.role_type = score_payload.role_type
+    job.screening_likelihood = score_payload.screening_likelihood
+    job.dimension_scores = score_payload.dimension_scores
+    job.gating_flags = score_payload.gating_flags
     job.strengths = score_payload.strengths
     job.gaps = score_payload.gaps
     job.missing_from_jd = score_payload.missing_from_jd
@@ -126,8 +130,14 @@ def ensure_job_postings_schema() -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("job_postings")}
 
+    json_type = "JSONB" if engine.dialect.name == "postgresql" else "JSON"
+    float_type = "DOUBLE PRECISION" if engine.dialect.name == "postgresql" else "REAL"
     type_map = {
         "error_at": "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME",
+        "role_type": "VARCHAR(100)",
+        "screening_likelihood": float_type,
+        "dimension_scores": json_type,
+        "gating_flags": json_type,
         "score_provider": "VARCHAR(100)",
         "score_model": "VARCHAR(255)",
         "score_error": "TEXT",
@@ -284,6 +294,10 @@ def store_job_score(job_id: int, score_payload: JobScoreWrite, session: Session 
         status=job.status,
         score=job.score,
         recommendation=job.recommendation,
+        role_type=job.role_type,
+        screening_likelihood=job.screening_likelihood,
+        dimension_scores=job.dimension_scores,
+        gating_flags=job.gating_flags,
         scored_at=job.scored_at,
         notified_at=job.notified_at,
         error_at=job.error_at,
@@ -310,6 +324,10 @@ def run_job_score(job_id: int, payload: JobScoreRunRequest, session: Session = D
         status=result.job.status,
         score=result.job.score,
         recommendation=result.job.recommendation,
+        role_type=result.job.role_type,
+        screening_likelihood=result.job.screening_likelihood,
+        dimension_scores=result.job.dimension_scores,
+        gating_flags=result.job.gating_flags,
         scored_at=result.job.scored_at,
         notified_at=result.job.notified_at,
         error_at=result.job.error_at,

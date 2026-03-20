@@ -39,6 +39,19 @@ Supported environment variables:
 
 The current implementation supports `ollama` as the scoring provider.
 
+### Scoring payload schema
+
+The scoring parser accepts both legacy and updated LLM JSON outputs.
+
+- Legacy supported fields: `total_score`, `recommendation`, `justification`, `strengths`, `gaps`, `missing_from_jd`.
+- New optional fields:
+  - `role_type`
+  - `screening_likelihood`
+  - `dimension_scores`
+  - `gating_flags`
+
+The parser is backwards compatible: old prompt outputs still parse and persist without requiring the new fields.
+
 ## Local run
 
 From `job-pipeline-service/`:
@@ -208,12 +221,24 @@ Example payload:
   "strengths": ["B2B product experience", "roadmapping"],
   "gaps": ["No direct fintech background"],
   "missing_from_jd": ["SQL"],
+  "role_type": "Product Manager",
+  "screening_likelihood": 20,
+  "dimension_scores": {
+    "domain_fit": 4,
+    "execution_ownership_fit": 5,
+    "customer_discovery_fit": 3,
+    "environment_fit": 4,
+    "role_readiness": 4
+  },
+  "gating_flags": ["No major blockers"],
   "prompt_key": "product",
   "prompt_version": 3
 }
 ```
 
-If `scored_at` is omitted, the service uses the current UTC time. The response includes the current `status`, `score`, `scored_at`, `notified_at`, and `error_at` values for that row.
+If `scored_at` is omitted, the service uses the current UTC time. The response includes the current `status`, `score`, `scoring metadata`, `scored_at`, `notified_at`, and `error_at` values for that row.
+
+Scoring writeback responses expose both legacy and new fields (`role_type`, `screening_likelihood`, `dimension_scores`, `gating_flags`) when present.
 
 ### `POST /jobs/scores`
 

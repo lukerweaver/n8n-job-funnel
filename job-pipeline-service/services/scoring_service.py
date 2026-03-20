@@ -46,6 +46,10 @@ def _apply_parsed_score(
     job.score = parsed.total_score
     job.recommendation = parsed.recommendation
     job.justification = parsed.justification
+    job.role_type = parsed.role_type
+    job.screening_likelihood = parsed.screening_likelihood
+    job.dimension_scores = parsed.dimension_scores
+    job.gating_flags = parsed.gating_flags
     job.strengths = parsed.strengths
     job.gaps = parsed.gaps
     job.missing_from_jd = parsed.missing_from_jd
