@@ -24,6 +24,8 @@ This service supports both SQLite and Postgres.
 
 Tables are created automatically on startup.
 
+In addition to `job_postings` and `prompt_library`, the service persists async scoring state in `score_runs` and `score_run_items`. Those tables back the batch scoring APIs and let progress survive beyond a single HTTP request.
+
 ## Scoring configuration
 
 The service can score jobs directly using a configured LLM provider.
@@ -38,6 +40,8 @@ Supported environment variables:
 - `DEFAULT_PROMPT_KEY` optional
 
 The current implementation supports `ollama` as the scoring provider.
+
+Batch scoring is asynchronous. `POST /jobs/score/run` creates a `score_runs` record plus one `score_run_items` record per selected job, and a background worker advances them through `queued`, `running`, `scored`, `error`, or `skipped`.
 
 ## Prompt library
 
@@ -85,6 +89,15 @@ The scoring parser accepts both legacy and updated LLM JSON outputs.
   - `gating_flags`
 
 The parser is backwards compatible: old prompt outputs still parse and persist without requiring the new fields.
+
+## Async scoring run model
+
+The scoring workflow does not hold a request open until every job finishes. Instead, the service records the run and processes it in the background.
+
+- `score_runs` stores the top-level run request, filters, callback metadata, counts, and lifecycle timestamps.
+- `score_run_items` stores one row per selected job so clients can inspect item-level progress and failures.
+- `GET /score-runs/{run_id}` returns the aggregate run status.
+- `GET /score-runs/{run_id}/items` returns the per-job statuses for that run.
 
 ## Local run
 

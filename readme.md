@@ -61,6 +61,13 @@ Scoring accepts both legacy and expanded JSON output shapes from the LLM. Old pr
 
 Prompts now live in the service database and are resolved at scoring time by `prompt_key` or `DEFAULT_PROMPT_KEY`.
 
+### Score runs
+
+- `GET /score-runs/{run_id}`
+- `GET /score-runs/{run_id}/items`
+
+Batch scoring is asynchronous. `POST /jobs/score/run` creates a durable `score_runs` row for the request and one `score_run_items` row per selected job. The service worker updates those records as jobs move through `queued`, `running`, `scored`, `error`, or `skipped`.
+
 ## Data model
 
 ### `job_postings`
@@ -111,6 +118,36 @@ Prompts now live in the service database and are resolved at scoring time by `pr
 
 `prompt_key` + `prompt_version` is unique.
 
+### `score_runs`
+
+- `id` - internal integer primary key
+- `status` - overall run state such as `queued`, `running`, `completed`, or `failed`
+- `requested_status` - job status filter used when the run was queued
+- `requested_source` - optional source filter used when the run was queued
+- `prompt_key` - prompt resolved for the run
+- `force` - whether already-scored jobs should be rescored
+- `callback_url`
+- `selected_count`
+- `last_error`
+- `callback_status`
+- `callback_error`
+- `started_at`
+- `finished_at`
+- `created_at`
+- `updated_at`
+
+### `score_run_items`
+
+- `id` - internal integer primary key
+- `score_run_id` - foreign key to `score_runs`
+- `job_posting_id` - foreign key to `job_postings`
+- `status` - per-job state such as `queued`, `running`, `scored`, `error`, or `skipped`
+- `error_message`
+- `started_at`
+- `finished_at`
+- `created_at`
+- `updated_at`
+
 ## Local setup
 
 ### Option 1: Run the API directly
@@ -140,6 +177,8 @@ Service-side scoring is configured with environment variables such as:
 - `OLLAMA_NUM_CTX`
 - `LLM_TIMEOUT_SECONDS`
 - `DEFAULT_PROMPT_KEY`
+
+Scoring runs are processed asynchronously in the service. Use `POST /jobs/score/run` to queue work, then poll `GET /score-runs/{run_id}` and `GET /score-runs/{run_id}/items` to track progress from n8n or another client.
 
 ### Option 2: Run the API with the included compose example
 
