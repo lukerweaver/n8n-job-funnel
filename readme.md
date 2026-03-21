@@ -23,6 +23,7 @@ LinkedIn job page or Hiring Cafe search page
                     -> service-side scoring
                         -> active prompt from prompt_library
                         -> configured LLM provider
+                        -> async score runs + optional callback
                         -> score/error persistence
                     -> n8n scoring workflow
                         -> POST /jobs/score/run
@@ -38,7 +39,9 @@ LinkedIn job page or Hiring Cafe search page
 - `GET /jobs` - list jobs with optional `status`, `source`, `score`, `scored_since`, `limit`, and `offset`
 - `GET /jobs/{id}` - fetch a single job by internal numeric database ID
 - `POST /jobs/{id}/score/run` - trigger service-side scoring for a single job
-- `POST /jobs/score/run` - trigger a batch service-side scoring run
+- `POST /jobs/score/run` - enqueue a batch service-side scoring run
+- `GET /score-runs/{run_id}` - inspect async batch scoring progress
+- `GET /score-runs/{run_id}/items` - inspect per-job scoring status for a run
 - `POST /jobs/{id}/score` - write score fields by internal numeric database ID
 - `POST /job/{id}/error` - mark a job as error and set `error_at`
 - `POST /jobs/scores` - batch score writeback; each item must include numeric `id`
@@ -55,6 +58,8 @@ Scoring accepts both legacy and expanded JSON output shapes from the LLM. Old pr
 - `POST /prompt-library`
 - `PUT /prompt-library/{prompt_id}`
 - `DELETE /prompt-library/{prompt_id}`
+
+Prompts now live in the service database and are resolved at scoring time by `prompt_key` or `DEFAULT_PROMPT_KEY`.
 
 ## Data model
 
@@ -183,7 +188,54 @@ The repo includes these exports:
 
 These exports target the current API-backed flow, but they are checked in with placeholder hosts, credential IDs, recipient addresses, and external document IDs. Reconfigure those values in n8n after import.
 
-If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id` and internal numeric `id`. `Job Scoring.json` now acts as a thin trigger that calls `/jobs/score/run`, while prompt rendering, LLM calls, parsing, and score/error persistence happen inside the service. `Job Notification.json` reads recently scored jobs above a threshold, appends them to a tracker, emails a digest, and calls `/jobs/{id}/notify`.
+If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id` and internal numeric `id`. `Job Scoring.json` now acts as a thin trigger that calls `/jobs/score/run`, then polls `GET /score-runs/{run_id}` or receives a callback when scoring is complete. Prompt rendering, LLM calls, parsing, and score/error persistence happen inside the service. `Job Notification.json` reads recently scored jobs above a threshold, appends them to a tracker, emails a digest, and calls `/jobs/{id}/notify`.
+
+## Prompt setup
+
+Prompt templates are stored in the `prompt_library` table. The service uses the active prompt version for the requested `prompt_key`, or `DEFAULT_PROMPT_KEY` if a scoring call does not pass one.
+
+The example seed file is `exports/data/prompt_library.seed.mock.json`. It is intentionally sanitized to show the prompt structure and customization points without exposing a production prompt.
+
+### Load a prompt with the API
+
+`POST /prompt-library` accepts one prompt object at a time, not an array.
+
+To load the example seed file from the repo root in PowerShell:
+
+```powershell
+$seed = Get-Content .\exports\data\prompt_library.seed.mock.json | ConvertFrom-Json
+foreach ($prompt in $seed) {
+  $prompt | ConvertTo-Json -Depth 10 | curl.exe -X POST http://localhost:8000/prompt-library `
+    -H "Content-Type: application/json" `
+    --data-binary @-
+}
+```
+
+Then verify:
+
+```bash
+curl http://localhost:8000/prompt-library
+```
+
+Example single prompt payload:
+
+```json
+{
+  "prompt_key": "product",
+  "prompt_version": 1,
+  "system_prompt": "ROLE: ...",
+  "user_prompt_template": "RESUME:\n<<<\n{{resume}}\n>>>\n\nJOB DESCRIPTION:\n<<<\n{{description}}\n>>>\n\nOUTPUT:\nReturn ONLY the JSON object matching the schema.",
+  "base_resume_template": "FIRST LAST\n...",
+  "is_active": true
+}
+```
+
+### Use the prompt during scoring
+
+- Set `DEFAULT_PROMPT_KEY=product` in the API environment, or
+- pass `"prompt_key": "product"` in `POST /jobs/{id}/score/run` or `POST /jobs/score/run`
+
+If you create a new prompt version for the same `prompt_key`, mark only one version `is_active=true` for predictable scoring behavior.
 
 ## Notes
 

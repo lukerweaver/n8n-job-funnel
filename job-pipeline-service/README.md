@@ -39,6 +39,40 @@ Supported environment variables:
 
 The current implementation supports `ollama` as the scoring provider.
 
+## Prompt library
+
+Prompt templates are stored in the `prompt_library` table and resolved by `prompt_key`.
+
+Scoring uses:
+
+- the `prompt_key` passed to `POST /jobs/{id}/score/run` or `POST /jobs/score/run`, or
+- `DEFAULT_PROMPT_KEY` if the scoring request does not pass one
+
+The repo includes a sanitized example seed at `exports/data/prompt_library.seed.mock.json`. It demonstrates the scoring schema and customization points without exposing a production prompt.
+
+### Load prompts
+
+`POST /prompt-library` accepts one prompt object at a time, not an array.
+
+If you want to load the example seed file, post each item in the array individually. One simple PowerShell option from the repo root is:
+
+```powershell
+$seed = Get-Content .\exports\data\prompt_library.seed.mock.json | ConvertFrom-Json
+foreach ($prompt in $seed) {
+  $prompt | ConvertTo-Json -Depth 10 | curl.exe -X POST http://localhost:8000/prompt-library `
+    -H "Content-Type: application/json" `
+    --data-binary @-
+}
+```
+
+You can verify loaded prompts with:
+
+```bash
+curl http://localhost:8000/prompt-library
+```
+
+If you create multiple versions for the same `prompt_key`, keep only one version active unless you intentionally want scoring calls to target a specific prompt version by changing the active record.
+
 ### Scoring payload schema
 
 The scoring parser accepts both legacy and updated LLM JSON outputs.
