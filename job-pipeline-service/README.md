@@ -140,6 +140,8 @@ The compose example:
 - `GET /jobs/{id}`
 - `POST /jobs/{id}/score/run`
 - `POST /jobs/score/run`
+- `GET /score-runs/{run_id}`
+- `GET /score-runs/{run_id}/items`
 - `POST /jobs/{id}/score`
 - `POST /job/{id}/error`
 - `POST /jobs/scores`
@@ -261,7 +263,7 @@ Example payload:
 
 ### `POST /jobs/score/run`
 
-Triggers a batch scoring run inside the service.
+Queues a batch scoring run inside the service and returns immediately.
 
 Example payload:
 
@@ -269,14 +271,26 @@ Example payload:
 {
   "limit": 25,
   "status": "new",
-  "dry_run": false,
-  "force": false
+  "force": false,
+  "callback_url": "https://example.com/scoring-complete"
 }
 ```
 
-The batch response includes `selected`, `scored`, `errored`, `skipped`, and the processed internal job IDs.
+The batch route is asynchronous. It creates a durable `score_run`, snapshots the selected job IDs into `score_run_items`, and returns a `run_id` plus current counts. A background worker processes those jobs independently of the HTTP connection.
 
-Batch scoring uses the same service-side prompt resolution, rendering, LLM call, parsing, and persistence logic as the single-job route.
+Use `GET /score-runs/{run_id}` to poll progress and `GET /score-runs/{run_id}/items` to inspect per-job status.
+
+If `callback_url` is supplied, the service will POST the final run payload to that URL after the run completes or fails.
+
+Per-job scoring results are committed as each job finishes, so completed work survives later timeouts or client disconnects.
+
+### `GET /score-runs/{run_id}`
+
+Returns the current status and counters for a queued or completed batch scoring run.
+
+### `GET /score-runs/{run_id}/items`
+
+Returns one row per selected job with `queued`, `running`, `scored`, `error`, or `skipped` status.
 
 ### `POST /job/{id}/error`
 

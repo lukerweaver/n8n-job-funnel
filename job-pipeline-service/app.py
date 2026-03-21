@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from database import Base, engine, get_session
-from models import JobPosting, PromptLibrary
+from models import JobPosting, PromptLibrary, ScoreRun, ScoreRunItem
 from schemas import (
     JobIngestItem,
     JobIngestResponse,
@@ -38,10 +38,14 @@ from schemas import (
     PromptLibraryUpdate,
     JobsBatchNotifyResponse,
     JobsBatchScoreResponse,
+    ScoreRunItemsResponse,
+    ScoreRunItemRead,
+    ScoreRunRead,
 )
 from services.llm_client import LlmRequestError
 from services.prompt_service import PromptResolutionError
-from services.scoring_service import BatchScoringResult, JobScoringSkipped, score_job, score_jobs
+from services.score_run_service import ScoreRunWorker, enqueue_score_run, serialize_score_run
+from services.scoring_service import JobScoringSkipped, score_job
 
 
 def merge_responses(existing, incoming):
@@ -62,6 +66,9 @@ def merge_responses(existing, incoming):
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+score_run_worker = ScoreRunWorker()
 
 
 def apply_job_updates(job: JobPosting, payload: JobIngestItem) -> None:
@@ -108,6 +115,10 @@ def apply_error(job: JobPosting, error_payload: JobErrorWrite) -> None:
 
 def _get_job_by_id(session: Session, job_pk: int) -> JobPosting | None:
     return session.get(JobPosting, job_pk)
+
+
+def _get_score_run_by_id(session: Session, run_id: int) -> ScoreRun | None:
+    return session.get(ScoreRun, run_id)
 
 
 def _commit_or_fail(session: Session) -> None:
@@ -163,7 +174,9 @@ def ensure_job_postings_schema() -> None:
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_job_postings_schema()
+    score_run_worker.start()
     yield
+    score_run_worker.stop()
 
 
 app = FastAPI(title="Job Pipeline Service", lifespan=lifespan)
@@ -351,27 +364,54 @@ def run_job_score(job_id: int, payload: JobScoreRunRequest, session: Session = D
     )
 
 
-@app.post("/jobs/score/run", response_model=JobsScoreRunResponse)
+@app.post("/jobs/score/run", response_model=JobsScoreRunResponse, status_code=202)
 def run_jobs_score(payload: JobsScoreRunRequest, session: Session = Depends(get_session)):
-    result: BatchScoringResult = score_jobs(
+    run = enqueue_score_run(
         session,
         limit=payload.limit,
         status=payload.status,
         source=payload.source,
         prompt_key=payload.prompt_key,
-        dry_run=payload.dry_run,
         force=payload.force,
+        callback_url=payload.callback_url,
     )
+    _commit_or_fail(session)
+    session.refresh(run)
+    return JobsScoreRunResponse(**serialize_score_run(session, run))
 
-    if not payload.dry_run:
-        _commit_or_fail(session)
+@app.get("/score-runs/{run_id}", response_model=ScoreRunRead)
+def get_score_run(run_id: int, session: Session = Depends(get_session)):
+    run = _get_score_run_by_id(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
 
-    return JobsScoreRunResponse(
-        selected=result.selected,
-        scored=result.scored,
-        errored=result.errored,
-        skipped=result.skipped,
-        jobs=result.job_ids,
+    return ScoreRunRead(**serialize_score_run(session, run))
+
+
+@app.get("/score-runs/{run_id}/items", response_model=ScoreRunItemsResponse)
+def list_score_run_items(run_id: int, session: Session = Depends(get_session)):
+    run = _get_score_run_by_id(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
+
+    items = session.scalars(
+        select(ScoreRunItem)
+        .where(ScoreRunItem.score_run_id == run_id)
+        .order_by(ScoreRunItem.id.asc())
+    ).all()
+    return ScoreRunItemsResponse(
+        total=len(items),
+        items=[
+            ScoreRunItemRead(
+                id=item.id,
+                job_posting_id=item.job_posting_id,
+                status=item.status,
+                error_message=item.error_message,
+                started_at=item.started_at,
+                finished_at=item.finished_at,
+            )
+            for item in items
+        ],
     )
 
 

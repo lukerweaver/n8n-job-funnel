@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -65,3 +65,45 @@ class PromptLibrary(Base):
     user_prompt_template: Mapped[str] = mapped_column(Text, nullable=False)
     base_resume_template: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+
+
+class ScoreRun(Base):
+    __tablename__ = "score_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False, index=True)
+    requested_status: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    requested_source: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    prompt_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    force: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    callback_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    callback_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    callback_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class ScoreRunItem(Base):
+    __tablename__ = "score_run_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    score_run_id: Mapped[int] = mapped_column(ForeignKey("score_runs.id"), nullable=False, index=True)
+    job_posting_id: Mapped[int] = mapped_column(ForeignKey("job_postings.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )

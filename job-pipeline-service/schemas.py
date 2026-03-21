@@ -143,16 +143,47 @@ class JobsScoreRunRequest(BaseModel):
     status: str = "new"
     source: str | None = None
     prompt_key: str | None = None
-    dry_run: bool = False
     force: bool = False
+    callback_url: str | None = None
+
+
+class ScoreRunItemRead(BaseModel):
+    id: int
+    job_posting_id: int
+    status: str
+    error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class JobsScoreRunResponse(BaseModel):
+    run_id: int
+    status: str
     selected: int
+    processed: int
     scored: int
     errored: int
     skipped: int
     jobs: list[int]
+    callback_url: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    last_error: str | None = None
+
+
+class ScoreRunRead(JobsScoreRunResponse):
+    requested_status: str
+    requested_source: str | None = None
+    prompt_key: str | None = None
+    force: bool = False
+    callback_status: str | None = None
+    callback_error: str | None = None
+
+
+class ScoreRunItemsResponse(BaseModel):
+    total: int
+    items: list[ScoreRunItemRead]
 
 
 class JobsBatchNotifyResponse(BaseModel):
