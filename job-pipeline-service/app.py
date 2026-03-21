@@ -240,6 +240,8 @@ def list_jobs(
     status: str | None = Query(default=None),
     source: str | None = Query(default=None),
     score: float | None = Query(default=None),
+    role_type: str | None = Query(default=None),
+    screening_likelihood: float | None = Query(default=None),
     scored_since: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -259,6 +261,20 @@ def list_jobs(
     if score is not None:
         query = query.where(JobPosting.score.is_not(None), JobPosting.score >= score)
         count_query = count_query.where(JobPosting.score.is_not(None), JobPosting.score >= score)
+
+    if role_type:
+        query = query.where(JobPosting.role_type == role_type)
+        count_query = count_query.where(JobPosting.role_type == role_type)
+
+    if screening_likelihood is not None:
+        query = query.where(
+            JobPosting.screening_likelihood.is_not(None),
+            JobPosting.screening_likelihood >= screening_likelihood,
+        )
+        count_query = count_query.where(
+            JobPosting.screening_likelihood.is_not(None),
+            JobPosting.screening_likelihood >= screening_likelihood,
+        )
 
     if scored_since is not None:
         query = query.where(JobPosting.scored_at.is_not(None), JobPosting.scored_at > scored_since)

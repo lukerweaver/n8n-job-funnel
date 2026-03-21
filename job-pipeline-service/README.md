@@ -197,6 +197,8 @@ Supported query parameters:
 - `status`
 - `source`
 - `score`
+- `role_type`
+- `screening_likelihood`
 - `scored_since`
 - `limit`
 - `offset`
