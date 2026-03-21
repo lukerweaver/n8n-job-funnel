@@ -1,461 +1,248 @@
-# Automated Job Funnel (n8n + LLM)
+# Automated Job Funnel
 
-An automated job search pipeline built with **n8n workflows, a local LLM, and a lightweight scraping service**.
+This repository combines a Chrome extension, a FastAPI service, and exported n8n workflows for collecting, scoring, and tracking job postings.
 
-The system continuously ingests job postings, evaluates them against a resume using a structured scoring rubric, and surfaces the best opportunities automatically.
+The current operational source of truth is `job-pipeline-service`, which stores jobs and prompt templates in a relational database. The Chrome extension is the primary ingestion path. The exported n8n workflows are sanitized templates that need environment-specific credentials and endpoints filled back in after import.
 
-The goal is to reduce the manual overhead of job searching while improving signal quality.
+## Repo layout
 
----
+- `job-pipeline-service/` - FastAPI API for job ingest, scoring writeback, notification writeback, and prompt library CRUD.
+- `job-scraper-chrome/` - Chrome extension that scrapes LinkedIn job pages and captures Hiring Cafe search responses, then posts normalized jobs to the API.
+- `exports/workflows/` - n8n workflow exports.
+- `exports/data/` - example prompt-library seed data.
+- `docs/` - architecture diagram and supporting docs.
 
-# Overview
+## Current architecture
 
-Job searching often involves scanning dozens or hundreds of postings, manually evaluating each one for fit, and tracking applications across multiple systems.
-
-This project automates that process by:
-
-1. **Collecting job postings automatically**
-2. **Evaluating them with a structured LLM scoring rubric**
-3. **Filtering for high-probability matches**
-4. **Tracking potential applications**
-5. **Sending alerts for strong opportunities**
-
-The system is designed as a lightweight **workflow orchestration pipeline** rather than a monolithic application.
-
----
-
-# Architecture
-
-```
-HiringCafe Searches
-        │
-        ▼
-n8n Ingestion Workflow
-        │
-        ▼
-jobscraper service (Playwright)
-        │
-        ▼
-job_postings Data Table
-        │
-        ▼
-n8n Scoring Workflow
-        │
-        ▼
-Local LLM (Ollama)
-        │
-        ▼
-Structured scoring output
-        │
-        ▼
-Filtered high matches
-        │
-        ├── Google Sheets application tracker
-        │
-        └── Email alert
+```text
+LinkedIn job page or Hiring Cafe search page
+    -> job-scraper-chrome
+        -> POST /jobs/ingest
+            -> job-pipeline-service
+                -> SQLite by default, Postgres when DATABASE_URL is set
+                    -> service-side scoring
+                        -> active prompt from prompt_library
+                        -> configured LLM provider
+                        -> async score runs + optional callback
+                        -> score/error persistence
+                    -> n8n scoring workflow
+                        -> POST /jobs/score/run
+                    -> n8n notification workflow
+                        -> tracker + email + notify writeback to API
 ```
 
-Key design principle: **orchestrate systems rather than building a single application.**
-Local-first development environment used for this implementation.
-Services can be deployed independently in production.
+## API overview
 
----
+### Jobs
 
-# Workflows
+- `POST /jobs/ingest` - insert new jobs by external `job_id`; duplicate `job_id` values are skipped
+- `GET /jobs` - list jobs with optional `status`, `source`, `score`, `scored_since`, `limit`, and `offset`
+- `GET /jobs/{id}` - fetch a single job by internal numeric database ID
+- `POST /jobs/{id}/score/run` - trigger service-side scoring for a single job
+- `POST /jobs/score/run` - enqueue a batch service-side scoring run
+- `GET /score-runs/{run_id}` - inspect async batch scoring progress
+- `GET /score-runs/{run_id}/items` - inspect per-job scoring status for a run
+- `POST /jobs/{id}/score` - write score fields by internal numeric database ID
+- `POST /job/{id}/error` - mark a job as error and set `error_at`
+- `POST /jobs/scores` - batch score writeback; each item must include numeric `id`
+- `POST /jobs/{id}/notify` - mark a job as notified by internal numeric database ID
+- `POST /jobs/notify` - batch notification writeback; each item must include numeric `id`
+- `GET /jobs/hiringcafe` - legacy Playwright capture route for Hiring Cafe search responses
 
-The repository contains two n8n workflows.
+Scoring accepts both legacy and expanded JSON output shapes from the LLM. Old prompt fields continue to work unchanged, while optional new fields (`role_type`, `screening_likelihood`, `dimension_scores`, `gating_flags`) are persisted when present.
 
----
+### Prompt library
 
-## 1. Job Import Workflow
+- `GET /prompt-library`
+- `GET /prompt-library/{prompt_id}`
+- `POST /prompt-library`
+- `PUT /prompt-library/{prompt_id}`
+- `DELETE /prompt-library/{prompt_id}`
 
-File:
+Prompts now live in the service database and are resolved at scoring time by `prompt_key` or `DEFAULT_PROMPT_KEY`.
 
-```
-exports/workflows/01_ingest_jobs.json
-```
+## Data model
 
-Runs multiple times per day to collect new job postings.
+### `job_postings`
 
-### Flow
+- `id` - internal integer primary key
+- `job_id` - external unique identifier used for ingest dedupe
+- `source`
+- `status`
+- `company_name`
+- `title`
+- `yearly_min_compensation`
+- `yearly_max_compensation`
+- `apply_url`
+- `description`
+- `raw_payload`
+- `score`
+- `recommendation`
+- `justification`
+- `strengths`
+- `gaps`
+- `missing_from_jd`
+- `role_type`
+- `screening_likelihood`
+- `dimension_scores`
+- `gating_flags`
+- `prompt_key`
+- `prompt_version`
+- `score_provider`
+- `score_model`
+- `score_error`
+- `score_raw_response`
+- `score_attempts`
+- `scored_at`
+- `notified_at`
+- `error_at`
+- `created_at`
+- `updated_at`
 
-```
-Schedule Trigger
-    ↓
-Get search URLs from Google Sheets
-    ↓
-Call jobscraper service
-    ↓
-Flatten API results
-    ↓
-Extract key fields
-    ↓
-Check if job already exists
-    ↓
-Insert new job into job_postings table
-```
+### `prompt_library`
 
-### Purpose
+- `id` - integer primary key
+- `prompt_key`
+- `prompt_version`
+- `system_prompt`
+- `user_prompt_template`
+- `base_resume_template`
+- `is_active`
 
-- Automatically import new postings
-- Normalize job data
-- Deduplicate using `job_id`
-- Store in the pipeline's working data table
+`prompt_key` + `prompt_version` is unique.
 
-Example stored fields:
+## Local setup
 
-- job_id
-- company_name
-- title
-- salary range
-- job description
-- apply_url
+### Option 1: Run the API directly
 
----
+From `job-pipeline-service/`:
 
-## 2. Job Scoring Workflow
-
-File:
-
-```
-exports/workflows/02_score_jobs_llm.json
-```
-
-Evaluates new job postings using an LLM scoring rubric.
-
-### Flow
-
-```
-Schedule Trigger
-    ↓
-Retrieve new job postings
-    ↓
-Retrieve prompt template and resume
-    ↓
-Merge prompt and job data
-    ↓
-Render structured prompt
-    ↓
-Send to local LLM (Ollama)
-    ↓
-Parse structured JSON output
-    ↓
-Store score and evaluation
-    ↓
-Filter high scores
-    ↓
-Append to application tracker
-    ↓
-Send email notification
-```
-
-### Example outputs
-
-Each job receives:
-
-- `score` (0–25)
-- strengths
-- gaps
-- missing_from_jd
-- recommendation
-- justification
-
-Jobs scoring **≥20** are surfaced as strong opportunities.
-
----
-
-# Data Model
-
-The system uses n8n Data Tables as lightweight storage.
-
----
-
-## job_postings
-
-Important fields:
-
-| Field | Purpose |
-|------|--------|
-| job_id | unique identifier from source |
-| company_name | employer |
-| title | job title |
-| description | full job description |
-| score | LLM fit score |
-| strengths | resume alignment highlights |
-| gaps | missing or weaker areas |
-| missing_from_jd | JD requirements not present in resume |
-| recommendation | apply guidance |
-| prompt_version | scoring prompt used |
-
-Array outputs from the LLM are serialized to strings for storage.
-
----
-
-## prompt_library
-
-Stores prompts and resume templates used by the pipeline.
-
-Fields:
-
-| Field | Purpose |
-|------|--------|
-| prompt_key | logical prompt identifier |
-| prompt_version | version tracking |
-| system_prompt | evaluation rubric |
-| user_prompt_template | prompt template |
-| base_resume_template | resume used for evaluation |
-| is_active | active prompt version |
-
-This design allows prompts to be updated without modifying workflows.
-
----
-
-# Prompt Design
-
-The LLM evaluation uses a deterministic schema.
-
-The scoring rubric evaluates five dimensions:
-
-| Dimension | Description |
-|----------|-------------|
-| domain_fit | alignment with product domain |
-| execution_ownership_fit | hands-on delivery experience |
-| customer_discovery_fit | user research and feedback loops |
-| environment_fit | operating context |
-| role_readiness | ability to perform role quickly |
-
-Total score range: **0–25**
-
-Recommendations:
-
-| Score | Recommendation |
-|------|---------------|
-| 20–25 | Strong Apply |
-| 16–19 | Selective Apply |
-| 12–15 | Stretch Apply |
-| ≤11 | Skip |
-
----
-
-# Dependencies
-
-This project assumes the following services are available.
-
----
-
-## n8n
-
-Workflow orchestration platform.
-
-Used for:
-
-- scheduling
-- automation logic
-- LLM integration
-- data orchestration
-
----
-
-## Ollama
-
-Local LLM runtime.
-
-Example model used:
-
-```
-qwen2.5:14b-instruct
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-LLM runs locally to avoid API costs.
+By default the service uses SQLite:
 
----
+- `sqlite:///./jobs.db` if no `./data/jobs.db` exists
+- `sqlite:///./data/jobs.db` if `job-pipeline-service/data/jobs.db` already exists
 
-## Job Scraper Service
+Set `DATABASE_URL` to use Postgres or another supported SQLAlchemy database.
 
-This project relies on a small Playwright-based scraping service that retrieves job results from HiringCafe.
+Service-side scoring is configured with environment variables such as:
 
-Repository:
+- `SCORING_PROVIDER` default `ollama`
+- `SCORING_MODEL`
+- `OLLAMA_BASE_URL`
+- `OLLAMA_NUM_CTX`
+- `LLM_TIMEOUT_SECONDS`
+- `DEFAULT_PROMPT_KEY`
 
-```
-https://github.com/lukerweaver/jobscraper
-```
+### Option 2: Run the API with the included compose example
 
-The ingestion workflow calls the service at:
+There is no root `docker-compose.yml` in this repository. The included compose file lives at `job-pipeline-service/docker-compose-example.yml`.
 
-```
-http://localhost:8000/jobs/hiringcafe
-```
+From `job-pipeline-service/`:
 
-The scraper:
-
-- launches a headless browser using Playwright
-- loads the HiringCafe search page
-- intercepts the `/api/search-jobs` response
-- returns the raw JSON payload to the pipeline
-
-This approach avoids needing to reverse engineer or maintain fragile scraping logic inside the workflow itself.
-
-# Runtime Environment
-
-This project was developed using a **local-first setup** to allow fast iteration and avoid external API costs.
-
-Typical development environment:
-
-- **n8n** running locally
-- **Ollama** running locally for LLM inference
-- **jobscraper service** running locally (Playwright)
-- **Google Sheets** for lightweight external tracking
-
-Example local service endpoints used by the workflows:
-
-```
-http://localhost:5678        # n8n
-http://localhost:11434       # Ollama
-http://localhost:8000        # jobscraper
+```bash
+docker compose -f docker-compose-example.yml up --build -d
 ```
 
-Running the services locally allows:
+This starts:
 
-- rapid prompt experimentation
-- near-zero operational cost
-- easier debugging of workflow logic
+- `job-pipeline-service` on `http://localhost:8000`
+- `postgres` on `localhost:5432`
 
-The architecture is not tied to local services and could be deployed using:
+The compose file sets `DATABASE_URL` to Postgres, so this path uses Postgres instead of SQLite.
 
-- n8n Cloud
-- containerized services
-- hosted LLM APIs
-- serverless scraping services
+### Verify the API
 
----
-
-# Setup
-
-## 1. Import workflows
-
-Import the workflows into n8n:
-
-```
-exports/workflows/01_ingest_jobs.json
-exports/workflows/02_score_jobs_llm.json
+```bash
+curl http://localhost:8000/health
 ```
 
-Workflows are inactive by default.
+## Chrome extension setup
 
----
+The Chrome extension lives in `job-scraper-chrome/`.
 
-## 2. Create Data Tables
+1. Edit `POST_ENDPOINT` in `job-scraper-chrome/background.js` if your API is not `http://localhost:8000/jobs/ingest`.
+2. Open `chrome://extensions`.
+3. Enable Developer mode.
+4. Load the `job-scraper-chrome/` folder as an unpacked extension.
 
-Create the following tables in n8n:
+Current behavior:
 
+- On LinkedIn job pages, the extension auto-detects job detail pages, observes route and DOM changes, and posts normalized payloads in the background. The popup still supports a manual scrape/send trigger.
+- On Hiring Cafe search pages, `page-hook.js` intercepts search API responses in the page context and `content.js` normalizes them into one or more ingest payloads, including company names from `v5_processed_job_data.company_name` when present.
+- `background.js` always posts an array payload to `POST /jobs/ingest`.
+
+## n8n workflow status
+
+The repo includes these exports:
+
+- `exports/workflows/Job Scoring.json`
+- `exports/workflows/Job Notification.json`
+
+These exports target the current API-backed flow, but they are checked in with placeholder hosts, credential IDs, recipient addresses, and external document IDs. Reconfigure those values in n8n after import.
+
+If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id` and internal numeric `id`. `Job Scoring.json` now acts as a thin trigger that calls `/jobs/score/run`, then polls `GET /score-runs/{run_id}` or receives a callback when scoring is complete. Prompt rendering, LLM calls, parsing, and score/error persistence happen inside the service. `Job Notification.json` reads recently scored jobs above a threshold, appends them to a tracker, emails a digest, and calls `/jobs/{id}/notify`.
+
+## Prompt setup
+
+Prompt templates are stored in the `prompt_library` table. The service uses the active prompt version for the requested `prompt_key`, or `DEFAULT_PROMPT_KEY` if a scoring call does not pass one.
+
+The example seed file is `exports/data/prompt_library.seed.mock.json`. It is intentionally sanitized to show the prompt structure and customization points without exposing a production prompt.
+
+### Load a prompt with the API
+
+`POST /prompt-library` accepts one prompt object at a time, not an array.
+
+To load the example seed file from the repo root in PowerShell:
+
+```powershell
+$seed = Get-Content .\exports\data\prompt_library.seed.mock.json | ConvertFrom-Json
+foreach ($prompt in $seed) {
+  $prompt | ConvertTo-Json -Depth 10 | curl.exe -X POST http://localhost:8000/prompt-library `
+    -H "Content-Type: application/json" `
+    --data-binary @-
+}
 ```
-job_postings
-prompt_library
+
+Then verify:
+
+```bash
+curl http://localhost:8000/prompt-library
 ```
 
-Schemas are provided in:
+Example single prompt payload:
 
-```
-exports/data/
-```
-
----
-
-## 3. Seed the prompt library
-
-Insert the mock row from:
-
-```
-prompt_library.seed.mock.json
+```json
+{
+  "prompt_key": "product",
+  "prompt_version": 1,
+  "system_prompt": "ROLE: ...",
+  "user_prompt_template": "RESUME:\n<<<\n{{resume}}\n>>>\n\nJOB DESCRIPTION:\n<<<\n{{description}}\n>>>\n\nOUTPUT:\nReturn ONLY the JSON object matching the schema.",
+  "base_resume_template": "FIRST LAST\n...",
+  "is_active": true
+}
 ```
 
-This provides:
+### Use the prompt during scoring
 
-- scoring prompt
-- resume template
-- prompt version
+- Set `DEFAULT_PROMPT_KEY=product` in the API environment, or
+- pass `"prompt_key": "product"` in `POST /jobs/{id}/score/run` or `POST /jobs/score/run`
 
----
+If you create a new prompt version for the same `prompt_key`, mark only one version `is_active=true` for predictable scoring behavior.
 
-## 4. Configure nodes
+## Notes
 
-After importing workflows, configure the following nodes.
+- The legacy `GET /jobs/hiringcafe` Playwright route still exists in the service, but the preferred ingest path is the Chrome extension posting to `POST /jobs/ingest`.
+- Prompt-library seeding is optional. Example seed data is in `exports/data/prompt_library.seed.mock.json`.
+- The Docker image includes Playwright because the legacy Hiring Cafe endpoint is still present.
 
-### Job Import Workflow
-
-**Get Hiring Cafe Searches**
-
-Connect your Google Sheet containing search URLs.
-
----
-
-### Job Scoring Workflow
-
-**Add to Tracker**
-
-Connect your application tracker sheet.
-
-**Send a message**
-
-Update recipient email.
-
-**Resume Scoring**
-
-Connect Ollama instance.
-
----
-
-# Design Decisions
-
-This project intentionally prioritizes **speed to value and system orchestration**.
-
-Key tradeoffs:
-
-### Local LLM
-
-Chosen to avoid API cost while iterating on prompts.
-
----
-
-### Workflow orchestration over custom code
-
-Using n8n allowed rapid development and experimentation.
-
----
-
-### Structured JSON LLM output
-
-Using strict schema validation prevents malformed responses from corrupting the pipeline.
-
----
-
-### Prompt versioning
-
-Prompts are stored in a table to allow experimentation without redeploying workflows.
-
----
-
-# Future Improvements
-
-Potential enhancements:
-
-- LinkedIn job email ingestion
-- resume tailoring pipeline
-- scoring analytics dashboard
-- automated cover letter generation
-- job source deduplication
-- multi-resume evaluation
-
----
-
-# Why this project exists
-
-This system was built to explore how workflow orchestration, structured prompting, and lightweight automation can meaningfully improve job search efficiency.
-
-Rather than manually reviewing dozens of postings daily, the pipeline surfaces a smaller set of high-quality opportunities.
-
----
-
-# License
+## License
 
 MIT

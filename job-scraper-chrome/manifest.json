@@ -1,0 +1,47 @@
+﻿{
+  "manifest_version": 3,
+  "name": "Job Scraper",
+  "description": "Scrape job details from LinkedIn and hiring.cafe and post them to a JSON endpoint.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "tabs"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://hiring.cafe/*",
+    "http://hiring.cafe/*",
+    "https://*.hiring.cafe/*",
+    "http://*.hiring.cafe/*",
+    "https://your-endpoint.example.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Job Scraper"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://hiring.cafe/*",
+        "http://hiring.cafe/*",
+        "https://*.hiring.cafe/*",
+        "http://*.hiring.cafe/*"
+      ],
+      "js": ["page-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.linkedin.com/jobs/*",
+        "https://www.linkedin.com/*",
+        "https://hiring.cafe/*",
+        "http://hiring.cafe/*",
+        "https://*.hiring.cafe/*",
+        "http://*.hiring.cafe/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

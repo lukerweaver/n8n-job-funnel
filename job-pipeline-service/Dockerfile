@@ -1,0 +1,17 @@
+FROM mcr.microsoft.com/playwright/python:v1.55.0-jammy
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app.py .
+COPY config.py .
+COPY database.py .
+COPY models.py .
+COPY schemas.py .
+COPY services ./services
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
