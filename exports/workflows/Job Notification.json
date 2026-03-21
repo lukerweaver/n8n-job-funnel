@@ -28,15 +28,15 @@
           "__rl": true,
           "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
           "mode": "list",
-          "cachedResultName": "Replace with your tracker sheet",
-          "cachedResultUrl": ""
+          "cachedResultName": "REPLACE_WITH_GOOGLE_SHEET_NAME",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_GOOGLE_SHEET_ID/edit"
         },
         "sheetName": {
           "__rl": true,
-          "value": "REPLACE_WITH_SHEET_NAME_OR_GID",
+          "value": "gid=0",
           "mode": "list",
-          "cachedResultName": "Replace with your worksheet",
-          "cachedResultUrl": ""
+          "cachedResultName": "REPLACE_WITH_SHEET_TAB_NAME",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_GOOGLE_SHEET_ID/edit#gid=0"
         },
         "columns": {
           "mappingMode": "defineBelow",
@@ -49,7 +49,9 @@
             "Job Link": "={{ $json.apply_url }}",
             "Stage Reached": "Pending",
             "Referal?": "n8n",
-            "Salary": "={{`$${Math.round($json.yearly_min_compensation/1000)}k-$${Math.round($json.yearly_max_compensation/1000)}k`}}"
+            "Salary": "={{`$${Math.round($json.yearly_min_compensation/1000)}k-$${Math.round($json.yearly_max_compensation/1000)}k`}}",
+            "n8n screening likelihood": "={{ $json.screening_likelihood }}",
+            "Role Type": "={{ $json.role_type }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -135,6 +137,26 @@
               "display": true,
               "type": "string",
               "canBeUsedToMatch": true
+            },
+            {
+              "id": "n8n screening likelihood",
+              "displayName": "n8n screening likelihood",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Role Type",
+              "displayName": "Role Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
             },
             {
               "id": "Cover Letter",
@@ -252,16 +274,16 @@
       "name": "Add to Tracker",
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
-          "name": "Replace with your Google Sheets credential"
+          "id": "",
+          "name": "RECONNECT_GOOGLE_SHEETS_CREDENTIAL"
         }
       }
     },
     {
       "parameters": {
-        "sendTo": "you@example.com",
+        "sendTo": "replace@example.com",
         "subject": "Job Matches found",
-        "message": "=<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" style=\"border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px;\">\n  <thead>\n    <tr style=\"font-weight:bold; background:#f2f2f2;\">\n      <th align=\"left\">Company</th>\n      <th align=\"left\">Title</th>\n      <th align=\"left\">Salary</th>\n      <th align=\"left\">n8n Score</th>\n      <th align=\"left\">Job Link</th>\n    </tr>\n  </thead>\n\n  <tbody>\n    {{\n      $json.data\n        .map(job => `\n          <tr>\n            <td>${job[\"Company\"] ?? \"\"}</td>\n            <td>${job[\"Title\"] ?? \"\"}</td>\n            <td>${job[\"Salary\"] ?? \"\"}</td>\n            <td>${job[\"n8n score\"] ?? \"\"}</td>\n            <td><a href=\"${job[\"Job Link\"] ?? \"#\"}\">View</a></td>\n          </tr>\n        `)\n        .join(\"\")\n    }}\n  </tbody>\n</table>",
+        "message": "=<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" style=\"border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px;\">\n  <thead>\n    <tr style=\"font-weight:bold; background:#f2f2f2;\">\n      <th align=\"left\">Company</th>\n      <th align=\"left\">Title</th>\n      <th align=\"left\">Salary</th>\n      <th align=\"left\">n8n Score</th>\n      <th align=\"left\">n8n Screen</th>\n      <th align=\"left\">Role Type</th>\n      <th align=\"left\">Job Link</th>\n    </tr>\n  </thead>\n\n  <tbody>\n    {{\n      $json.data\n        .map(job => `\n          <tr>\n            <td>${job[\"Company\"] ?? \"\"}</td>\n            <td>${job[\"Title\"] ?? \"\"}</td>\n            <td>${job[\"Salary\"] ?? \"\"}</td>\n            <td>${job[\"n8n score\"] ?? \"\"}</td>\n            <td>${job[\"n8n screening likelihood\"] ?? \"\"}</td>\n            <td>${job[\"Role Type\"] ?? \"\"}</td>\n            <td><a href=\"${job[\"Job Link\"] ?? \"#\"}\">View</a></td>\n          </tr>\n        `)\n        .join(\"\")\n    }}\n  </tbody>\n</table>",
         "options": {}
       },
       "type": "n8n-nodes-base.gmail",
@@ -272,11 +294,11 @@
       ],
       "id": "243b622c-ea3e-46aa-9a56-6fefc72f7ce6",
       "name": "Send a message",
-      "webhookId": "REPLACE_WITH_YOUR_WEBHOOK_ID",
+      "webhookId": "",
       "credentials": {
         "gmailOAuth2": {
-          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
-          "name": "Replace with your Gmail credential"
+          "id": "",
+          "name": "RECONNECT_GMAIL_CREDENTIAL"
         }
       }
     },
@@ -310,7 +332,7 @@
     },
     {
       "parameters": {
-        "url": "http://<job-pipeline-service-host>:8000/jobs",
+        "url": "http://REPLACE_WITH_JOB_PIPELINE_HOST:8000/jobs",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -342,7 +364,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://<job-pipeline-service-host>:8000/jobs/{{ $json.id }}/notify",
+        "url": "=http://REPLACE_WITH_JOB_PIPELINE_HOST:8000/jobs/{{ $json.id }}/notify",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -446,10 +468,10 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "79cdc50c-c7a6-4036-9020-26ead69f4eca",
+  "versionId": "9f658143-74ef-45fa-aba0-9c42a516f4b3",
   "meta": {
     "templateCredsSetupCompleted": true,
-    "instanceId": "4b822023187a5edc90d108fd34ec387e96fd3f58e06d64a8f9f7e008f280d4e3"
+    "instanceId": ""
   },
   "id": "fPHA3W17DrVEy94O",
   "tags": []
