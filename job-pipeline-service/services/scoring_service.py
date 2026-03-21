@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import time
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from models import JobPosting, PromptLibrary
@@ -29,6 +31,18 @@ class BatchScoringResult:
     errored: int
     skipped: int
     job_ids: list[int]
+
+
+def _commit_scoring_progress(session: Session) -> None:
+    for attempt in range(3):
+        try:
+            session.commit()
+            return
+        except OperationalError:
+            session.rollback()
+            if attempt == 2:
+                raise
+            time.sleep(0.2 * (attempt + 1))
 
 
 def _increment_attempts(job: JobPosting) -> None:
@@ -147,6 +161,7 @@ def score_jobs(
                 prompt=prompt,
             )
         except JobScoringSkipped:
+            session.rollback()
             skipped += 1
             continue
 
@@ -155,6 +170,7 @@ def score_jobs(
             scored += 1
         elif result.outcome == "error":
             errored += 1
+        _commit_scoring_progress(session)
 
     return BatchScoringResult(
         selected=len(jobs),
