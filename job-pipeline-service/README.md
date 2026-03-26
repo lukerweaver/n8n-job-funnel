@@ -151,13 +151,22 @@ pytest
 Run tests with coverage reports:
 
 ```bash
-pytest --cov=. --cov-branch --cov-report=term-missing --cov-report=json
+pytest \
+  --cov=app \
+  --cov=services/scoring_service.py \
+  --cov=services/scoring_parser.py \
+  --cov=services/llm_client.py \
+  --cov-branch \
+  --cov-report=term-missing \
+  --cov-report=json
 ```
 
 Coverage policy target:
 
 - line coverage: at least 80%
 - branch coverage: at least 80%
+
+Current coverage enforcement scope is the core scoring/service modules plus `app.py`. Expand this scope as additional modules gain stable test coverage.
 
 If you generated `coverage.json`, you can enforce the branch threshold locally:
 

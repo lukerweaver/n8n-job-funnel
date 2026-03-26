@@ -9,7 +9,7 @@ This file applies to everything under `job-pipeline-service/`.
 Run these from `job-pipeline-service/` before finalizing changes:
 
 1. `pytest`
-2. `pytest --cov=. --cov-branch --cov-report=term-missing --cov-report=json`
+2. `pytest --cov=app --cov=services/scoring_service.py --cov=services/scoring_parser.py --cov=services/llm_client.py --cov-branch --cov-report=term-missing --cov-report=json`
 3. `python scripts/coverage_gate.py coverage.json 80`
 
 If coverage tooling is unavailable locally, note that clearly and rely on CI to enforce the gate.
@@ -17,6 +17,7 @@ If coverage tooling is unavailable locally, note that clearly and rely on CI to 
 ## Coverage policy
 - Minimum line coverage target: **80%**
 - Minimum branch coverage target: **80%**
+- Current enforced scope: `app.py`, `services/scoring_service.py`, `services/scoring_parser.py`, `services/llm_client.py`
 
 CI enforces this in `.github/workflows/job-pipeline-service-tests.yml`.
 

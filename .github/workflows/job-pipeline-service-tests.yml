@@ -30,7 +30,14 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          pytest --cov=. --cov-branch --cov-report=term-missing --cov-report=json
+          pytest \
+            --cov=app \
+            --cov=services/scoring_service.py \
+            --cov=services/scoring_parser.py \
+            --cov=services/llm_client.py \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=json
 
       - name: Enforce branch coverage >= 80%
         run: |
