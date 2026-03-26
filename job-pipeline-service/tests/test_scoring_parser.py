@@ -73,3 +73,33 @@ def test_parse_scoring_response_rejects_invalid_gating_flags():
     """
     with pytest.raises(ScoringParseError, match="Field 'gating_flags' must contain only strings"):
         parse_scoring_response(payload)
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ("not-json", "Model response was not valid JSON"),
+        ('["not", "an", "object"]', "Model response must be a JSON object"),
+        ('{"error": "bad prompt"}', "Model returned error 'bad prompt'"),
+        ('{"total_score": "high"}', "Field 'total_score' must be a number"),
+        ('{"total_score": 17, "recommendation": 5}', "Field 'recommendation' must be a string or null"),
+        ('{"total_score": 17, "justification": 5}', "Field 'justification' must be a string or null"),
+        ('{"total_score": 17, "role_type": 5}', "Field 'role_type' must be a string or null"),
+        ('{"total_score": 17, "screening_likelihood": "likely"}', "Field 'screening_likelihood' must be a number or null"),
+        ('{"total_score": 17, "strengths": "strong"}', "Field 'strengths' must be a list, object, or null"),
+        ('{"total_score": 17, "gaps": "missing"}', "Field 'gaps' must be a list, object, or null"),
+        ('{"total_score": 17, "missing_from_jd": "none"}', "Field 'missing_from_jd' must be a list, object, or null"),
+        ('{"total_score": 17, "gating_flags": "nope"}', "Field 'gating_flags' must be a list of strings or null"),
+        ('{"total_score": 17, "dimension_scores": {"fit": "strong"}}', "Field 'dimension_scores' values must be numbers"),
+    ],
+)
+def test_parse_scoring_response_validation_errors(payload, message):
+    with pytest.raises(ScoringParseError, match=message):
+        parse_scoring_response(payload)
+
+
+def test_parse_scoring_response_rejects_non_string_dimension_keys():
+    payload = '{"total_score": 17, "dimension_scores": {"fit": 4}}'
+    parsed = parse_scoring_response(payload)
+
+    assert parsed.dimension_scores == {"fit": 4.0}

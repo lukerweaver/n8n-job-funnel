@@ -1,7 +1,8 @@
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from services.llm_client import LlmClient, LlmRequestError
-from services.scoring_service import JobScoringSkipped, score_job, score_jobs
+from services.scoring_service import JobScoringResult, JobScoringSkipped, _commit_scoring_progress, score_job, score_jobs
 from tests.helpers import seed_job, seed_prompt
 
 
@@ -77,3 +78,73 @@ def test_score_jobs_dry_run_and_counts(db_session, monkeypatch):
     assert scored.scored == 2
     assert scored.errored == 0
     assert job1.id in scored.job_ids
+
+
+def test_score_jobs_returns_empty_result_when_no_jobs_selected(db_session):
+    seed_prompt(db_session)
+
+    result = score_jobs(db_session, limit=10, status="missing", dry_run=False)
+
+    assert result.selected == 0
+    assert result.scored == 0
+    assert result.errored == 0
+    assert result.skipped == 0
+    assert result.job_ids == []
+
+
+def test_score_jobs_tracks_errors_and_skips(db_session, monkeypatch):
+    seed_prompt(db_session)
+    job1 = seed_job(db_session, job_id="job-1")
+    seed_job(db_session, job_id="job-2")
+    seed_job(db_session, job_id="job-3")
+    outcomes = iter(
+        [
+            JobScoringResult(job=job1, outcome="error", error_message="bad output"),
+            JobScoringSkipped("skip"),
+            JobScoringResult(job=job1, outcome="scored"),
+        ]
+    )
+
+    def _fake_score_job(*_args, **_kwargs):
+        result = next(outcomes)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr("services.scoring_service.score_job", _fake_score_job)
+    monkeypatch.setattr("services.scoring_service.resolve_active_prompt", lambda *args, **kwargs: object())
+    monkeypatch.setattr("services.scoring_service.build_llm_client", lambda: FakeClient(_valid_response()))
+
+    result = score_jobs(db_session, limit=10, status="new", dry_run=False)
+
+    assert result.selected == 3
+    assert result.errored == 1
+    assert result.skipped == 1
+    assert result.scored == 1
+    assert len(result.job_ids) == 2
+
+
+def test_commit_scoring_progress_retries_and_raises():
+    class FakeSession:
+        def __init__(self, failures):
+            self.failures = iter(failures)
+            self.rollbacks = 0
+            self.commits = 0
+
+        def commit(self):
+            self.commits += 1
+            failure = next(self.failures, None)
+            if failure is not None:
+                raise failure
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    retry_session = FakeSession([OperationalError("stmt", {}, Exception("database is locked")), None])
+    _commit_scoring_progress(retry_session)
+    assert retry_session.commits == 2
+    assert retry_session.rollbacks == 1
+
+    fail_session = FakeSession([OperationalError("stmt", {}, Exception("database is locked"))] * 3)
+    with pytest.raises(OperationalError):
+        _commit_scoring_progress(fail_session)

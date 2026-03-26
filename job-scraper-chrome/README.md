@@ -36,6 +36,26 @@ By default the extension posts to a local API on port `8000`.
 4. Enable Developer mode.
 5. Load the `job-scraper-chrome/` folder as an unpacked extension.
 
+## Testing
+
+The extension now includes a lightweight Node-based test harness built around Vitest.
+
+From `job-scraper-chrome/`:
+
+```bash
+npm install
+npm test
+```
+
+This suite exercises the current extension scripts directly with mocked `chrome` APIs:
+
+- `tests/content.test.js` covers LinkedIn scraping and Hiring Cafe normalization/deduping
+- `tests/background.test.js` covers the background POST bridge
+- `tests/popup.test.js` covers popup interaction flows
+- `tests/page-hook.test.js` covers Hiring Cafe fetch/XHR interception
+
+The tests use `jsdom` and small script-evaluation helpers rather than a bundler or extension-specific runner, so they stay close to the shipped scripts and remain cheap to maintain.
+
 ## Behavior
 
 ### LinkedIn

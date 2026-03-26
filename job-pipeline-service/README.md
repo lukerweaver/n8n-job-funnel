@@ -153,9 +153,9 @@ Run tests with coverage reports:
 ```bash
 pytest \
   --cov=app \
-  --cov=services/scoring_service.py \
-  --cov=services/scoring_parser.py \
-  --cov=services/llm_client.py \
+  --cov=services.scoring_service \
+  --cov=services.scoring_parser \
+  --cov=services.llm_client \
   --cov-branch \
   --cov-report=term-missing \
   --cov-report=json

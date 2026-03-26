@@ -3,7 +3,7 @@ from urllib import error
 
 import pytest
 
-from services.llm_client import LlmRequestError, OllamaClient
+from services.llm_client import LlmRequestError, OllamaClient, build_llm_client
 
 
 class FakeResponse:
@@ -62,3 +62,9 @@ def test_ollama_client_empty_content(monkeypatch):
     )
     with pytest.raises(LlmRequestError, match="empty response"):
         OllamaClient().generate("system", "user")
+
+
+def test_build_llm_client_rejects_unsupported_provider(monkeypatch):
+    monkeypatch.setattr("services.llm_client.settings.scoring_provider", "unsupported")
+    with pytest.raises(LlmRequestError, match="Unsupported scoring provider 'unsupported'"):
+        build_llm_client()

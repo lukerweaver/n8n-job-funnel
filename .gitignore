@@ -22,3 +22,8 @@ job-pipeline-service/data/
 # Editor / OS
 .idea/
 .vscode/
+
+# Node / frontend test artifacts
+node_modules/
+coverage/
+*.tsbuildinfo
