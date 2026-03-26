@@ -138,6 +138,33 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 curl http://localhost:8000/health
 ```
 
+## Testing and coverage
+
+From `job-pipeline-service/`:
+
+Run tests:
+
+```bash
+pytest
+```
+
+Run tests with coverage reports:
+
+```bash
+pytest --cov=. --cov-branch --cov-report=term-missing --cov-report=json
+```
+
+Coverage policy target:
+
+- line coverage: at least 80%
+- branch coverage: at least 80%
+
+If you generated `coverage.json`, you can enforce the branch threshold locally:
+
+```bash
+python scripts/coverage_gate.py coverage.json 80
+```
+
 ## Docker
 
 Build the image:
