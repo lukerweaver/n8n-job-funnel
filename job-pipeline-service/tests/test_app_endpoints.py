@@ -240,10 +240,13 @@ def test_prompt_library_crud(db_session):
     create = create_prompt_library(
         PromptLibraryCreate(
             prompt_key="default",
+            prompt_type="scoring",
             prompt_version=1,
             system_prompt="System",
             user_prompt_template="User",
-            base_resume_template="Resume",
+            context="Resume",
+            max_tokens=600,
+            temperature=0.2,
             is_active=True,
         ),
         db_session,
@@ -291,20 +294,26 @@ def test_update_prompt_library_updates_all_fields(db_session):
         prompt.id,
         PromptLibraryUpdate(
             prompt_key="custom",
+            prompt_type="tailoring",
             prompt_version=3,
             system_prompt="New system",
             user_prompt_template="New user",
-            base_resume_template="New resume",
+            context="New context",
+            max_tokens=900,
+            temperature=0.5,
             is_active=False,
         ),
         db_session,
     )
 
     assert updated.prompt_key == "custom"
+    assert updated.prompt_type == "tailoring"
     assert updated.prompt_version == 3
     assert updated.system_prompt == "New system"
     assert updated.user_prompt_template == "New user"
-    assert updated.base_resume_template == "New resume"
+    assert updated.context == "New context"
+    assert updated.max_tokens == 900
+    assert updated.temperature == 0.5
     assert updated.is_active is False
 
 
@@ -321,10 +330,11 @@ def test_update_and_delete_prompt_library_not_found(db_session):
 def test_prompt_library_conflicts(db_session):
     payload = PromptLibraryCreate(
         prompt_key="default",
+        prompt_type="scoring",
         prompt_version=1,
         system_prompt="System",
         user_prompt_template="User",
-        base_resume_template="Resume",
+        context="Resume",
         is_active=True,
     )
     create_prompt_library(payload, db_session)
@@ -449,6 +459,7 @@ def test_ensure_job_postings_schema_executes_only_missing_columns(monkeypatch):
     ensure_job_postings_schema()
 
     assert any("ADD COLUMN screening_likelihood REAL" in statement for statement in executed)
+    assert any("ADD COLUMN classification_key VARCHAR(100)" in statement for statement in executed)
     assert all("ADD COLUMN error_at" not in statement for statement in executed)
 
 
@@ -472,6 +483,13 @@ def test_ensure_job_postings_schema_returns_when_no_statements(monkeypatch):
                 "score_error",
                 "score_raw_response",
                 "score_attempts",
+                "classification_key",
+                "classification_prompt_version",
+                "classification_provider",
+                "classification_model",
+                "classification_error",
+                "classification_raw_response",
+                "classified_at",
             )]
         ),
     )
@@ -492,6 +510,7 @@ def test_lifespan_starts_and_stops_worker(monkeypatch):
 
     monkeypatch.setattr(app_module.Base.metadata, "create_all", lambda bind: calls.append(("create_all", bind)))
     monkeypatch.setattr(app_module, "ensure_job_postings_schema", lambda: calls.append(("ensure_schema", None)))
+    monkeypatch.setattr(app_module, "ensure_prompt_library_schema", lambda: calls.append(("ensure_prompt_schema", None)))
     monkeypatch.setattr(app_module.score_run_worker, "start", lambda: calls.append(("start", None)))
     monkeypatch.setattr(app_module.score_run_worker, "stop", lambda: calls.append(("stop", None)))
 
@@ -501,7 +520,14 @@ def test_lifespan_starts_and_stops_worker(monkeypatch):
 
     asyncio.run(_run())
 
-    assert [name for name, _ in calls] == ["create_all", "ensure_schema", "start", "inside", "stop"]
+    assert [name for name, _ in calls] == [
+        "create_all",
+        "ensure_schema",
+        "ensure_prompt_schema",
+        "start",
+        "inside",
+        "stop",
+    ]
 
 
 def test_operational_error_handler_branches(db_session, monkeypatch):

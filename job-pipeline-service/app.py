@@ -154,6 +154,13 @@ def ensure_job_postings_schema() -> None:
         "score_error": "TEXT",
         "score_raw_response": "TEXT",
         "score_attempts": "INTEGER",
+        "classification_key": "VARCHAR(100)",
+        "classification_prompt_version": "INTEGER",
+        "classification_provider": "VARCHAR(100)",
+        "classification_model": "VARCHAR(255)",
+        "classification_error": "TEXT",
+        "classification_raw_response": "TEXT",
+        "classified_at": "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME",
     }
 
     statements = [
@@ -170,10 +177,53 @@ def ensure_job_postings_schema() -> None:
             connection.execute(text(statement))
 
 
+def ensure_prompt_library_schema() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("prompt_library")}
+
+    float_type = "DOUBLE PRECISION" if engine.dialect.name == "postgresql" else "REAL"
+    type_map = {
+        "prompt_type": "VARCHAR(50)",
+        "context": "TEXT",
+        "max_tokens": "INTEGER",
+        "temperature": float_type,
+        "created_at": "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME",
+        "updated_at": "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME",
+    }
+
+    statements = [
+        f"ALTER TABLE prompt_library ADD COLUMN {column_name} {column_type}"
+        for column_name, column_type in type_map.items()
+        if column_name not in columns
+    ]
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+        if "prompt_type" not in columns:
+            connection.execute(text("UPDATE prompt_library SET prompt_type = 'scoring' WHERE prompt_type IS NULL"))
+        if "created_at" not in columns:
+            connection.execute(
+                text(
+                    "UPDATE prompt_library SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"
+                )
+            )
+        if "updated_at" not in columns:
+            connection.execute(
+                text(
+                    "UPDATE prompt_library SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"
+                )
+            )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_job_postings_schema()
+    ensure_prompt_library_schema()
     score_run_worker.start()
     yield
     score_run_worker.stop()
@@ -494,6 +544,7 @@ def mark_jobs_notified(notify_payloads: list[JobNotifyBatchItem], session: Sessi
 def list_prompt_library(
     session: Session = Depends(get_session),
     prompt_key: str | None = Query(default=None),
+    prompt_type: str | None = None,
     prompt_version: int | None = Query(default=None, ge=1),
     is_active: bool | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
@@ -503,6 +554,8 @@ def list_prompt_library(
 
     if prompt_key:
         query = query.where(PromptLibrary.prompt_key == prompt_key)
+    if prompt_type:
+        query = query.where(PromptLibrary.prompt_type == prompt_type)
     if prompt_version:
         query = query.where(PromptLibrary.prompt_version == prompt_version)
     if is_active is not None:
@@ -529,10 +582,13 @@ def create_prompt_library(
 ):
     prompt = PromptLibrary(
         prompt_key=payload.prompt_key,
+        prompt_type=payload.prompt_type,
         prompt_version=payload.prompt_version,
         system_prompt=payload.system_prompt,
         user_prompt_template=payload.user_prompt_template,
-        base_resume_template=payload.base_resume_template,
+        context=payload.context,
+        max_tokens=payload.max_tokens,
+        temperature=payload.temperature,
         is_active=payload.is_active,
     )
     session.add(prompt)
@@ -542,7 +598,7 @@ def create_prompt_library(
         session.rollback()
         raise HTTPException(
             status_code=409,
-            detail="Prompt key/version combination already exists",
+            detail="Prompt key/version/type combination already exists",
         ) from exc
 
     return PromptLibraryRead.model_validate(prompt)
@@ -560,14 +616,20 @@ def update_prompt_library(
 
     if payload.prompt_key is not None:
         prompt.prompt_key = payload.prompt_key
+    if payload.prompt_type is not None:
+        prompt.prompt_type = payload.prompt_type
     if payload.prompt_version is not None:
         prompt.prompt_version = payload.prompt_version
     if payload.system_prompt is not None:
         prompt.system_prompt = payload.system_prompt
     if payload.user_prompt_template is not None:
         prompt.user_prompt_template = payload.user_prompt_template
-    if payload.base_resume_template is not None:
-        prompt.base_resume_template = payload.base_resume_template
+    if payload.context is not None:
+        prompt.context = payload.context
+    if payload.max_tokens is not None:
+        prompt.max_tokens = payload.max_tokens
+    if payload.temperature is not None:
+        prompt.temperature = payload.temperature
     if payload.is_active is not None:
         prompt.is_active = payload.is_active
 
@@ -577,7 +639,7 @@ def update_prompt_library(
         session.rollback()
         raise HTTPException(
             status_code=409,
-            detail="Prompt key/version combination already exists",
+            detail="Prompt key/version/type combination already exists",
         ) from exc
 
     return PromptLibraryRead.model_validate(prompt)

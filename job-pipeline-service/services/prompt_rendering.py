@@ -14,7 +14,10 @@ def render_user_prompt(job: JobPosting, prompt: PromptLibrary) -> str:
     rendered = str(prompt.user_prompt_template or "")
     replacements = {
         "job_id": job.job_id or "",
-        "resume": prompt.base_resume_template or "",
+        # Resume content is moving to the Resume model. Until scoring is fully
+        # application-based, keep {{resume}} working by sourcing generic prompt
+        # context when present.
+        "resume": prompt.context or "",
         "description": job.description or "",
     }
 

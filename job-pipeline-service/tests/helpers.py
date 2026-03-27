@@ -23,10 +23,11 @@ def seed_job(session, *, job_id="job-1", status="new", description="Role details
 def seed_prompt(session, *, key="default", version=1, active=True) -> PromptLibrary:
     prompt = PromptLibrary(
         prompt_key=key,
+        prompt_type="scoring",
         prompt_version=version,
         system_prompt="System",
         user_prompt_template="User {{job.description}}",
-        base_resume_template="Resume",
+        context="Resume",
         is_active=active,
     )
     session.add(prompt)

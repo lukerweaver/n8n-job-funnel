@@ -193,10 +193,13 @@ class JobsBatchNotifyResponse(BaseModel):
 
 class PromptLibraryBase(BaseModel):
     prompt_key: str
+    prompt_type: str = "scoring"
     prompt_version: int
     system_prompt: str
     user_prompt_template: str
-    base_resume_template: str
+    context: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
     is_active: bool = True
 
 
@@ -206,10 +209,13 @@ class PromptLibraryCreate(PromptLibraryBase):
 
 class PromptLibraryUpdate(BaseModel):
     prompt_key: str | None = None
+    prompt_type: str | None = None
     prompt_version: int | None = None
     system_prompt: str | None = None
     user_prompt_template: str | None = None
-    base_resume_template: str | None = None
+    context: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
     is_active: bool | None = None
 
 
