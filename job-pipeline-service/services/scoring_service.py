@@ -5,10 +5,10 @@ import time
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from models import JobPosting, PromptLibrary
+from models import JobApplication, JobPosting, PromptLibrary
 from services.job_selection import select_jobs_for_scoring
 from services.llm_client import LlmClient, LlmRequestError, build_llm_client
-from services.prompt_rendering import render_user_prompt
+from services.prompt_rendering import render_application_prompt, render_user_prompt
 from services.prompt_service import resolve_active_prompt
 from services.scoring_parser import ParsedScore, ScoringParseError, parse_scoring_response
 
@@ -20,6 +20,13 @@ class JobScoringSkipped(Exception):
 @dataclass
 class JobScoringResult:
     job: JobPosting
+    outcome: str
+    error_message: str | None = None
+
+
+@dataclass
+class ApplicationScoringResult:
+    application: JobApplication
     outcome: str
     error_message: str | None = None
 
@@ -47,6 +54,10 @@ def _commit_scoring_progress(session: Session) -> None:
 
 def _increment_attempts(job: JobPosting) -> None:
     job.score_attempts = (job.score_attempts or 0) + 1
+
+
+def _increment_application_attempts(application: JobApplication) -> None:
+    application.score_attempts = (application.score_attempts or 0) + 1
 
 
 def _apply_parsed_score(
@@ -88,6 +99,49 @@ def _apply_scoring_error(job: JobPosting, error_message: str, raw_response: str 
     job.status = "error"
 
 
+def _apply_parsed_application_score(
+    application: JobApplication,
+    prompt: PromptLibrary,
+    parsed: ParsedScore,
+    raw_response: str,
+    client: LlmClient,
+) -> None:
+    _increment_application_attempts(application)
+    application.score = parsed.total_score
+    application.recommendation = parsed.recommendation
+    application.justification = parsed.justification
+    application.screening_likelihood = parsed.screening_likelihood
+    application.dimension_scores = parsed.dimension_scores
+    application.gating_flags = parsed.gating_flags
+    application.strengths = parsed.strengths
+    application.gaps = parsed.gaps
+    application.missing_from_jd = parsed.missing_from_jd
+    application.scoring_prompt_key = prompt.prompt_key
+    application.scoring_prompt_version = prompt.prompt_version
+    application.score_provider = client.provider
+    application.score_model = client.model
+    application.score_error = None
+    application.score_raw_response = raw_response
+    application.scored_at = datetime.now(timezone.utc)
+    application.last_error_at = None
+    application.status = "scored"
+
+
+def _apply_application_scoring_error(
+    application: JobApplication,
+    error_message: str,
+    raw_response: str | None,
+    client: LlmClient,
+) -> None:
+    _increment_application_attempts(application)
+    application.score_provider = client.provider
+    application.score_model = client.model
+    application.score_error = error_message
+    application.score_raw_response = raw_response
+    application.last_error_at = datetime.now(timezone.utc)
+    application.status = "new"
+
+
 def score_job(
     session: Session,
     job: JobPosting,
@@ -117,6 +171,42 @@ def score_job(
 
     _apply_parsed_score(job, resolved_prompt, parsed, raw_response, llm_client)
     return JobScoringResult(job=job, outcome="scored")
+
+
+def score_application(
+    session: Session,
+    application: JobApplication,
+    *,
+    prompt_key: str | None = None,
+    force: bool = False,
+    client: LlmClient | None = None,
+    prompt: PromptLibrary | None = None,
+) -> ApplicationScoringResult:
+    if not force and application.status != "new":
+        raise JobScoringSkipped(
+            f"Application '{application.id}' is in status '{application.status}' and force=false"
+        )
+
+    if not (application.job_posting.description and application.job_posting.description.strip()):
+        raise JobScoringSkipped(f"Application '{application.id}' has no job description to score")
+
+    if not (application.resume.content and application.resume.content.strip()):
+        raise JobScoringSkipped(f"Application '{application.id}' has no resume content to score")
+
+    resolved_prompt = prompt or resolve_active_prompt(session, prompt_key, prompt_type="scoring")
+    llm_client = client or build_llm_client()
+    rendered_prompt = render_application_prompt(application, resolved_prompt)
+
+    raw_response: str | None = None
+    try:
+        raw_response = llm_client.generate(resolved_prompt.system_prompt, rendered_prompt)
+        parsed = parse_scoring_response(raw_response)
+    except (LlmRequestError, ScoringParseError) as exc:
+        _apply_application_scoring_error(application, str(exc), raw_response, llm_client)
+        return ApplicationScoringResult(application=application, outcome="error", error_message=str(exc))
+
+    _apply_parsed_application_score(application, resolved_prompt, parsed, raw_response, llm_client)
+    return ApplicationScoringResult(application=application, outcome="scored")
 
 
 def score_jobs(

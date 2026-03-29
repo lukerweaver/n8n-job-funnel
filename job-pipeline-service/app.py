@@ -16,10 +16,24 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import Base, engine, get_session
-from models import JobApplication, JobPosting, PromptLibrary, Resume, ScoreRun, ScoreRunItem, User
+from models import InterviewRound, JobApplication, JobPosting, PromptLibrary, Resume, ScoreRun, ScoreRunItem, User
 from schemas import (
+    ApplicationCreate,
+    ApplicationGenerateRequest,
+    ApplicationGenerateResponse,
+    ApplicationsScoreRunRequest,
+    ApplicationsScoreRunResponse,
+    ApplicationStatusWrite,
+    InterviewRoundCreate,
+    InterviewRoundListResponse,
+    InterviewRoundRead,
     JobIngestItem,
     JobIngestResponse,
+    JobApplicationListResponse,
+    JobApplicationRead,
+    JobApplicationScoreResponse,
+    JobClassificationResponse,
+    JobClassificationRunRequest,
     JobErrorResponse,
     JobErrorWrite,
     JobListResponse,
@@ -37,16 +51,26 @@ from schemas import (
     PromptLibraryListResponse,
     PromptLibraryRead,
     PromptLibraryUpdate,
+    ResumeCreate,
+    ResumeListResponse,
+    ResumeRead,
+    ResumeUpdate,
+    UserCreate,
+    UserListResponse,
+    UserRead,
     JobsBatchNotifyResponse,
     JobsBatchScoreResponse,
+    JobsClassificationRunRequest,
+    JobsClassificationRunResponse,
     ScoreRunItemsResponse,
     ScoreRunItemRead,
     ScoreRunRead,
 )
+from services.classification_service import classify_job, classify_jobs
 from services.llm_client import LlmRequestError
 from services.prompt_service import PromptResolutionError
 from services.score_run_service import ScoreRunWorker, enqueue_score_run, serialize_score_run
-from services.scoring_service import JobScoringSkipped, score_job
+from services.scoring_service import JobScoringSkipped, score_application, score_job
 
 
 def merge_responses(existing, incoming):
@@ -130,6 +154,115 @@ def apply_error(job: JobPosting, error_payload: JobErrorWrite) -> None:
 
 def _get_job_by_id(session: Session, job_pk: int) -> JobPosting | None:
     return session.get(JobPosting, job_pk)
+
+
+def _get_user_by_id(session: Session, user_id: int) -> User | None:
+    return session.get(User, user_id)
+
+
+def _get_resume_by_id(session: Session, resume_id: int) -> Resume | None:
+    return session.get(Resume, resume_id)
+
+
+def _get_application_by_id(session: Session, application_id: int) -> JobApplication | None:
+    return session.get(JobApplication, application_id)
+
+
+def _serialize_application(application: JobApplication) -> JobApplicationRead:
+    return JobApplicationRead.model_validate(application)
+
+
+def _serialize_application_score(application: JobApplication) -> JobApplicationScoreResponse:
+    return JobApplicationScoreResponse(
+        id=application.id,
+        job_posting_id=application.job_posting_id,
+        resume_id=application.resume_id,
+        status=application.status,
+        score=application.score,
+        recommendation=application.recommendation,
+        screening_likelihood=application.screening_likelihood,
+        dimension_scores=application.dimension_scores,
+        gating_flags=application.gating_flags,
+        scored_at=application.scored_at,
+        notified_at=application.notified_at,
+        last_error_at=application.last_error_at,
+        score_error=application.score_error,
+    )
+
+
+def _serialize_job_classification(job: JobPosting) -> JobClassificationResponse:
+    return JobClassificationResponse(
+        id=job.id,
+        job_id=job.job_id,
+        classification_key=job.classification_key,
+        classification_prompt_version=job.classification_prompt_version,
+        classified_at=job.classified_at,
+        classification_error=job.classification_error,
+    )
+
+
+def _validate_application_entities(
+    session: Session,
+    *,
+    user_id: int,
+    resume_id: int,
+    job_posting_id: int,
+) -> tuple[User, Resume, JobPosting]:
+    user = _get_user_by_id(session, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' was not found")
+
+    resume = _get_resume_by_id(session, resume_id)
+    if resume is None:
+        raise HTTPException(status_code=404, detail=f"Resume '{resume_id}' was not found")
+    if resume.user_id != user_id:
+        raise HTTPException(status_code=409, detail="Resume does not belong to the selected user")
+
+    job_posting = _get_job_by_id(session, job_posting_id)
+    if job_posting is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_posting_id}' was not found")
+
+    return user, resume, job_posting
+
+
+def apply_application_score(application: JobApplication, score_payload: JobScoreWrite) -> None:
+    application.score = score_payload.score
+    application.recommendation = score_payload.recommendation
+    application.justification = score_payload.justification
+    application.screening_likelihood = score_payload.screening_likelihood
+    application.dimension_scores = score_payload.dimension_scores
+    application.gating_flags = score_payload.gating_flags
+    application.strengths = score_payload.strengths
+    application.gaps = score_payload.gaps
+    application.missing_from_jd = score_payload.missing_from_jd
+    application.scoring_prompt_key = score_payload.prompt_key
+    application.scoring_prompt_version = score_payload.prompt_version
+    application.scored_at = score_payload.scored_at or utcnow()
+    application.score_error = None
+    application.last_error_at = None
+    application.status = score_payload.status
+
+
+def apply_application_notification(application: JobApplication, notify_payload: JobNotifyWrite) -> None:
+    application.notified_at = notify_payload.notified_at or utcnow()
+    application.status = notify_payload.status
+
+
+def apply_application_error(application: JobApplication, error_payload: JobErrorWrite) -> None:
+    application.last_error_at = error_payload.error_at or utcnow()
+    application.status = "new" if error_payload.status == "error" else error_payload.status
+
+
+def apply_application_status(application: JobApplication, payload: ApplicationStatusWrite) -> None:
+    application.status = payload.status
+    if payload.status == "applied":
+        application.applied_at = payload.applied_at or utcnow()
+    elif payload.status == "offer":
+        application.offer_at = payload.offer_at or utcnow()
+    elif payload.status == "rejected":
+        application.rejected_at = payload.rejected_at or utcnow()
+    elif payload.status == "withdrawn":
+        application.withdrawn_at = payload.withdrawn_at or utcnow()
 
 
 def _get_score_run_by_id(session: Session, run_id: int) -> ScoreRun | None:
@@ -234,6 +367,26 @@ def ensure_prompt_library_schema() -> None:
             )
 
 
+def ensure_resumes_schema() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("resumes")}
+
+    if "classification_key" in columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE resumes ADD COLUMN classification_key VARCHAR(100)"))
+        connection.execute(
+            text(
+                """
+                UPDATE resumes
+                SET classification_key = prompt_key
+                WHERE classification_key IS NULL AND prompt_key IS NOT NULL
+                """
+            )
+        )
+
+
 def _backfill_prompt_context_from_legacy_column(session: Session) -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("prompt_library")}
@@ -267,6 +420,14 @@ def _backfill_job_posting_classification(session: Session) -> None:
         job.classification_key = role_type
         if job.classified_at is None:
             job.classified_at = job.scored_at or job.updated_at or job.created_at
+
+
+def _backfill_resume_classification_keys(session: Session) -> None:
+    resumes = session.scalars(
+        select(Resume).where(Resume.classification_key.is_(None), Resume.prompt_key.is_not(None))
+    ).all()
+    for resume in resumes:
+        resume.classification_key = resume.prompt_key
 
 
 def _get_or_create_legacy_user(session: Session) -> User:
@@ -303,7 +464,7 @@ def _get_or_create_legacy_resume(session: Session, user: User, prompt_key: str) 
     resume = session.scalar(
         select(Resume).where(
             Resume.user_id == user.id,
-            Resume.prompt_key == prompt_key,
+            Resume.classification_key == prompt_key,
             Resume.name == resume_name,
         )
     )
@@ -314,6 +475,7 @@ def _get_or_create_legacy_resume(session: Session, user: User, prompt_key: str) 
         user_id=user.id,
         name=resume_name,
         prompt_key=prompt_key,
+        classification_key=prompt_key,
         content=_legacy_resume_content(session, prompt_key),
         is_active=True,
     )
@@ -411,6 +573,7 @@ def _backfill_job_applications(session: Session) -> None:
 def run_phase_two_backfill(session: Session) -> None:
     _backfill_prompt_context_from_legacy_column(session)
     _backfill_job_posting_classification(session)
+    _backfill_resume_classification_keys(session)
     _backfill_job_applications(session)
     session.commit()
 
@@ -420,6 +583,7 @@ async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_job_postings_schema()
     ensure_prompt_library_schema()
+    ensure_resumes_schema()
     with Session(engine) as session:
         run_phase_two_backfill(session)
     score_run_worker.start()
@@ -554,6 +718,40 @@ def get_job(job_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
 
     return JobRead.model_validate(job)
+
+
+@app.post("/jobs/{job_id}/classify/run", response_model=JobClassificationResponse)
+def run_job_classification(job_id: int, payload: JobClassificationRunRequest, session: Session = Depends(get_session)):
+    job = _get_job_by_id(session, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
+
+    try:
+        result = classify_job(session, job, prompt_key=payload.prompt_key, force=payload.force)
+    except JobScoringSkipped as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    _commit_or_fail(session)
+    return _serialize_job_classification(result.job)
+
+
+@app.post("/jobs/classify/run", response_model=JobsClassificationRunResponse)
+def run_jobs_classification(payload: JobsClassificationRunRequest, session: Session = Depends(get_session)):
+    result = classify_jobs(
+        session,
+        limit=payload.limit,
+        source=payload.source,
+        prompt_key=payload.prompt_key,
+        force=payload.force,
+    )
+    return JobsClassificationRunResponse(
+        selected=result.selected,
+        processed=len(result.job_ids),
+        classified=result.classified,
+        errored=result.errored,
+        skipped=result.skipped,
+        jobs=result.job_ids,
+    )
 
 
 @app.post("/jobs/{job_id}/score", response_model=JobScoreResponse)
@@ -736,6 +934,417 @@ def mark_jobs_notified(notify_payloads: list[JobNotifyBatchItem], session: Sessi
     _commit_or_fail(session)
 
     return JobsBatchNotifyResponse(updated=len(updated_job_ids), jobs=updated_job_ids)
+
+
+@app.get("/users", response_model=UserListResponse)
+def list_users(
+    session: Session = Depends(get_session),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    items = session.scalars(select(User).order_by(User.id.asc()).offset(offset).limit(limit)).all()
+    total = len(session.scalars(select(User)).all())
+    return UserListResponse(total=total, items=[UserRead.model_validate(item) for item in items])
+
+
+@app.post("/users", response_model=UserRead)
+def create_user(payload: UserCreate, session: Session = Depends(get_session)):
+    user = User(name=payload.name, email=payload.email)
+    session.add(user)
+    try:
+        _commit_or_fail(session)
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="User email already exists") from exc
+    return UserRead.model_validate(user)
+
+
+@app.get("/resumes", response_model=ResumeListResponse)
+def list_resumes(
+    session: Session = Depends(get_session),
+    user_id: int | None = Query(default=None),
+    classification_key: str | None = Query(default=None),
+    is_active: bool | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    query = select(Resume).order_by(Resume.id.asc())
+    count_query = select(Resume)
+    if user_id is not None:
+        query = query.where(Resume.user_id == user_id)
+        count_query = count_query.where(Resume.user_id == user_id)
+    if classification_key:
+        query = query.where(Resume.classification_key == classification_key)
+        count_query = count_query.where(Resume.classification_key == classification_key)
+    if is_active is not None:
+        query = query.where(Resume.is_active == is_active)
+        count_query = count_query.where(Resume.is_active == is_active)
+    items = session.scalars(query.offset(offset).limit(limit)).all()
+    total = len(session.scalars(count_query).all())
+    return ResumeListResponse(total=total, items=[ResumeRead.model_validate(item) for item in items])
+
+
+@app.post("/resumes", response_model=ResumeRead)
+def create_resume(payload: ResumeCreate, session: Session = Depends(get_session)):
+    user = _get_user_by_id(session, payload.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{payload.user_id}' was not found")
+    resume = Resume(
+        user_id=payload.user_id,
+        name=payload.name,
+        prompt_key=payload.classification_key,
+        classification_key=payload.classification_key,
+        content=payload.content,
+        is_active=payload.is_active,
+    )
+    session.add(resume)
+    _commit_or_fail(session)
+    return ResumeRead.model_validate(resume)
+
+
+@app.put("/resumes/{resume_id}", response_model=ResumeRead)
+def update_resume(resume_id: int, payload: ResumeUpdate, session: Session = Depends(get_session)):
+    resume = _get_resume_by_id(session, resume_id)
+    if resume is None:
+        raise HTTPException(status_code=404, detail=f"Resume '{resume_id}' was not found")
+    if payload.name is not None:
+        resume.name = payload.name
+    if payload.classification_key is not None:
+        resume.classification_key = payload.classification_key
+        resume.prompt_key = payload.classification_key
+    if payload.content is not None:
+        resume.content = payload.content
+    if payload.is_active is not None:
+        resume.is_active = payload.is_active
+    _commit_or_fail(session)
+    return ResumeRead.model_validate(resume)
+
+
+@app.get("/applications", response_model=JobApplicationListResponse)
+def list_applications(
+    session: Session = Depends(get_session),
+    user_id: int | None = Query(default=None),
+    resume_id: int | None = Query(default=None),
+    job_posting_id: int | None = Query(default=None),
+    status: str | None = Query(default=None),
+    score: float | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    query = select(JobApplication).order_by(JobApplication.created_at.desc())
+    count_query = select(JobApplication)
+    if user_id is not None:
+        query = query.where(JobApplication.user_id == user_id)
+        count_query = count_query.where(JobApplication.user_id == user_id)
+    if resume_id is not None:
+        query = query.where(JobApplication.resume_id == resume_id)
+        count_query = count_query.where(JobApplication.resume_id == resume_id)
+    if job_posting_id is not None:
+        query = query.where(JobApplication.job_posting_id == job_posting_id)
+        count_query = count_query.where(JobApplication.job_posting_id == job_posting_id)
+    if status:
+        query = query.where(JobApplication.status == status)
+        count_query = count_query.where(JobApplication.status == status)
+    if score is not None:
+        query = query.where(JobApplication.score.is_not(None), JobApplication.score >= score)
+        count_query = count_query.where(JobApplication.score.is_not(None), JobApplication.score >= score)
+    items = session.scalars(query.offset(offset).limit(limit)).all()
+    total = len(session.scalars(count_query).all())
+    return JobApplicationListResponse(total=total, items=[_serialize_application(item) for item in items])
+
+
+@app.get("/applications/{application_id}", response_model=JobApplicationRead)
+def get_application(application_id: int, session: Session = Depends(get_session)):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    return _serialize_application(application)
+
+
+@app.post("/applications", response_model=JobApplicationRead)
+def create_application(payload: ApplicationCreate, session: Session = Depends(get_session)):
+    _, resume, _ = _validate_application_entities(
+        session,
+        user_id=payload.user_id,
+        resume_id=payload.resume_id,
+        job_posting_id=payload.job_posting_id,
+    )
+    application = JobApplication(
+        user_id=payload.user_id,
+        job_posting_id=payload.job_posting_id,
+        resume_id=payload.resume_id,
+        status=payload.status,
+    )
+    session.add(application)
+    try:
+        _commit_or_fail(session)
+    except IntegrityError as exc:
+        session.rollback()
+        existing = session.scalar(
+            select(JobApplication).where(
+                JobApplication.job_posting_id == payload.job_posting_id,
+                JobApplication.resume_id == payload.resume_id,
+            )
+        )
+        if existing is None:
+            raise
+        # Regeneration semantics overwrite the existing application for the
+        # posting/resume pair instead of creating a second row.
+        existing.user_id = payload.user_id
+        existing.status = payload.status
+        existing.score = None
+        existing.recommendation = None
+        existing.justification = None
+        existing.screening_likelihood = None
+        existing.dimension_scores = None
+        existing.gating_flags = None
+        existing.strengths = None
+        existing.gaps = None
+        existing.missing_from_jd = None
+        existing.scoring_prompt_key = None
+        existing.scoring_prompt_version = None
+        existing.score_provider = None
+        existing.score_model = None
+        existing.score_raw_response = None
+        existing.score_error = None
+        existing.score_attempts = 0
+        existing.scored_at = None
+        existing.tailored_resume_content = None
+        existing.tailoring_prompt_key = None
+        existing.tailoring_prompt_version = None
+        existing.tailoring_provider = None
+        existing.tailoring_model = None
+        existing.tailoring_raw_response = None
+        existing.tailoring_error = None
+        existing.tailored_at = None
+        existing.notified_at = None
+        existing.applied_at = None
+        existing.offer_at = None
+        existing.rejected_at = None
+        existing.withdrawn_at = None
+        existing.last_error_at = None
+        existing.resume_id = resume.id
+        _commit_or_fail(session)
+        return _serialize_application(existing)
+    return _serialize_application(application)
+
+
+@app.post("/applications/generate", response_model=ApplicationGenerateResponse)
+def generate_applications(payload: ApplicationGenerateRequest, session: Session = Depends(get_session)):
+    job = _get_job_by_id(session, payload.job_posting_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{payload.job_posting_id}' was not found")
+    if not job.classification_key:
+        raise HTTPException(status_code=409, detail="Job posting is missing classification_key")
+
+    query = select(Resume).where(Resume.is_active.is_(True), Resume.classification_key == job.classification_key)
+    if payload.user_id is not None:
+        query = query.where(Resume.user_id == payload.user_id)
+
+    resumes = session.scalars(query.order_by(Resume.id.asc())).all()
+    created = 0
+    skipped = 0
+    application_ids: list[int] = []
+
+    for resume in resumes:
+        existing = session.scalar(
+            select(JobApplication).where(
+                JobApplication.job_posting_id == job.id,
+                JobApplication.resume_id == resume.id,
+            )
+        )
+        if existing is not None:
+            skipped += 1
+            application_ids.append(existing.id)
+            continue
+
+        application = JobApplication(
+            user_id=resume.user_id,
+            job_posting_id=job.id,
+            resume_id=resume.id,
+            status="new",
+        )
+        session.add(application)
+        session.flush()
+        created += 1
+        application_ids.append(application.id)
+
+    _commit_or_fail(session)
+    return ApplicationGenerateResponse(created=created, skipped=skipped, applications=application_ids)
+
+
+@app.post("/applications/{application_id}/score", response_model=JobApplicationScoreResponse)
+def store_application_score(
+    application_id: int,
+    score_payload: JobScoreWrite,
+    session: Session = Depends(get_session),
+):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    apply_application_score(application, score_payload)
+    _commit_or_fail(session)
+    return _serialize_application_score(application)
+
+
+@app.post("/applications/{application_id}/score/run", response_model=JobApplicationScoreResponse)
+def run_application_score(
+    application_id: int,
+    payload: JobScoreRunRequest,
+    session: Session = Depends(get_session),
+):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    try:
+        result = score_application(session, application, prompt_key=payload.prompt_key, force=payload.force)
+    except JobScoringSkipped as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _commit_or_fail(session)
+    return _serialize_application_score(result.application)
+
+
+@app.post("/applications/score/run", response_model=ApplicationsScoreRunResponse)
+def run_applications_score(payload: ApplicationsScoreRunRequest, session: Session = Depends(get_session)):
+    query = select(JobApplication).order_by(JobApplication.created_at.asc())
+    if payload.status:
+        query = query.where(JobApplication.status == payload.status)
+    if payload.user_id is not None:
+        query = query.where(JobApplication.user_id == payload.user_id)
+    if payload.resume_id is not None:
+        query = query.where(JobApplication.resume_id == payload.resume_id)
+    if payload.job_posting_id is not None:
+        query = query.where(JobApplication.job_posting_id == payload.job_posting_id)
+
+    applications = session.scalars(query.limit(payload.limit)).all()
+    if not applications:
+        return ApplicationsScoreRunResponse(
+            selected=0,
+            processed=0,
+            scored=0,
+            errored=0,
+            skipped=0,
+            applications=[],
+        )
+
+    scored = 0
+    errored = 0
+    skipped = 0
+    processed_application_ids: list[int] = []
+
+    for application in applications:
+        try:
+            result = score_application(
+                session,
+                application,
+                prompt_key=payload.prompt_key,
+                force=payload.force,
+            )
+        except JobScoringSkipped:
+            session.rollback()
+            skipped += 1
+            continue
+
+        processed_application_ids.append(application.id)
+        if result.outcome == "scored":
+            scored += 1
+        elif result.outcome == "error":
+            errored += 1
+        _commit_or_fail(session)
+
+    return ApplicationsScoreRunResponse(
+        selected=len(applications),
+        processed=len(processed_application_ids),
+        scored=scored,
+        errored=errored,
+        skipped=skipped,
+        applications=processed_application_ids,
+    )
+
+
+@app.post("/applications/{application_id}/notify", response_model=JobApplicationRead)
+def mark_application_notified(
+    application_id: int,
+    notify_payload: JobNotifyWrite,
+    session: Session = Depends(get_session),
+):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    apply_application_notification(application, notify_payload)
+    _commit_or_fail(session)
+    return _serialize_application(application)
+
+
+@app.post("/applications/{application_id}/error", response_model=JobApplicationRead)
+def mark_application_error(
+    application_id: int,
+    error_payload: JobErrorWrite,
+    session: Session = Depends(get_session),
+):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    apply_application_error(application, error_payload)
+    _commit_or_fail(session)
+    return _serialize_application(application)
+
+
+@app.post("/applications/{application_id}/status", response_model=JobApplicationRead)
+def update_application_status(
+    application_id: int,
+    payload: ApplicationStatusWrite,
+    session: Session = Depends(get_session),
+):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    apply_application_status(application, payload)
+    _commit_or_fail(session)
+    return _serialize_application(application)
+
+
+@app.get("/applications/{application_id}/interview-rounds", response_model=InterviewRoundListResponse)
+def list_interview_rounds(application_id: int, session: Session = Depends(get_session)):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    items = session.scalars(
+        select(InterviewRound)
+        .where(InterviewRound.job_application_id == application_id)
+        .order_by(InterviewRound.round_number.asc(), InterviewRound.id.asc())
+    ).all()
+    return InterviewRoundListResponse(total=len(items), items=[InterviewRoundRead.model_validate(item) for item in items])
+
+
+@app.post("/applications/{application_id}/interview-rounds", response_model=InterviewRoundRead)
+def create_interview_round(
+    application_id: int,
+    payload: InterviewRoundCreate,
+    session: Session = Depends(get_session),
+):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    interview_round = InterviewRound(
+        job_application_id=application_id,
+        round_number=payload.round_number,
+        stage_name=payload.stage_name,
+        status=payload.status,
+        notes=payload.notes,
+        scheduled_at=payload.scheduled_at,
+        completed_at=payload.completed_at,
+    )
+    session.add(interview_round)
+    try:
+        _commit_or_fail(session)
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Interview round already exists for that application") from exc
+    if application.status not in {"offer", "rejected", "withdrawn"}:
+        application.status = "interview"
+        _commit_or_fail(session)
+    return InterviewRoundRead.model_validate(interview_round)
 
 
 @app.get("/prompt-library", response_model=PromptLibraryListResponse)

@@ -3,8 +3,9 @@
 FastAPI service for:
 
 1. ingesting normalized jobs from the Chrome extension
-2. storing job records and prompt templates
-3. exposing routes that n8n can use to trigger scoring and write notification state back
+2. classifying job postings into reusable role buckets
+3. generating and scoring user-owned job applications from matching resumes
+4. exposing routes that n8n can use to automate classification, scoring, tailoring-adjacent workflow, and notification state
 4. keeping a legacy Hiring Cafe Playwright capture route available
 
 The primary ingestion path is `POST /jobs/ingest` from `job-scraper-chrome`.
@@ -22,13 +23,19 @@ This service supports both SQLite and Postgres.
 - If `DATABASE_URL` is not set and `./data/jobs.db` already exists, the service uses `sqlite:///./data/jobs.db`.
 - Otherwise it uses `sqlite:///./jobs.db`.
 
-Tables are created automatically on startup.
+Tables are created automatically on startup. The current data model centers on:
 
-In addition to `job_postings` and `prompt_library`, the service persists async scoring state in `score_runs` and `score_run_items`. Those tables back the batch scoring APIs and let progress survive beyond a single HTTP request.
+- `job_postings` for ingested source jobs plus classification state
+- `users` for application ownership
+- `resumes` for user resumes aligned to a `classification_key`
+- `job_applications` for resume-specific scoring and workflow lifecycle
+- `interview_rounds` for variable interview tracking
 
-## Scoring configuration
+In addition to those tables, the service persists async legacy job scoring state in `score_runs` and `score_run_items`. Those tables still back the older `/jobs/score/run` flow.
 
-The service can score jobs directly using a configured LLM provider.
+## LLM configuration
+
+The service can classify jobs and score applications directly using a configured LLM provider.
 
 Supported environment variables:
 
@@ -39,18 +46,42 @@ Supported environment variables:
 - `LLM_TIMEOUT_SECONDS` default `180`
 - `DEFAULT_PROMPT_KEY` optional
 
-The current implementation supports `ollama` as the scoring provider.
+The current implementation supports `ollama` as the provider.
 
-Batch scoring is asynchronous. `POST /jobs/score/run` creates a `score_runs` record plus one `score_run_items` record per selected job, and a background worker advances them through `queued`, `running`, `scored`, `error`, or `skipped`.
+There are now two orchestration styles:
+
+- preferred application-native flow:
+  - classify postings with `/jobs/classify/run`
+  - generate applications with `/applications/generate`
+  - score applications with `/applications/score/run`
+- legacy job-native flow:
+  - queue batch scoring with `/jobs/score/run`
+
+## Workflow
+
+The intended automated workflow is:
+
+1. ingest `JobPosting`
+2. classify `JobPosting`
+3. generate `JobApplication` rows when `JobPosting.classification_key == Resume.classification_key`
+4. score `JobApplication`
+5. tailor and notify from application thresholds
+6. let the user drive `applied`, `screening`, `interview`, `offer`, `rejected`, or `withdrawn`
 
 ## Prompt library
 
-Prompt templates are stored in the `prompt_library` table and resolved by `prompt_key`.
+Prompt templates are stored in the `prompt_library` table and resolved by `prompt_key` plus `prompt_type`.
 
-Scoring uses:
+Supported prompt types:
 
-- the `prompt_key` passed to `POST /jobs/{id}/score/run` or `POST /jobs/score/run`, or
-- `DEFAULT_PROMPT_KEY` if the scoring request does not pass one
+- `classification`
+- `scoring`
+- `tailoring`
+
+Prompt resolution uses:
+
+- the explicit `prompt_key` passed to a classify or score route, or
+- `DEFAULT_PROMPT_KEY` if the request does not pass one
 
 The repo includes a sanitized example seed at `exports/data/prompt_library.seed.mock.json`. It demonstrates the scoring schema and customization points without exposing a production prompt.
 
@@ -75,7 +106,25 @@ You can verify loaded prompts with:
 curl http://localhost:8000/prompt-library
 ```
 
-If you create multiple versions for the same `prompt_key`, keep only one version active unless you intentionally want scoring calls to target a specific prompt version by changing the active record.
+If you create multiple versions for the same `prompt_key` and `prompt_type`, keep only one version active unless you intentionally want callers to target a specific prompt version.
+
+Prompt write payloads now use prompt-only fields. Resume source text belongs on `resumes`, not in `prompt_library`.
+
+Example prompt payload:
+
+```json
+{
+  "prompt_key": "Product Manager",
+  "prompt_type": "scoring",
+  "prompt_version": 1,
+  "system_prompt": "You are a hiring assistant...",
+  "user_prompt_template": "{{resume}}\n\n{{description}}",
+  "context": "Optional shared instructions",
+  "max_tokens": 1500,
+  "temperature": 0.2,
+  "is_active": true
+}
+```
 
 ### Scoring payload schema
 
@@ -83,21 +132,11 @@ The scoring parser accepts both legacy and updated LLM JSON outputs.
 
 - Legacy supported fields: `total_score`, `recommendation`, `justification`, `strengths`, `gaps`, `missing_from_jd`.
 - New optional fields:
-  - `role_type`
   - `screening_likelihood`
   - `dimension_scores`
   - `gating_flags`
 
 The parser is backwards compatible: old prompt outputs still parse and persist without requiring the new fields.
-
-## Async scoring run model
-
-The scoring workflow does not hold a request open until every job finishes. Instead, the service records the run and processes it in the background.
-
-- `score_runs` stores the top-level run request, filters, callback metadata, counts, and lifecycle timestamps.
-- `score_run_items` stores one row per selected job so clients can inspect item-level progress and failures.
-- `GET /score-runs/{run_id}` returns the aggregate run status.
-- `GET /score-runs/{run_id}/items` returns the per-job statuses for that run.
 
 ## Local run
 
@@ -221,6 +260,30 @@ The compose example:
 - `POST /jobs/ingest`
 - `GET /jobs`
 - `GET /jobs/{id}`
+- `POST /jobs/{id}/classify/run`
+- `POST /jobs/classify/run`
+- `GET /applications`
+- `GET /applications/{id}`
+- `POST /applications`
+- `POST /applications/generate`
+- `POST /applications/{id}/score`
+- `POST /applications/{id}/score/run`
+- `POST /applications/score/run`
+- `POST /applications/{id}/notify`
+- `POST /applications/{id}/error`
+- `POST /applications/{id}/status`
+- `GET /applications/{id}/interview-rounds`
+- `POST /applications/{id}/interview-rounds`
+- `GET /users`
+- `POST /users`
+- `GET /resumes`
+- `POST /resumes`
+- `PUT /resumes/{id}`
+- `GET /prompt-library`
+- `GET /prompt-library/{prompt_id}`
+- `POST /prompt-library`
+- `PUT /prompt-library/{prompt_id}`
+- `DELETE /prompt-library/{prompt_id}`
 - `POST /jobs/{id}/score/run`
 - `POST /jobs/score/run`
 - `GET /score-runs/{run_id}`
@@ -230,11 +293,6 @@ The compose example:
 - `POST /jobs/scores`
 - `POST /jobs/{id}/notify`
 - `POST /jobs/notify`
-- `GET /prompt-library`
-- `GET /prompt-library/{prompt_id}`
-- `POST /prompt-library`
-- `PUT /prompt-library/{prompt_id}`
-- `DELETE /prompt-library/{prompt_id}`
 - `GET /jobs/hiringcafe?search_url=<HIRING_CAFE_URL>`
 
 ### ID semantics
@@ -244,7 +302,7 @@ The service uses two job identifiers:
 - `job_id` - external string identifier used for ingest dedupe
 - `id` - internal numeric database primary key used by `GET /jobs/{id}`, score routes, and notify routes
 
-That distinction matters for n8n integrations. Ingest works with external `job_id`, while score and notify writeback routes work with internal numeric `id`.
+That distinction matters for n8n integrations. Ingest works with external `job_id`, while classify, score, and notify routes work with internal numeric IDs.
 
 ### `POST /jobs/ingest`
 
@@ -294,9 +352,149 @@ Example:
 GET http://localhost:8000/jobs?status=new&limit=25
 ```
 
+### Preferred n8n sequence
+
+The preferred automation chain is:
+
+1. classify jobs:
+
+```json
+POST /jobs/classify/run
+{
+  "limit": 100,
+  "force": false
+}
+```
+
+2. generate applications for classified postings:
+
+```json
+POST /applications/generate
+{
+  "job_posting_id": 123
+}
+```
+
+3. score applications in batch:
+
+```json
+POST /applications/score/run
+{
+  "limit": 100,
+  "status": "new",
+  "force": false
+}
+```
+
+4. fetch high-scoring applications:
+
+```text
+GET /applications?status=scored&score=20
+```
+
+5. mark notified applications:
+
+```json
+POST /applications/{id}/notify
+{
+  "status": "notified"
+}
+```
+
+### `POST /jobs/{id}/classify/run`
+
+Classifies a single posting and writes the result to `job_postings.classification_key`.
+
+Example payload:
+
+```json
+{
+  "prompt_key": "Product Manager",
+  "force": false
+}
+```
+
+### `POST /jobs/classify/run`
+
+Runs batch classification across postings.
+
+Example payload:
+
+```json
+{
+  "limit": 100,
+  "source": "linkedin",
+  "force": false
+}
+```
+
+### `POST /applications/generate`
+
+Creates `job_applications` for resumes whose `classification_key` matches the posting classification.
+
+Example payload:
+
+```json
+{
+  "job_posting_id": 123
+}
+```
+
+### `GET /applications`
+
+Supported query parameters:
+
+- `user_id`
+- `resume_id`
+- `job_posting_id`
+- `status`
+- `score`
+- `limit`
+- `offset`
+
+### `POST /applications/score/run`
+
+Scores application rows in batch.
+
+Example payload:
+
+```json
+{
+  "limit": 100,
+  "status": "new",
+  "force": false
+}
+```
+
+### `POST /applications/{id}/status`
+
+Updates the application lifecycle status. Use this for `applied`, `screening`, `interview`, `offer`, `rejected`, and `withdrawn`.
+
+Example payload:
+
+```json
+{
+  "status": "applied"
+}
+```
+
+### `POST /applications/{id}/interview-rounds`
+
+Adds a numbered interview round for an application.
+
+Example payload:
+
+```json
+{
+  "round_number": 1,
+  "stage_name": "Hiring Manager",
+  "status": "scheduled"
+}
+```
+
 ### `POST /jobs/{id}/score`
 
-Stores scoring output for a single job identified by internal numeric `id`. This is now the legacy/manual writeback route; the preferred scoring path is the service-side `/jobs/{id}/score/run` or `/jobs/score/run` endpoints.
+Stores scoring output for a single job identified by internal numeric `id`. This is a legacy/manual writeback route retained for compatibility.
 
 Example payload:
 
@@ -308,7 +506,6 @@ Example payload:
   "strengths": ["B2B product experience", "roadmapping"],
   "gaps": ["No direct fintech background"],
   "missing_from_jd": ["SQL"],
-  "role_type": "Product Manager",
   "screening_likelihood": 20,
   "dimension_scores": {
     "domain_fit": 4,
@@ -325,55 +522,19 @@ Example payload:
 
 If `scored_at` is omitted, the service uses the current UTC time. The response includes the current `status`, `score`, `scoring metadata`, `scored_at`, `notified_at`, and `error_at` values for that row.
 
-Scoring writeback responses expose both legacy and new fields (`role_type`, `screening_likelihood`, `dimension_scores`, `gating_flags`) when present.
+Scoring writeback responses expose legacy fields such as `role_type`, `screening_likelihood`, `dimension_scores`, and `gating_flags` when present.
 
 ### `POST /jobs/scores`
 
 Batch score writeback route. Each item must include numeric `id`.
 
-### `POST /jobs/{id}/score/run`
+### Legacy scoring routes
 
-Triggers scoring for a single job inside the service. The service resolves the active prompt, renders the prompt body, calls the configured LLM provider, validates the response, and persists either scored or error state.
+`POST /jobs/{id}/score/run`, `POST /jobs/score/run`, `GET /score-runs/{run_id}`, and `GET /score-runs/{run_id}/items` are still available for backward compatibility while older n8n flows are being retired.
 
-Example payload:
+### Legacy notify/error routes
 
-```json
-{
-  "prompt_key": "product",
-  "force": false
-}
-```
-
-### `POST /jobs/score/run`
-
-Queues a batch scoring run inside the service and returns immediately.
-
-Example payload:
-
-```json
-{
-  "limit": 25,
-  "status": "new",
-  "force": false,
-  "callback_url": "https://example.com/scoring-complete"
-}
-```
-
-The batch route is asynchronous. It creates a durable `score_run`, snapshots the selected job IDs into `score_run_items`, and returns a `run_id` plus current counts. A background worker processes those jobs independently of the HTTP connection.
-
-Use `GET /score-runs/{run_id}` to poll progress and `GET /score-runs/{run_id}/items` to inspect per-job status.
-
-If `callback_url` is supplied, the service will POST the final run payload to that URL after the run completes or fails.
-
-Per-job scoring results are committed as each job finishes, so completed work survives later timeouts or client disconnects.
-
-### `GET /score-runs/{run_id}`
-
-Returns the current status and counters for a queued or completed batch scoring run.
-
-### `GET /score-runs/{run_id}/items`
-
-Returns one row per selected job with `queued`, `running`, `scored`, `error`, or `skipped` status.
+`POST /job/{id}/error`, `POST /jobs/{id}/notify`, and `POST /jobs/notify` are also retained for backward compatibility with older job-based automation.
 
 ### `POST /job/{id}/error`
 

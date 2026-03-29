@@ -10,46 +10,74 @@ from sqlalchemy import select, text
 import app as app_module
 from app import (
     _commit_or_fail,
+    create_application,
+    create_interview_round,
     create_prompt_library,
+    create_resume,
+    create_user,
     delete_prompt_library,
     ensure_job_postings_schema,
     get_job,
+    get_application,
     get_prompt_library,
     get_score_run,
     health,
     ingest_jobs,
+    list_applications,
     list_jobs,
     list_prompt_library,
+    list_resumes,
+    list_users,
     list_score_run_items,
+    list_interview_rounds,
+    mark_application_error,
+    mark_application_notified,
     mark_job_error,
     mark_job_notified,
     mark_jobs_notified,
     merge_responses,
     operational_error_handler,
     run_phase_two_backfill,
+    run_application_score,
+    run_applications_score,
+    run_job_classification,
+    run_jobs_classification,
     run_job_score,
     run_jobs_score,
+    store_application_score,
     store_job_score,
     store_job_scores,
+    update_application_status,
+    update_resume,
     update_prompt_library,
 )
 from models import JobApplication, Resume, User
 from schemas import (
+    ApplicationCreate,
+    ApplicationGenerateRequest,
+    ApplicationsScoreRunRequest,
+    ApplicationStatusWrite,
+    InterviewRoundCreate,
     JobErrorWrite,
+    JobClassificationRunRequest,
     JobIngestItem,
     JobNotifyBatchItem,
     JobNotifyWrite,
+    ResumeCreate,
+    ResumeUpdate,
     JobScoreBatchItem,
     JobScoreRunRequest,
     JobScoreWrite,
     JobsScoreRunRequest,
+    JobsClassificationRunRequest,
     PromptLibraryCreate,
     PromptLibraryUpdate,
+    UserCreate,
 )
 from services.llm_client import LlmRequestError
 from services.prompt_service import PromptResolutionError
 from services.scoring_service import JobScoringResult, JobScoringSkipped
-from tests.helpers import seed_job, seed_prompt, seed_score_run
+from tests.helpers import seed_application, seed_job, seed_prompt, seed_resume, seed_score_run, seed_user
 
 
 def _score_payload() -> JobScoreWrite:
@@ -148,6 +176,48 @@ def test_get_job_by_id(db_session):
         get_job(9999, db_session)
 
 
+def test_run_job_classification_success_and_conflict(db_session, monkeypatch):
+    job = seed_job(db_session)
+
+    def _fake_classify_job(session, target_job, **_kwargs):
+        target_job.classification_key = "Product Manager"
+        target_job.classification_prompt_version = 1
+        target_job.classified_at = datetime.now(timezone.utc)
+        return SimpleNamespace(job=target_job)
+
+    monkeypatch.setattr(app_module, "classify_job", _fake_classify_job)
+    ok = run_job_classification(job.id, JobClassificationRunRequest(force=False), db_session)
+    assert ok.classification_key == "Product Manager"
+
+    def _fake_skip(*_args, **_kwargs):
+        raise JobScoringSkipped("skipped")
+
+    monkeypatch.setattr(app_module, "classify_job", _fake_skip)
+    with pytest.raises(HTTPException) as exc:
+        run_job_classification(job.id, JobClassificationRunRequest(force=False), db_session)
+    assert exc.value.status_code == 409
+
+    with pytest.raises(HTTPException) as missing:
+        run_job_classification(9999, JobClassificationRunRequest(force=False), db_session)
+    assert missing.value.status_code == 404
+
+
+def test_run_jobs_classification_batch(db_session, monkeypatch):
+    seed_job(db_session, job_id="job-1")
+    seed_job(db_session, job_id="job-2")
+
+    monkeypatch.setattr(
+        app_module,
+        "classify_jobs",
+        lambda session, **_kwargs: SimpleNamespace(selected=2, classified=1, errored=0, skipped=1, job_ids=[1]),
+    )
+
+    response = run_jobs_classification(JobsClassificationRunRequest(limit=2, force=False), db_session)
+    assert response.selected == 2
+    assert response.classified == 1
+    assert response.jobs == [1]
+
+
 def test_store_job_score(db_session):
     job = seed_job(db_session)
     scored = store_job_score(job.id, _score_payload(), db_session)
@@ -237,6 +307,260 @@ def test_notify_and_error_endpoints(db_session):
         mark_job_error(9999, JobErrorWrite(status="error"), db_session)
     with pytest.raises(HTTPException):
         mark_jobs_notified([JobNotifyBatchItem(id=9999, status="notified")], db_session)
+
+
+def test_user_and_resume_crud(db_session):
+    user = create_user(UserCreate(name="Alice", email="alice@example.com"), db_session)
+    resume = create_resume(
+        ResumeCreate(
+            user_id=user.id,
+            name="PM Resume",
+            classification_key="Product Manager",
+            content="Resume body",
+            is_active=True,
+        ),
+        db_session,
+    )
+    listed_users = list_users(db_session, limit=10, offset=0)
+    listed_resumes = list_resumes(
+        db_session,
+        user_id=user.id,
+        classification_key="Product Manager",
+        is_active=True,
+        limit=10,
+        offset=0,
+    )
+    updated_resume = update_resume(
+        resume.id,
+        ResumeUpdate(content="Updated resume body", is_active=False),
+        db_session,
+    )
+
+    assert listed_users.total == 1
+    assert listed_resumes.total == 1
+    assert listed_resumes.items[0].classification_key == "Product Manager"
+    assert updated_resume.content == "Updated resume body"
+    assert updated_resume.is_active is False
+
+    with pytest.raises(HTTPException):
+        create_resume(
+            ResumeCreate(
+                user_id=9999,
+                name="Missing",
+                classification_key="default",
+                content="nope",
+                is_active=True,
+            ),
+            db_session,
+        )
+    with pytest.raises(HTTPException):
+        create_user(UserCreate(name="Alice 2", email="alice@example.com"), db_session)
+
+
+def test_application_crud_generate_and_status_flow(db_session):
+    user = seed_user(db_session, name="Bob", email="bob@example.com")
+    job = seed_job(db_session, job_id="job-apps")
+    job.classification_key = "Product Manager"
+    db_session.commit()
+    resume = seed_resume(db_session, user=user, prompt_key="Product Manager", content="Resume body")
+
+    created = create_application(
+        ApplicationCreate(user_id=user.id, job_posting_id=job.id, resume_id=resume.id, status="new"),
+        db_session,
+    )
+    fetched = get_application(created.id, db_session)
+    listed = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=resume.id,
+        job_posting_id=job.id,
+        status="new",
+        limit=10,
+        offset=0,
+    )
+    generated = app_module.generate_applications(
+        ApplicationGenerateRequest(job_posting_id=job.id, user_id=user.id),
+        db_session,
+    )
+    status_updated = update_application_status(
+        created.id,
+        ApplicationStatusWrite(status="applied"),
+        db_session,
+    )
+    notified = mark_application_notified(created.id, JobNotifyWrite(status="notified"), db_session)
+    errored = mark_application_error(created.id, JobErrorWrite(status="error"), db_session)
+
+    assert fetched.id == created.id
+    assert listed.total == 1
+    assert generated.created == 0
+    assert generated.skipped == 1
+    assert status_updated.status == "applied"
+    assert status_updated.applied_at is not None
+    assert notified.status == "notified"
+    assert notified.notified_at is not None
+    assert errored.status == "new"
+    assert errored.last_error_at is not None
+
+
+def test_application_endpoint_conflicts_and_not_found(db_session):
+    user = seed_user(db_session, name="Dana", email="dana@example.com")
+    other_user = seed_user(db_session, name="Evan", email="evan@example.com")
+    job = seed_job(db_session, job_id="job-conflict")
+    resume = seed_resume(db_session, user=user, prompt_key="Product Manager")
+    existing = seed_application(db_session, user=user, job=job, resume=resume, status="scored")
+
+    regenerated = create_application(
+        ApplicationCreate(user_id=user.id, job_posting_id=job.id, resume_id=resume.id, status="new"),
+        db_session,
+    )
+    assert regenerated.id == existing.id
+    assert regenerated.status == "new"
+    assert regenerated.score is None
+
+    with pytest.raises(HTTPException):
+        get_application(9999, db_session)
+    with pytest.raises(HTTPException):
+        create_application(
+            ApplicationCreate(user_id=other_user.id, job_posting_id=job.id, resume_id=resume.id, status="new"),
+            db_session,
+        )
+    with pytest.raises(HTTPException):
+        app_module.generate_applications(ApplicationGenerateRequest(job_posting_id=9999), db_session)
+    with pytest.raises(HTTPException):
+        app_module.generate_applications(ApplicationGenerateRequest(job_posting_id=job.id), db_session)
+    with pytest.raises(HTTPException):
+        update_resume(9999, ResumeUpdate(name="missing"), db_session)
+    with pytest.raises(HTTPException):
+        mark_application_notified(9999, JobNotifyWrite(status="notified"), db_session)
+    with pytest.raises(HTTPException):
+        mark_application_error(9999, JobErrorWrite(status="error"), db_session)
+    with pytest.raises(HTTPException):
+        update_application_status(9999, ApplicationStatusWrite(status="applied"), db_session)
+    with pytest.raises(HTTPException):
+        list_interview_rounds(9999, db_session)
+    with pytest.raises(HTTPException):
+        create_interview_round(9999, InterviewRoundCreate(round_number=1), db_session)
+
+
+def test_list_applications_filters_by_score(db_session):
+    user = seed_user(db_session, name="Fran", email="fran@example.com")
+    job = seed_job(db_session, job_id="job-filter")
+    resume = seed_resume(db_session, user=user, prompt_key="default")
+    low = seed_application(db_session, user=user, job=job, resume=resume, status="scored")
+    low.score = 10
+    low.updated_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+
+    resume_two = seed_resume(db_session, user=user, name="Resume 2", prompt_key="default")
+    high = seed_application(db_session, user=user, job=job, resume=resume_two, status="scored")
+    high.score = 30
+    high.updated_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=job.id,
+        status="scored",
+        score=20,
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].id == high.id
+
+
+def test_run_applications_score_batch(db_session, monkeypatch):
+    user = seed_user(db_session, name="Gina", email="gina@example.com")
+    job = seed_job(db_session, job_id="job-batch")
+    resume_one = seed_resume(db_session, user=user, name="Resume 1", prompt_key="default", content="Resume body 1")
+    resume_two = seed_resume(db_session, user=user, name="Resume 2", prompt_key="default", content="Resume body 2")
+    application_one = seed_application(db_session, user=user, job=job, resume=resume_one, status="new")
+    application_two = seed_application(db_session, user=user, job=job, resume=resume_two, status="new")
+
+    outcomes = iter(
+        [
+            SimpleNamespace(application=application_one, outcome="scored"),
+            JobScoringSkipped("skip"),
+        ]
+    )
+
+    def _fake_score_application(*_args, **_kwargs):
+        result = next(outcomes)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(app_module, "score_application", _fake_score_application)
+
+    result = run_applications_score(
+        ApplicationsScoreRunRequest(
+            status="new",
+            limit=10,
+            user_id=user.id,
+            prompt_key="default",
+            force=False,
+        ),
+        db_session,
+    )
+
+    assert result.selected == 2
+    assert result.processed == 1
+    assert result.scored == 1
+    assert result.skipped == 1
+    assert result.errored == 0
+    assert result.applications == [application_one.id]
+
+
+def test_run_applications_score_empty_selection(db_session):
+    result = run_applications_score(
+        ApplicationsScoreRunRequest(status="new", limit=10, user_id=9999, force=False),
+        db_session,
+    )
+
+    assert result.selected == 0
+    assert result.processed == 0
+    assert result.applications == []
+
+
+def test_application_scoring_and_interview_rounds(db_session, monkeypatch):
+    user = seed_user(db_session, name="Cara", email="cara@example.com")
+    job = seed_job(db_session, job_id="job-score")
+    resume = seed_resume(db_session, user=user, prompt_key="default", content="Resume body")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="new")
+
+    manual = store_application_score(application.id, _score_payload(), db_session)
+    assert manual.status == "scored"
+
+    application.status = "new"
+    db_session.commit()
+
+    def _fake_score_application(session, target_application, **_kwargs):
+        target_application.status = "scored"
+        target_application.score = 91
+        target_application.scored_at = datetime.now(timezone.utc)
+        return SimpleNamespace(application=target_application)
+
+    monkeypatch.setattr(app_module, "score_application", _fake_score_application)
+    scored = run_application_score(application.id, JobScoreRunRequest(force=False), db_session)
+    assert scored.score == 91
+
+    round_one = create_interview_round(
+        application.id,
+        InterviewRoundCreate(round_number=1, stage_name="Hiring Manager"),
+        db_session,
+    )
+    rounds = list_interview_rounds(application.id, db_session)
+    assert round_one.round_number == 1
+    assert rounds.total == 1
+
+    with pytest.raises(HTTPException):
+        create_interview_round(
+            application.id,
+            InterviewRoundCreate(round_number=1, stage_name="Duplicate"),
+            db_session,
+        )
 
 
 def test_prompt_library_crud(db_session):

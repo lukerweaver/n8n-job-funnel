@@ -94,6 +94,7 @@ class Resume(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     prompt_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    classification_key: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
