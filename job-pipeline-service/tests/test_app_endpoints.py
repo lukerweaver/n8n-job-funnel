@@ -221,8 +221,12 @@ def test_run_jobs_classification_batch(db_session, monkeypatch):
 def test_store_job_score(db_session):
     job = seed_job(db_session)
     scored = store_job_score(job.id, _score_payload(), db_session)
+    applications = db_session.scalars(select(JobApplication).where(JobApplication.job_posting_id == job.id)).all()
 
     assert scored.status == "scored"
+    assert len(applications) == 1
+    assert applications[0].score == _score_payload().score
+    assert applications[0].status == "scored"
 
     with pytest.raises(HTTPException, match="was not found"):
         store_job_score(9999, _score_payload(), db_session)
@@ -292,6 +296,15 @@ def test_store_job_scores_batch(db_session):
 
 def test_notify_and_error_endpoints(db_session):
     job = seed_job(db_session)
+    user = seed_user(db_session, name="Legacy User", email="legacy-user@example.com")
+    resume = seed_resume(db_session, user=user)
+    application = seed_application(
+        db_session,
+        user=user,
+        job=job,
+        resume=resume,
+        status="scored",
+    )
 
     notify = mark_job_notified(job.id, JobNotifyWrite(status="notified"), db_session)
     error = mark_job_error(job.id, JobErrorWrite(status="error"), db_session)
@@ -300,6 +313,10 @@ def test_notify_and_error_endpoints(db_session):
     assert notify.status == "notified"
     assert error.status == "error"
     assert notify_batch.updated == 1
+    db_session.refresh(application)
+    assert application.status == "notified"
+    assert application.notified_at is not None
+    assert application.last_error_at is not None
 
     with pytest.raises(HTTPException):
         mark_job_notified(9999, JobNotifyWrite(status="notified"), db_session)
@@ -307,6 +324,21 @@ def test_notify_and_error_endpoints(db_session):
         mark_job_error(9999, JobErrorWrite(status="error"), db_session)
     with pytest.raises(HTTPException):
         mark_jobs_notified([JobNotifyBatchItem(id=9999, status="notified")], db_session)
+
+
+def test_legacy_job_sync_does_not_overwrite_protected_application_status(db_session):
+    user = seed_user(db_session, name="Protected", email="protected@example.com")
+    job = seed_job(db_session, job_id="job-protected", status="new")
+    resume = seed_resume(db_session, user=user, prompt_key="default")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="applied")
+
+    store_job_score(job.id, _score_payload(), db_session)
+    mark_job_notified(job.id, JobNotifyWrite(status="notified"), db_session)
+
+    db_session.refresh(application)
+    assert application.status == "applied"
+    assert application.score is None
+    assert application.notified_at is None
 
 
 def test_user_and_resume_crud(db_session):

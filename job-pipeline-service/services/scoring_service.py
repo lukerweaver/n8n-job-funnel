@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from models import JobApplication, JobPosting, PromptLibrary
 from services.job_selection import select_jobs_for_scoring
+from services.legacy_sync_service import sync_job_to_applications
 from services.llm_client import LlmClient, LlmRequestError, build_llm_client
 from services.prompt_rendering import render_application_prompt, render_user_prompt
 from services.prompt_service import resolve_active_prompt
@@ -167,9 +168,11 @@ def score_job(
         parsed = parse_scoring_response(raw_response)
     except (LlmRequestError, ScoringParseError) as exc:
         _apply_scoring_error(job, str(exc), raw_response, llm_client)
+        sync_job_to_applications(session, job)
         return JobScoringResult(job=job, outcome="error", error_message=str(exc))
 
     _apply_parsed_score(job, resolved_prompt, parsed, raw_response, llm_client)
+    sync_job_to_applications(session, job)
     return JobScoringResult(job=job, outcome="scored")
 
 

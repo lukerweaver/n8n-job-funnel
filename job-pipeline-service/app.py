@@ -67,6 +67,11 @@ from schemas import (
     ScoreRunRead,
 )
 from services.classification_service import classify_job, classify_jobs
+from services.legacy_sync_service import (
+    LEGACY_MIGRATION_USER_EMAIL,
+    LEGACY_MIGRATION_USER_NAME,
+    sync_job_to_applications,
+)
 from services.llm_client import LlmRequestError
 from services.prompt_service import PromptResolutionError
 from services.score_run_service import ScoreRunWorker, enqueue_score_run, serialize_score_run
@@ -94,8 +99,6 @@ def utcnow() -> datetime:
 
 
 score_run_worker = ScoreRunWorker()
-LEGACY_MIGRATION_USER_EMAIL = "legacy-migration@job-pipeline-service.local"
-LEGACY_MIGRATION_USER_NAME = "Legacy Migration User"
 ALLOWED_APPLICATION_STATUSES = {
     "new",
     "scored",
@@ -761,6 +764,7 @@ def store_job_score(job_id: int, score_payload: JobScoreWrite, session: Session 
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
 
     apply_score(job, score_payload)
+    sync_job_to_applications(session, job)
     _commit_or_fail(session)
 
     return JobScoreResponse(
@@ -874,6 +878,7 @@ def store_job_scores(score_payloads: list[JobScoreBatchItem], session: Session =
             )
 
         apply_score(job, score_payload)
+        sync_job_to_applications(session, job)
         updated_job_ids.append(job.id)
 
     _commit_or_fail(session)
@@ -888,6 +893,7 @@ def mark_job_notified(job_id: int, notify_payload: JobNotifyWrite, session: Sess
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
 
     apply_notification(job, notify_payload)
+    sync_job_to_applications(session, job)
     _commit_or_fail(session)
 
     return JobNotifyResponse(
@@ -905,6 +911,7 @@ def mark_job_error(job_id: int, error_payload: JobErrorWrite, session: Session =
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
 
     apply_error(job, error_payload)
+    sync_job_to_applications(session, job)
     _commit_or_fail(session)
 
     return JobErrorResponse(
@@ -929,6 +936,7 @@ def mark_jobs_notified(notify_payloads: list[JobNotifyBatchItem], session: Sessi
             )
 
         apply_notification(job, notify_payload)
+        sync_job_to_applications(session, job)
         updated_job_ids.append(job.id)
 
     _commit_or_fail(session)
