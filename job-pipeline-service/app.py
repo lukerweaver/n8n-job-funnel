@@ -14,8 +14,9 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import Base, engine, get_session
-from models import JobPosting, PromptLibrary, ScoreRun, ScoreRunItem
+from models import JobApplication, JobPosting, PromptLibrary, Resume, ScoreRun, ScoreRunItem, User
 from schemas import (
     JobIngestItem,
     JobIngestResponse,
@@ -69,6 +70,20 @@ def utcnow() -> datetime:
 
 
 score_run_worker = ScoreRunWorker()
+LEGACY_MIGRATION_USER_EMAIL = "legacy-migration@job-pipeline-service.local"
+LEGACY_MIGRATION_USER_NAME = "Legacy Migration User"
+ALLOWED_APPLICATION_STATUSES = {
+    "new",
+    "scored",
+    "tailored",
+    "notified",
+    "applied",
+    "screening",
+    "interview",
+    "offer",
+    "rejected",
+    "withdrawn",
+}
 
 
 def apply_job_updates(job: JobPosting, payload: JobIngestItem) -> None:
@@ -219,11 +234,194 @@ def ensure_prompt_library_schema() -> None:
             )
 
 
+def _backfill_prompt_context_from_legacy_column(session: Session) -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("prompt_library")}
+    if "base_resume_template" not in columns:
+        return
+
+    session.execute(
+        text(
+            """
+            UPDATE prompt_library
+            SET context = base_resume_template
+            WHERE (context IS NULL OR TRIM(context) = '')
+              AND base_resume_template IS NOT NULL
+              AND TRIM(base_resume_template) <> ''
+            """
+        )
+    )
+
+
+def _backfill_job_posting_classification(session: Session) -> None:
+    jobs = session.scalars(
+        select(JobPosting).where(
+            JobPosting.classification_key.is_(None),
+            JobPosting.role_type.is_not(None),
+        )
+    ).all()
+    for job in jobs:
+        role_type = (job.role_type or "").strip()
+        if not role_type:
+            continue
+        job.classification_key = role_type
+        if job.classified_at is None:
+            job.classified_at = job.scored_at or job.updated_at or job.created_at
+
+
+def _get_or_create_legacy_user(session: Session) -> User:
+    user = session.scalar(select(User).where(User.email == LEGACY_MIGRATION_USER_EMAIL))
+    if user is not None:
+        return user
+
+    user = User(name=LEGACY_MIGRATION_USER_NAME, email=LEGACY_MIGRATION_USER_EMAIL)
+    session.add(user)
+    session.flush()
+    return user
+
+
+def _effective_legacy_prompt_key(job: JobPosting) -> str:
+    for candidate in (job.prompt_key, job.classification_key, job.role_type, settings.default_prompt_key):
+        if candidate and str(candidate).strip():
+            return str(candidate).strip()
+    return "legacy-unspecified"
+
+
+def _legacy_resume_content(session: Session, prompt_key: str) -> str:
+    prompt = session.scalar(
+        select(PromptLibrary)
+        .where(PromptLibrary.prompt_key == prompt_key, PromptLibrary.prompt_type == "scoring")
+        .order_by(PromptLibrary.prompt_version.desc(), PromptLibrary.id.desc())
+    )
+    if prompt is not None and prompt.context and prompt.context.strip():
+        return prompt.context.strip()
+    return f"Legacy resume content unavailable for prompt_key '{prompt_key}'."
+
+
+def _get_or_create_legacy_resume(session: Session, user: User, prompt_key: str) -> Resume:
+    resume_name = f"Legacy Resume ({prompt_key})"
+    resume = session.scalar(
+        select(Resume).where(
+            Resume.user_id == user.id,
+            Resume.prompt_key == prompt_key,
+            Resume.name == resume_name,
+        )
+    )
+    if resume is not None:
+        return resume
+
+    resume = Resume(
+        user_id=user.id,
+        name=resume_name,
+        prompt_key=prompt_key,
+        content=_legacy_resume_content(session, prompt_key),
+        is_active=True,
+    )
+    session.add(resume)
+    session.flush()
+    return resume
+
+
+def _job_requires_application_backfill(job: JobPosting) -> bool:
+    if job.status and job.status != "new":
+        return True
+    return any(
+        value is not None
+        for value in (
+            job.score,
+            job.recommendation,
+            job.justification,
+            job.screening_likelihood,
+            job.dimension_scores,
+            job.gating_flags,
+            job.strengths,
+            job.gaps,
+            job.missing_from_jd,
+            job.prompt_key,
+            job.prompt_version,
+            job.score_provider,
+            job.score_model,
+            job.score_error,
+            job.score_raw_response,
+            job.scored_at,
+            job.notified_at,
+            job.error_at,
+        )
+    ) or (job.score_attempts or 0) > 0
+
+
+def _map_legacy_job_status_to_application_status(job: JobPosting) -> str:
+    status = (job.status or "new").strip().lower()
+    if status in ALLOWED_APPLICATION_STATUSES:
+        return status
+    if status == "error":
+        return "scored" if job.scored_at else "new"
+    return "new"
+
+
+def _backfill_job_applications(session: Session) -> None:
+    legacy_user = _get_or_create_legacy_user(session)
+
+    jobs = session.scalars(select(JobPosting).order_by(JobPosting.id.asc())).all()
+    for job in jobs:
+        if not _job_requires_application_backfill(job):
+            continue
+
+        prompt_key = _effective_legacy_prompt_key(job)
+        resume = _get_or_create_legacy_resume(session, legacy_user, prompt_key)
+        application = session.scalar(
+            select(JobApplication).where(
+                JobApplication.job_posting_id == job.id,
+                JobApplication.resume_id == resume.id,
+            )
+        )
+        if application is not None:
+            continue
+
+        application = JobApplication(
+            user_id=legacy_user.id,
+            job_posting_id=job.id,
+            resume_id=resume.id,
+            status=_map_legacy_job_status_to_application_status(job),
+            score=job.score,
+            recommendation=job.recommendation,
+            justification=job.justification,
+            screening_likelihood=job.screening_likelihood,
+            dimension_scores=job.dimension_scores,
+            gating_flags=job.gating_flags,
+            strengths=job.strengths,
+            gaps=job.gaps,
+            missing_from_jd=job.missing_from_jd,
+            scoring_prompt_key=job.prompt_key,
+            scoring_prompt_version=job.prompt_version,
+            score_provider=job.score_provider,
+            score_model=job.score_model,
+            score_raw_response=job.score_raw_response,
+            score_error=job.score_error,
+            score_attempts=job.score_attempts or 0,
+            scored_at=job.scored_at,
+            notified_at=job.notified_at,
+            last_error_at=job.error_at,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+        session.add(application)
+
+
+def run_phase_two_backfill(session: Session) -> None:
+    _backfill_prompt_context_from_legacy_column(session)
+    _backfill_job_posting_classification(session)
+    _backfill_job_applications(session)
+    session.commit()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_job_postings_schema()
     ensure_prompt_library_schema()
+    with Session(engine) as session:
+        run_phase_two_backfill(session)
     score_run_worker.start()
     yield
     score_run_worker.stop()

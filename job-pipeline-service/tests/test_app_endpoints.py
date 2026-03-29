@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy import select, text
 
 import app as app_module
 from app import (
@@ -25,12 +26,14 @@ from app import (
     mark_jobs_notified,
     merge_responses,
     operational_error_handler,
+    run_phase_two_backfill,
     run_job_score,
     run_jobs_score,
     store_job_score,
     store_job_scores,
     update_prompt_library,
 )
+from models import JobApplication, Resume, User
 from schemas import (
     JobErrorWrite,
     JobIngestItem,
@@ -357,6 +360,87 @@ def test_update_prompt_library_conflict(db_session):
     assert exc.value.status_code == 409
 
 
+def test_run_phase_two_backfill_migrates_legacy_prompt_and_job_data(db_session):
+    created_prompt = create_prompt_library(
+        PromptLibraryCreate(
+            prompt_key="default",
+            prompt_type="scoring",
+            prompt_version=1,
+            system_prompt="System",
+            user_prompt_template="User {{resume}} {{description}}",
+            context=None,
+            is_active=True,
+        ),
+        db_session,
+    )
+    prompt = db_session.get(app_module.PromptLibrary, created_prompt.id)
+    assert prompt is not None
+    db_session.execute(text("ALTER TABLE prompt_library ADD COLUMN base_resume_template TEXT"))
+    db_session.execute(
+        text("UPDATE prompt_library SET base_resume_template = :resume WHERE id = :prompt_id"),
+        {"resume": "Legacy Resume", "prompt_id": prompt.id},
+    )
+
+    migrated_job = seed_job(db_session, job_id="job-migrated", status="notified")
+    migrated_job.role_type = "Product Manager"
+    migrated_job.prompt_key = "default"
+    migrated_job.prompt_version = 1
+    migrated_job.score = 42
+    migrated_job.recommendation = "Apply"
+    migrated_job.justification = "Strong fit"
+    migrated_job.scored_at = datetime.now(timezone.utc)
+    migrated_job.notified_at = datetime.now(timezone.utc)
+
+    untouched_job = seed_job(db_session, job_id="job-untouched", status="new")
+    db_session.commit()
+
+    run_phase_two_backfill(db_session)
+
+    db_session.refresh(migrated_job)
+    db_session.refresh(prompt)
+
+    legacy_user = db_session.scalar(select(User).where(User.email == app_module.LEGACY_MIGRATION_USER_EMAIL))
+    resumes = db_session.scalars(select(Resume).order_by(Resume.id.asc())).all()
+    applications = db_session.scalars(select(JobApplication).order_by(JobApplication.id.asc())).all()
+
+    assert prompt.context == "Legacy Resume"
+    assert migrated_job.classification_key == "Product Manager"
+    assert migrated_job.classified_at == migrated_job.scored_at
+    assert legacy_user is not None
+    assert len(resumes) == 1
+    assert resumes[0].prompt_key == "default"
+    assert resumes[0].content == "Legacy Resume"
+    assert len(applications) == 1
+    assert applications[0].job_posting_id == migrated_job.id
+    assert applications[0].resume_id == resumes[0].id
+    assert applications[0].status == "notified"
+    assert applications[0].score == 42
+    assert applications[0].scoring_prompt_key == "default"
+    assert applications[0].notified_at == migrated_job.notified_at
+    assert all(application.job_posting_id != untouched_job.id for application in applications)
+
+    run_phase_two_backfill(db_session)
+
+    assert db_session.query(User).count() == 1
+    assert db_session.query(Resume).count() == 1
+    assert db_session.query(JobApplication).count() == 1
+
+
+def test_run_phase_two_backfill_maps_error_jobs_to_new_applications(db_session):
+    job = seed_job(db_session, job_id="job-error", status="error")
+    job.score_error = "LLM failed"
+    job.error_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    run_phase_two_backfill(db_session)
+
+    application = db_session.scalar(select(JobApplication).where(JobApplication.job_posting_id == job.id))
+    assert application is not None
+    assert application.status == "new"
+    assert application.score_error == "LLM failed"
+    assert application.last_error_at == job.error_at
+
+
 def test_exception_handlers(db_session, monkeypatch):
     seed_job(db_session)
 
@@ -511,6 +595,7 @@ def test_lifespan_starts_and_stops_worker(monkeypatch):
     monkeypatch.setattr(app_module.Base.metadata, "create_all", lambda bind: calls.append(("create_all", bind)))
     monkeypatch.setattr(app_module, "ensure_job_postings_schema", lambda: calls.append(("ensure_schema", None)))
     monkeypatch.setattr(app_module, "ensure_prompt_library_schema", lambda: calls.append(("ensure_prompt_schema", None)))
+    monkeypatch.setattr(app_module, "run_phase_two_backfill", lambda session: calls.append(("phase_two", session)))
     monkeypatch.setattr(app_module.score_run_worker, "start", lambda: calls.append(("start", None)))
     monkeypatch.setattr(app_module.score_run_worker, "stop", lambda: calls.append(("stop", None)))
 
@@ -524,6 +609,7 @@ def test_lifespan_starts_and_stops_worker(monkeypatch):
         "create_all",
         "ensure_schema",
         "ensure_prompt_schema",
+        "phase_two",
         "start",
         "inside",
         "stop",
