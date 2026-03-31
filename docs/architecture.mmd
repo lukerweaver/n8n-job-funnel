@@ -9,17 +9,22 @@ flowchart TD
   E --> F[(job_postings)]
   E --> G[(prompt_library)]
 
-  F --> H[n8n scoring workflow]
-  G --> H
+  F --> H[n8n classification workflow]
+  H --> I[POST /jobs/classify/run]
+  I --> E
 
-  H --> I[Ollama or external LLM]
-  I --> J[POST /jobs/{id}/score]
-  J --> E
+  E --> J[job_postings.classification_key]
+  J --> K[application generation]
+  K --> L[(job_applications)]
 
-  E --> K{Score passes threshold?}
-  K -- Yes --> L[Tracker sync]
-  K -- Yes --> M[POST /jobs/{id}/notify]
-  M --> E
-  K -- No --> N[Remain scored only]
+  L --> M[n8n legacy scoring workflow]
+  M --> N[POST /jobs/score/run]
+  N --> E
 
-  O[Legacy GET /jobs/hiringcafe route\nPlaywright capture] -. optional / fallback .-> E
+  E --> O{Application score passes threshold?}
+  O -- Yes --> P[Tracker sync]
+  O -- Yes --> Q[POST /applications/{id}/notify]
+  Q --> E
+  O -- No --> R[Remain scored only]
+
+  S[Legacy GET /jobs/hiringcafe route\nPlaywright capture] -. optional / fallback .-> E

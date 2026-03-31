@@ -316,6 +316,15 @@ class JobApplicationRead(BaseModel):
     user_id: int
     job_posting_id: int
     resume_id: int
+    job_id: str | None = None
+    source: str | None = None
+    company_name: str | None = None
+    title: str | None = None
+    yearly_min_compensation: float | None = None
+    yearly_max_compensation: float | None = None
+    apply_url: str | None = None
+    role_type: str | None = None
+    resume_name: str | None = None
     status: str
     score: float | None = None
     recommendation: str | None = None

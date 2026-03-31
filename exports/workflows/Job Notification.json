@@ -1,5 +1,5 @@
 {
-  "name": "Job Notification",
+  "name": "Application Notification",
   "nodes": [
     {
       "parameters": {
@@ -44,10 +44,10 @@
             "Date Submitted": "={{ $now.format('yyyy-MM-dd') }}",
             "Company": "={{ $json.company_name }}",
             "Title": "={{ $json.title }}",
-            "Status": "Pending",
+            "Status": "={{ $json.status }}",
             "n8n score": "={{ $json.score }}",
             "Job Link": "={{ $json.apply_url }}",
-            "Stage Reached": "Pending",
+            "Stage Reached": "={{ $json.status }}",
             "Referal?": "n8n",
             "Salary": "={{`$${Math.round($json.yearly_min_compensation/1000)}k-$${Math.round($json.yearly_max_compensation/1000)}k`}}",
             "n8n screening likelihood": "={{ $json.screening_likelihood }}",
@@ -282,8 +282,8 @@
     {
       "parameters": {
         "sendTo": "replace@example.com",
-        "subject": "Job Matches found",
-        "message": "=<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" style=\"border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px;\">\n  <thead>\n    <tr style=\"font-weight:bold; background:#f2f2f2;\">\n      <th align=\"left\">Company</th>\n      <th align=\"left\">Title</th>\n      <th align=\"left\">Salary</th>\n      <th align=\"left\">n8n Score</th>\n      <th align=\"left\">n8n Screen</th>\n      <th align=\"left\">Role Type</th>\n      <th align=\"left\">Job Link</th>\n    </tr>\n  </thead>\n\n  <tbody>\n    {{\n      $json.data\n        .map(job => `\n          <tr>\n            <td>${job[\"Company\"] ?? \"\"}</td>\n            <td>${job[\"Title\"] ?? \"\"}</td>\n            <td>${job[\"Salary\"] ?? \"\"}</td>\n            <td>${job[\"n8n score\"] ?? \"\"}</td>\n            <td>${job[\"n8n screening likelihood\"] ?? \"\"}</td>\n            <td>${job[\"Role Type\"] ?? \"\"}</td>\n            <td><a href=\"${job[\"Job Link\"] ?? \"#\"}\">View</a></td>\n          </tr>\n        `)\n        .join(\"\")\n    }}\n  </tbody>\n</table>",
+        "subject": "Application matches found",
+        "message": "=<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" style=\"border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px;\">\n  <thead>\n    <tr style=\"font-weight:bold; background:#f2f2f2;\">\n      <th align=\"left\">Company</th>\n      <th align=\"left\">Title</th>\n      <th align=\"left\">Salary</th>\n      <th align=\"left\">n8n Score</th>\n      <th align=\"left\">n8n Screen</th>\n      <th align=\"left\">Role Type</th>\n      <th align=\"left\">Job Link</th>\n    </tr>\n  </thead>\n\n  <tbody>\n    {{\n      $json.data\n        .map(application => `\n          <tr>\n            <td>${application[\"Company\"] ?? \"\"}</td>\n            <td>${application[\"Title\"] ?? \"\"}</td>\n            <td>${application[\"Salary\"] ?? \"\"}</td>\n            <td>${application[\"n8n score\"] ?? \"\"}</td>\n            <td>${application[\"n8n screening likelihood\"] ?? \"\"}</td>\n            <td>${application[\"Role Type\"] ?? \"\"}</td>\n            <td><a href=\"${application[\"Job Link\"] ?? \"#\"}\">View</a></td>\n          </tr>\n        `)\n        .join(\"\")\n    }}\n  </tbody>\n</table>",
         "options": {}
       },
       "type": "n8n-nodes-base.gmail",
@@ -332,17 +332,13 @@
     },
     {
       "parameters": {
-        "url": "http://REPLACE_WITH_JOB_PIPELINE_HOST:8000/jobs",
+        "url": "http://REPLACE_WITH_JOB_PIPELINE_HOST:8000/applications",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
             {
               "name": "status",
               "value": "scored"
-            },
-            {
-              "name": "scored_since",
-              "value": "={{ new Date($now - 3 * 24 * 60 * 60 * 1000) }}"
             },
             {
               "name": "score",
@@ -359,29 +355,15 @@
         -624
       ],
       "id": "cd92ceec-78f9-463c-bbc6-f9a28d0c88c2",
-      "name": "Get Scored Jobs"
+      "name": "Get Scored Applications"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://REPLACE_WITH_JOB_PIPELINE_HOST:8000/jobs/{{ $json.id }}/notify",
+        "url": "=http://REPLACE_WITH_JOB_PIPELINE_HOST:8000/applications/{{ $json.id }}/notify",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "notified_at",
-              "value": "={{ $now }}"
-            },
-            {
-              "name": "id",
-              "value": "={{ $json.id }}"
-            },
-            {
-              "name": "status",
-              "value": "notified"
-            }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"notified_at\": $now,\n  \"status\": \"notified\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -391,7 +373,7 @@
         -816
       ],
       "id": "e51472fc-7d56-4b35-bca1-1a4aa233bdbf",
-      "name": "Mark as Notified"
+      "name": "Mark Application Notified"
     }
   ],
   "pinData": {},
@@ -400,7 +382,7 @@
       "main": [
         [
           {
-            "node": "Get Scored Jobs",
+            "node": "Get Scored Applications",
             "type": "main",
             "index": 0
           }
@@ -433,7 +415,7 @@
       "main": [
         [
           {
-            "node": "Mark as Notified",
+            "node": "Mark Application Notified",
             "type": "main",
             "index": 0
           },
@@ -445,7 +427,7 @@
         ]
       ]
     },
-    "Get Scored Jobs": {
+    "Get Scored Applications": {
       "main": [
         [
           {
@@ -456,7 +438,7 @@
         ]
       ]
     },
-    "Mark as Notified": {
+    "Mark Application Notified": {
       "main": [
         []
       ]
@@ -468,7 +450,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "9f658143-74ef-45fa-aba0-9c42a516f4b3",
+  "versionId": "phase5-application-notification",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": ""

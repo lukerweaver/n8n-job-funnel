@@ -12,7 +12,7 @@ from playwright.async_api import async_playwright
 from sqlalchemy import func, select
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from config import settings
 from database import Base, engine, get_session
@@ -172,7 +172,50 @@ def _get_application_by_id(session: Session, application_id: int) -> JobApplicat
 
 
 def _serialize_application(application: JobApplication) -> JobApplicationRead:
-    return JobApplicationRead.model_validate(application)
+    job = application.job_posting
+    resume = application.resume
+    return JobApplicationRead(
+        id=application.id,
+        user_id=application.user_id,
+        job_posting_id=application.job_posting_id,
+        resume_id=application.resume_id,
+        job_id=job.job_id if job is not None else None,
+        source=job.source if job is not None else None,
+        company_name=job.company_name if job is not None else None,
+        title=job.title if job is not None else None,
+        yearly_min_compensation=job.yearly_min_compensation if job is not None else None,
+        yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
+        apply_url=job.apply_url if job is not None else None,
+        role_type=job.role_type if job is not None else None,
+        resume_name=resume.name if resume is not None else None,
+        status=application.status,
+        score=application.score,
+        recommendation=application.recommendation,
+        justification=application.justification,
+        screening_likelihood=application.screening_likelihood,
+        dimension_scores=application.dimension_scores,
+        gating_flags=application.gating_flags,
+        strengths=application.strengths,
+        gaps=application.gaps,
+        missing_from_jd=application.missing_from_jd,
+        scoring_prompt_key=application.scoring_prompt_key,
+        scoring_prompt_version=application.scoring_prompt_version,
+        score_error=application.score_error,
+        scored_at=application.scored_at,
+        tailored_resume_content=application.tailored_resume_content,
+        tailoring_prompt_key=application.tailoring_prompt_key,
+        tailoring_prompt_version=application.tailoring_prompt_version,
+        tailoring_error=application.tailoring_error,
+        tailored_at=application.tailored_at,
+        notified_at=application.notified_at,
+        applied_at=application.applied_at,
+        offer_at=application.offer_at,
+        rejected_at=application.rejected_at,
+        withdrawn_at=application.withdrawn_at,
+        last_error_at=application.last_error_at,
+        created_at=application.created_at,
+        updated_at=application.updated_at,
+    )
 
 
 def _serialize_application_score(application: JobApplication) -> JobApplicationScoreResponse:
@@ -1039,7 +1082,11 @@ def list_applications(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    query = select(JobApplication).order_by(JobApplication.created_at.desc())
+    query = (
+        select(JobApplication)
+        .options(selectinload(JobApplication.job_posting), selectinload(JobApplication.resume))
+        .order_by(JobApplication.created_at.desc())
+    )
     count_query = select(JobApplication)
     if user_id is not None:
         query = query.where(JobApplication.user_id == user_id)
@@ -1063,7 +1110,11 @@ def list_applications(
 
 @app.get("/applications/{application_id}", response_model=JobApplicationRead)
 def get_application(application_id: int, session: Session = Depends(get_session)):
-    application = _get_application_by_id(session, application_id)
+    application = session.scalar(
+        select(JobApplication)
+        .options(selectinload(JobApplication.job_posting), selectinload(JobApplication.resume))
+        .where(JobApplication.id == application_id)
+    )
     if application is None:
         raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
     return _serialize_application(application)

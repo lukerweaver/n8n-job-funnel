@@ -342,12 +342,17 @@ Current behavior:
 
 The repo includes these exports:
 
+- `exports/workflows/Job Classification.json`
 - `exports/workflows/Job Scoring.json`
 - `exports/workflows/Job Notification.json`
 
 These exports target the current API-backed flow, but they are checked in with placeholder hosts, credential IDs, recipient addresses, and external document IDs. Reconfigure those values in n8n after import.
 
-If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id` and internal numeric `id`. `Job Scoring.json` now acts as a thin legacy trigger that calls `/jobs/score/run`, then polls `GET /score-runs/{run_id}` or receives a callback when scoring is complete. Prompt rendering, LLM calls, parsing, and score/error persistence happen inside the service. `Job Notification.json` should be reviewed against the newer application-native lifecycle if you want notifications to operate on `job_applications` instead of legacy job rows.
+If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id` and internal numeric `id`.
+
+- `Job Classification.json` is a thin trigger for `POST /jobs/classify/run`.
+- `Job Scoring.json` is a thin legacy trigger for `POST /jobs/score/run`.
+- `Job Notification.json` is application-native: it reads scored rows from `/applications` and writes back with `POST /applications/{id}/notify`.
 
 ## Prompt setup
 

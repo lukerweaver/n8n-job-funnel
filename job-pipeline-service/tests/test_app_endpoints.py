@@ -595,6 +595,46 @@ def test_application_scoring_and_interview_rounds(db_session, monkeypatch):
         )
 
 
+def test_application_reads_include_job_context(db_session):
+    user = seed_user(db_session, name="Dana", email="dana@example.com")
+    job = seed_job(db_session, job_id="job-app-read", status="scored")
+    job.company_name = "Acme Labs"
+    job.title = "Senior PM"
+    job.apply_url = "https://example.com/jobs/123"
+    job.yearly_min_compensation = 150000
+    job.yearly_max_compensation = 180000
+    job.role_type = "Product Manager"
+    db_session.commit()
+    resume = seed_resume(db_session, user=user, name="PM Resume", prompt_key="default")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="scored")
+    application.score = 24
+    application.screening_likelihood = 19
+    db_session.commit()
+
+    listed = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=None,
+        status="scored",
+        score=None,
+        limit=10,
+        offset=0,
+    )
+    fetched = get_application(application.id, db_session)
+
+    assert listed.total == 1
+    assert listed.items[0].job_id == "job-app-read"
+    assert listed.items[0].company_name == "Acme Labs"
+    assert listed.items[0].title == "Senior PM"
+    assert listed.items[0].apply_url == "https://example.com/jobs/123"
+    assert listed.items[0].role_type == "Product Manager"
+    assert listed.items[0].resume_name == "PM Resume"
+    assert fetched.job_id == "job-app-read"
+    assert fetched.company_name == "Acme Labs"
+    assert fetched.resume_name == "PM Resume"
+
+
 def test_prompt_library_crud(db_session):
     create = create_prompt_library(
         PromptLibraryCreate(
