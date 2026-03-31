@@ -6,7 +6,7 @@ FastAPI service for:
 2. classifying job postings into reusable role buckets
 3. generating and scoring user-owned job applications from matching resumes
 4. exposing routes that n8n can use to automate classification, scoring, tailoring-adjacent workflow, and notification state
-4. keeping a legacy Hiring Cafe Playwright capture route available
+5. keeping a legacy job-native scoring bridge and Hiring Cafe Playwright capture route available
 
 The primary ingestion path is `POST /jobs/ingest` from `job-scraper-chrome`.
 
@@ -31,7 +31,7 @@ Tables are created automatically on startup. The current data model centers on:
 - `job_applications` for resume-specific scoring and workflow lifecycle
 - `interview_rounds` for variable interview tracking
 
-In addition to those tables, the service persists async legacy job scoring state in `score_runs` and `score_run_items`. Those tables still back the older `/jobs/score/run` flow.
+`job_postings` still retains legacy job-level score fields during the migration. In addition to those tables, the service persists async legacy job scoring state in `score_runs` and `score_run_items`. Those tables still back the older `/jobs/score/run` flow, and the service syncs that legacy score data into generated `job_applications` where possible.
 
 ## LLM configuration
 
@@ -67,6 +67,12 @@ The intended automated workflow is:
 4. score `JobApplication`
 5. tailor and notify from application thresholds
 6. let the user drive `applied`, `screening`, `interview`, `offer`, `rejected`, or `withdrawn`
+
+Legacy compatibility flow:
+
+1. ingest `JobPosting`
+2. optionally score `JobPosting` through `/jobs/{id}/score/run` or `/jobs/score/run`
+3. let the legacy sync bridge mirror score state onto `job_applications` until downstream automation is fully moved to the application-native routes
 
 ## Prompt library
 
@@ -132,6 +138,7 @@ The scoring parser accepts both legacy and updated LLM JSON outputs.
 
 - Legacy supported fields: `total_score`, `recommendation`, `justification`, `strengths`, `gaps`, `missing_from_jd`.
 - New optional fields:
+  - `role_type`
   - `screening_likelihood`
   - `dimension_scores`
   - `gating_flags`
@@ -262,6 +269,20 @@ The compose example:
 - `GET /jobs/{id}`
 - `POST /jobs/{id}/classify/run`
 - `POST /jobs/classify/run`
+- `POST /jobs/{id}/score`
+- `POST /jobs/{id}/score/run`
+- `POST /jobs/score/run`
+- `GET /score-runs/{run_id}`
+- `GET /score-runs/{run_id}/items`
+- `POST /jobs/scores`
+- `POST /jobs/{id}/notify`
+- `POST /jobs/notify`
+- `POST /jobs/{id}/error`
+- `GET /users`
+- `POST /users`
+- `GET /resumes`
+- `POST /resumes`
+- `PUT /resumes/{id}`
 - `GET /applications`
 - `GET /applications/{id}`
 - `POST /applications`
@@ -274,35 +295,29 @@ The compose example:
 - `POST /applications/{id}/status`
 - `GET /applications/{id}/interview-rounds`
 - `POST /applications/{id}/interview-rounds`
-- `GET /users`
-- `POST /users`
-- `GET /resumes`
-- `POST /resumes`
-- `PUT /resumes/{id}`
 - `GET /prompt-library`
 - `GET /prompt-library/{prompt_id}`
 - `POST /prompt-library`
 - `PUT /prompt-library/{prompt_id}`
 - `DELETE /prompt-library/{prompt_id}`
-- `POST /jobs/{id}/score/run`
-- `POST /jobs/score/run`
-- `GET /score-runs/{run_id}`
-- `GET /score-runs/{run_id}/items`
-- `POST /jobs/{id}/score`
-- `POST /job/{id}/error`
-- `POST /jobs/scores`
-- `POST /jobs/{id}/notify`
-- `POST /jobs/notify`
 - `GET /jobs/hiringcafe?search_url=<HIRING_CAFE_URL>`
+
+### Primary route groups
+
+- Jobs: ingest and classify source postings, with legacy job-native score/writeback routes still available
+- Users and resumes: define owners plus resume inventories keyed by `classification_key`
+- Applications: create, generate, score, notify, error, and update lifecycle state on `job_applications`
+- Interview rounds: track multi-round interview progress per application
+- Prompt library: manage versioned prompts by `prompt_key` and `prompt_type`
 
 ### ID semantics
 
 The service uses two job identifiers:
 
 - `job_id` - external string identifier used for ingest dedupe
-- `id` - internal numeric database primary key used by `GET /jobs/{id}`, score routes, and notify routes
+- `id` - internal numeric database primary key used by most read/write routes
 
-That distinction matters for n8n integrations. Ingest works with external `job_id`, while classify, score, and notify routes work with internal numeric IDs.
+That distinction matters for integrations. Ingest works with external `job_id`, while classify, score, notify, resume, application, and prompt-library routes use internal numeric IDs.
 
 ### `POST /jobs/ingest`
 
@@ -534,9 +549,9 @@ Batch score writeback route. Each item must include numeric `id`.
 
 ### Legacy notify/error routes
 
-`POST /job/{id}/error`, `POST /jobs/{id}/notify`, and `POST /jobs/notify` are also retained for backward compatibility with older job-based automation.
+`POST /jobs/{id}/error`, `POST /jobs/{id}/notify`, and `POST /jobs/notify` are also retained for backward compatibility with older job-based automation.
 
-### `POST /job/{id}/error`
+### `POST /jobs/{id}/error`
 
 Marks a job as error and sets `error_at`.
 
