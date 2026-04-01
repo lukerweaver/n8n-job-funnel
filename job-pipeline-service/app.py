@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from config import settings
 from database import Base, engine, get_session
-from models import InterviewRound, JobApplication, JobPosting, PromptLibrary, Resume, ScoreRun, ScoreRunItem, User
+from models import InterviewRound, JobApplication, JobPosting, PromptLibrary, Resume, Run, RunItem, User
 from schemas import (
     ApplicationCreate,
     ApplicationGenerateRequest,
@@ -55,6 +55,9 @@ from schemas import (
     ResumeListResponse,
     ResumeRead,
     ResumeUpdate,
+    RunItemsResponse,
+    RunItemRead,
+    RunRead,
     UserCreate,
     UserListResponse,
     UserRead,
@@ -62,11 +65,10 @@ from schemas import (
     JobsBatchScoreResponse,
     JobsClassificationRunRequest,
     JobsClassificationRunResponse,
-    ScoreRunItemsResponse,
-    ScoreRunItemRead,
     ScoreRunRead,
+    ScoreRunItemsResponse,
 )
-from services.classification_service import classify_job, classify_jobs
+from services.classification_service import classify_job
 from services.legacy_sync_service import (
     LEGACY_MIGRATION_USER_EMAIL,
     LEGACY_MIGRATION_USER_NAME,
@@ -74,7 +76,14 @@ from services.legacy_sync_service import (
 )
 from services.llm_client import LlmRequestError
 from services.prompt_service import PromptResolutionError
-from services.score_run_service import ScoreRunWorker, enqueue_score_run, serialize_score_run
+from services.score_run_service import (
+    ScoreRunWorker,
+    enqueue_classification_run,
+    enqueue_score_run,
+    serialize_classification_run,
+    serialize_run,
+    serialize_score_run,
+)
 from services.scoring_service import JobScoringSkipped, score_application, score_job
 
 
@@ -311,8 +320,12 @@ def apply_application_status(application: JobApplication, payload: ApplicationSt
         application.withdrawn_at = payload.withdrawn_at or utcnow()
 
 
-def _get_score_run_by_id(session: Session, run_id: int) -> ScoreRun | None:
-    return session.get(ScoreRun, run_id)
+def _get_run_by_id(session: Session, run_id: int) -> Run | None:
+    return session.get(Run, run_id)
+
+
+def _get_score_run_by_id(session: Session, run_id: int) -> Run | None:
+    return _get_run_by_id(session, run_id)
 
 
 def _commit_or_fail(session: Session) -> None:
@@ -431,6 +444,34 @@ def ensure_resumes_schema() -> None:
                 """
             )
         )
+
+
+def ensure_run_schema() -> None:
+    inspector = inspect(engine)
+
+    run_columns = {column["name"] for column in inspector.get_columns("score_runs")}
+    run_type = "VARCHAR(50)"
+    run_statements = []
+    if "type" not in run_columns:
+        run_statements.append(f"ALTER TABLE score_runs ADD COLUMN type {run_type}")
+
+    item_columns = {column["name"] for column in inspector.get_columns("score_run_items")}
+    item_statements = []
+    if "type" not in item_columns:
+        item_statements.append(f"ALTER TABLE score_run_items ADD COLUMN type {run_type}")
+
+    if not run_statements and not item_statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in run_statements:
+            connection.execute(text(statement))
+        for statement in item_statements:
+            connection.execute(text(statement))
+        if "type" not in run_columns:
+            connection.execute(text("UPDATE score_runs SET type = 'scoring' WHERE type IS NULL"))
+        if "type" not in item_columns:
+            connection.execute(text("UPDATE score_run_items SET type = 'scoring' WHERE type IS NULL"))
 
 
 def _backfill_prompt_context_from_legacy_column(session: Session) -> None:
@@ -630,6 +671,7 @@ async def lifespan(_app: FastAPI):
     ensure_job_postings_schema()
     ensure_prompt_library_schema()
     ensure_resumes_schema()
+    ensure_run_schema()
     with Session(engine) as session:
         run_phase_two_backfill(session)
     score_run_worker.start()
@@ -781,23 +823,19 @@ def run_job_classification(job_id: int, payload: JobClassificationRunRequest, se
     return _serialize_job_classification(result.job)
 
 
-@app.post("/jobs/classify/run", response_model=JobsClassificationRunResponse)
+@app.post("/jobs/classify/run", response_model=JobsClassificationRunResponse, status_code=202)
 def run_jobs_classification(payload: JobsClassificationRunRequest, session: Session = Depends(get_session)):
-    result = classify_jobs(
+    run = enqueue_classification_run(
         session,
         limit=payload.limit,
         source=payload.source,
         prompt_key=payload.prompt_key,
         force=payload.force,
+        callback_url=payload.callback_url,
     )
-    return JobsClassificationRunResponse(
-        selected=result.selected,
-        processed=len(result.job_ids),
-        classified=result.classified,
-        errored=result.errored,
-        skipped=result.skipped,
-        jobs=result.job_ids,
-    )
+    _commit_or_fail(session)
+    session.refresh(run)
+    return JobsClassificationRunResponse(**serialize_classification_run(session, run))
 
 
 @app.post("/jobs/{job_id}/score", response_model=JobScoreResponse)
@@ -872,10 +910,49 @@ def run_jobs_score(payload: JobsScoreRunRequest, session: Session = Depends(get_
     session.refresh(run)
     return JobsScoreRunResponse(**serialize_score_run(session, run))
 
+@app.get("/runs/{run_id}", response_model=RunRead)
+def get_run(run_id: int, session: Session = Depends(get_session)):
+    run = _get_run_by_id(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found")
+
+    return RunRead(**serialize_run(session, run))
+
+
+@app.get("/runs/{run_id}/items", response_model=RunItemsResponse)
+def list_run_items(run_id: int, session: Session = Depends(get_session)):
+    run = _get_run_by_id(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found")
+
+    items = session.scalars(
+        select(RunItem)
+        .where(RunItem.score_run_id == run_id)
+        .order_by(RunItem.id.asc())
+    ).all()
+    return RunItemsResponse(
+        total=len(items),
+        items=[
+            RunItemRead(
+                id=item.id,
+                type=item.type,
+                job_posting_id=item.job_posting_id,
+                status=item.status,
+                error_message=item.error_message,
+                started_at=item.started_at,
+                finished_at=item.finished_at,
+            )
+            for item in items
+        ],
+    )
+
+
 @app.get("/score-runs/{run_id}", response_model=ScoreRunRead)
 def get_score_run(run_id: int, session: Session = Depends(get_session)):
     run = _get_score_run_by_id(session, run_id)
     if run is None:
+        raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
+    if run.type != "scoring":
         raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
 
     return ScoreRunRead(**serialize_score_run(session, run))
@@ -886,26 +963,11 @@ def list_score_run_items(run_id: int, session: Session = Depends(get_session)):
     run = _get_score_run_by_id(session, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
+    if run.type != "scoring":
+        raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
 
-    items = session.scalars(
-        select(ScoreRunItem)
-        .where(ScoreRunItem.score_run_id == run_id)
-        .order_by(ScoreRunItem.id.asc())
-    ).all()
-    return ScoreRunItemsResponse(
-        total=len(items),
-        items=[
-            ScoreRunItemRead(
-                id=item.id,
-                job_posting_id=item.job_posting_id,
-                status=item.status,
-                error_message=item.error_message,
-                started_at=item.started_at,
-                finished_at=item.finished_at,
-            )
-            for item in items
-        ],
-    )
+    items = list_run_items(run_id, session)
+    return ScoreRunItemsResponse(total=items.total, items=items.items)
 
 
 @app.post("/jobs/scores", response_model=JobsBatchScoreResponse)

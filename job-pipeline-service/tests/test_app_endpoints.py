@@ -20,6 +20,7 @@ from app import (
     get_job,
     get_application,
     get_prompt_library,
+    get_run,
     get_score_run,
     health,
     ingest_jobs,
@@ -27,6 +28,7 @@ from app import (
     list_jobs,
     list_prompt_library,
     list_resumes,
+    list_run_items,
     list_users,
     list_score_run_items,
     list_interview_rounds,
@@ -206,16 +208,69 @@ def test_run_jobs_classification_batch(db_session, monkeypatch):
     seed_job(db_session, job_id="job-1")
     seed_job(db_session, job_id="job-2")
 
-    monkeypatch.setattr(
-        app_module,
-        "classify_jobs",
-        lambda session, **_kwargs: SimpleNamespace(selected=2, classified=1, errored=0, skipped=1, job_ids=[1]),
-    )
+    captured = {}
+
+    def _fake_enqueue(session, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            id=11,
+            type="classification",
+            status="queued",
+            selected_count=2,
+            callback_url=None,
+            created_at=datetime.now(timezone.utc),
+            started_at=None,
+            finished_at=None,
+            last_error=None,
+            requested_status="",
+            requested_source=kwargs.get("source"),
+            prompt_key=kwargs.get("prompt_key"),
+            force=kwargs.get("force", False),
+            callback_status=None,
+            callback_error=None,
+        )
+
+    monkeypatch.setattr(app_module, "enqueue_classification_run", _fake_enqueue)
+    monkeypatch.setattr(app_module, "_commit_or_fail", lambda _session: None)
+    monkeypatch.setattr(db_session, "refresh", lambda _obj: None)
+    monkeypatch.setattr(app_module, "serialize_classification_run", lambda _session, run: {
+        "run_id": run.id,
+        "type": run.type,
+        "status": run.status,
+        "selected": run.selected_count,
+        "processed": 0,
+        "classified": 0,
+        "errored": 0,
+        "skipped": 0,
+        "jobs": [1],
+        "callback_url": run.callback_url,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "last_error": run.last_error,
+    })
 
     response = run_jobs_classification(JobsClassificationRunRequest(limit=2, force=False), db_session)
+    assert captured["force"] is False
     assert response.selected == 2
-    assert response.classified == 1
+    assert response.run_id == 11
+    assert response.type == "classification"
+    assert response.classified == 0
     assert response.jobs == [1]
+
+
+def test_run_jobs_classification_filters_preclassified_jobs(db_session):
+    included = seed_job(db_session, job_id="job-1")
+    excluded = seed_job(db_session, job_id="job-2")
+    excluded.classification_key = "Product Manager"
+    db_session.commit()
+
+    response = run_jobs_classification(JobsClassificationRunRequest(limit=10, force=False), db_session)
+
+    assert response.status == "queued"
+    assert response.selected == 1
+    assert response.jobs == [included.id]
+    assert excluded.id not in response.jobs
 
 
 def test_store_job_score(db_session):
@@ -271,12 +326,21 @@ def test_get_score_run_and_items(db_session):
     job = seed_job(db_session)
     run = seed_score_run(db_session, job=job)
 
+    generic_run_response = get_run(run.id, db_session)
+    generic_items_response = list_run_items(run.id, db_session)
     run_response = get_score_run(run.id, db_session)
     items_response = list_score_run_items(run.id, db_session)
 
+    assert generic_run_response.run_id == run.id
+    assert generic_run_response.type == "scoring"
+    assert generic_items_response.total == 1
     assert run_response.run_id == run.id
     assert items_response.total == 1
 
+    with pytest.raises(HTTPException):
+        get_run(9999, db_session)
+    with pytest.raises(HTTPException):
+        list_run_items(9999, db_session)
     with pytest.raises(HTTPException):
         get_score_run(9999, db_session)
     with pytest.raises(HTTPException):

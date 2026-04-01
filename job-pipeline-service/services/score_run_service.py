@@ -8,7 +8,8 @@ from urllib import error, request
 from sqlalchemy import func, select
 
 from database import SessionLocal
-from models import JobPosting, PromptLibrary, ScoreRun, ScoreRunItem
+from models import JobPosting, PromptLibrary, Run, RunItem
+from services.classification_service import classify_job
 from services.llm_client import build_llm_client
 from services.prompt_service import resolve_active_prompt
 from services.scoring_service import JobScoringSkipped, _commit_scoring_progress, score_job
@@ -21,22 +22,26 @@ def utcnow() -> datetime:
 @dataclass
 class ScoreRunCounts:
     processed: int
-    scored: int
+    succeeded: int
     errored: int
     skipped: int
     jobs: list[int]
 
 
-def enqueue_score_run(
+SUCCESS_STATUSES = {"scored", "classified"}
+
+
+def enqueue_run(
     session,
     *,
+    run_type: str,
     limit: int,
-    status: str,
+    status: str = "",
     source: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
     callback_url: str | None = None,
-) -> ScoreRun:
+) -> Run:
     query = select(JobPosting).order_by(JobPosting.created_at.asc()).limit(limit)
 
     if status:
@@ -45,8 +50,12 @@ def enqueue_score_run(
     if source:
         query = query.where(JobPosting.source == source)
 
+    if run_type == "classification" and not force:
+        query = query.where(JobPosting.classification_key.is_(None))
+
     jobs = list(session.scalars(query).all())
-    run = ScoreRun(
+    run = Run(
+        type=run_type,
         status="queued",
         requested_status=status,
         requested_source=source,
@@ -60,8 +69,9 @@ def enqueue_score_run(
 
     for job in jobs:
         session.add(
-            ScoreRunItem(
+            RunItem(
                 score_run_id=run.id,
+                type=run_type,
                 job_posting_id=job.id,
                 status="queued",
             )
@@ -70,37 +80,80 @@ def enqueue_score_run(
     return run
 
 
-def get_score_run_counts(session, run_id: int) -> ScoreRunCounts:
+def enqueue_score_run(
+    session,
+    *,
+    limit: int,
+    status: str,
+    source: str | None = None,
+    prompt_key: str | None = None,
+    force: bool = False,
+    callback_url: str | None = None,
+) -> Run:
+    return enqueue_run(
+        session,
+        run_type="scoring",
+        limit=limit,
+        status=status,
+        source=source,
+        prompt_key=prompt_key,
+        force=force,
+        callback_url=callback_url,
+    )
+
+
+def enqueue_classification_run(
+    session,
+    *,
+    limit: int,
+    source: str | None = None,
+    prompt_key: str | None = None,
+    force: bool = False,
+    callback_url: str | None = None,
+) -> Run:
+    return enqueue_run(
+        session,
+        run_type="classification",
+        limit=limit,
+        source=source,
+        prompt_key=prompt_key,
+        force=force,
+        callback_url=callback_url,
+    )
+
+
+def get_run_counts(session, run_id: int) -> ScoreRunCounts:
     rows = session.execute(
-        select(ScoreRunItem.status, func.count())
-        .where(ScoreRunItem.score_run_id == run_id)
-        .group_by(ScoreRunItem.status)
+        select(RunItem.status, func.count())
+        .where(RunItem.score_run_id == run_id)
+        .group_by(RunItem.status)
     ).all()
     counts = {status: count for status, count in rows}
     job_ids = list(
         session.scalars(
-            select(ScoreRunItem.job_posting_id)
-            .where(ScoreRunItem.score_run_id == run_id)
-            .order_by(ScoreRunItem.id.asc())
+            select(RunItem.job_posting_id)
+            .where(RunItem.score_run_id == run_id)
+            .order_by(RunItem.id.asc())
         ).all()
     )
     return ScoreRunCounts(
-        processed=sum(counts.get(key, 0) for key in ("scored", "error", "skipped")),
-        scored=counts.get("scored", 0),
+        processed=sum(counts.get(key, 0) for key in (*SUCCESS_STATUSES, "error", "skipped")),
+        succeeded=sum(counts.get(key, 0) for key in SUCCESS_STATUSES),
         errored=counts.get("error", 0),
         skipped=counts.get("skipped", 0),
         jobs=job_ids,
     )
 
 
-def serialize_score_run(session, run: ScoreRun) -> dict:
-    counts = get_score_run_counts(session, run.id)
+def serialize_run(session, run: Run) -> dict:
+    counts = get_run_counts(session, run.id)
     return {
         "run_id": run.id,
+        "type": run.type,
         "status": run.status,
         "selected": run.selected_count,
         "processed": counts.processed,
-        "scored": counts.scored,
+        "succeeded": counts.succeeded,
         "errored": counts.errored,
         "skipped": counts.skipped,
         "jobs": counts.jobs,
@@ -118,11 +171,23 @@ def serialize_score_run(session, run: ScoreRun) -> dict:
     }
 
 
-def _mark_run_failed(session, run: ScoreRun, message: str) -> None:
+def serialize_score_run(session, run: Run) -> dict:
+    payload = serialize_run(session, run)
+    payload["scored"] = payload.pop("succeeded")
+    return payload
+
+
+def serialize_classification_run(session, run: Run) -> dict:
+    payload = serialize_run(session, run)
+    payload["classified"] = payload.pop("succeeded")
+    return payload
+
+
+def _mark_run_failed(session, run: Run, message: str) -> None:
     pending_items = session.scalars(
-        select(ScoreRunItem).where(
-            ScoreRunItem.score_run_id == run.id,
-            ScoreRunItem.status.in_(("queued", "running")),
+        select(RunItem).where(
+            RunItem.score_run_id == run.id,
+            RunItem.status.in_(("queued", "running")),
         )
     ).all()
     for item in pending_items:
@@ -148,11 +213,11 @@ def _post_callback(callback_url: str, payload: dict) -> None:
 
 def _deliver_callback(run_id: int) -> None:
     with SessionLocal() as session:
-        run = session.get(ScoreRun, run_id)
+        run = session.get(Run, run_id)
         if run is None or not run.callback_url:
             return
 
-        payload = serialize_score_run(session, run)
+        payload = serialize_run(session, run)
         try:
             _post_callback(run.callback_url, payload)
             run.callback_status = "delivered"
@@ -164,12 +229,12 @@ def _deliver_callback(run_id: int) -> None:
         _commit_scoring_progress(session)
 
 
-def process_next_score_run() -> bool:
+def process_next_run() -> bool:
     with SessionLocal() as session:
         run = session.scalar(
-            select(ScoreRun)
-            .where(ScoreRun.status == "queued")
-            .order_by(ScoreRun.created_at.asc())
+            select(Run)
+            .where(Run.status == "queued")
+            .order_by(Run.created_at.asc())
             .limit(1)
         )
         if run is None:
@@ -182,12 +247,16 @@ def process_next_score_run() -> bool:
         run_id = run.id
 
     with SessionLocal() as session:
-        run = session.get(ScoreRun, run_id)
+        run = session.get(Run, run_id)
         if run is None:
             return True
 
         try:
-            prompt: PromptLibrary = resolve_active_prompt(session, run.prompt_key)
+            prompt: PromptLibrary = resolve_active_prompt(
+                session,
+                run.prompt_key,
+                prompt_type="classification" if run.type == "classification" else "scoring",
+            )
             client = build_llm_client()
         except Exception as exc:
             _mark_run_failed(session, run, str(exc))
@@ -197,9 +266,9 @@ def process_next_score_run() -> bool:
 
         items = list(
             session.scalars(
-                select(ScoreRunItem)
-                .where(ScoreRunItem.score_run_id == run.id)
-                .order_by(ScoreRunItem.id.asc())
+                select(RunItem)
+                .where(RunItem.score_run_id == run.id)
+                .order_by(RunItem.id.asc())
             ).all()
         )
 
@@ -221,26 +290,36 @@ def process_next_score_run() -> bool:
                 continue
 
             try:
-                result = score_job(
-                    session,
-                    job,
-                    prompt_key=run.prompt_key,
-                    force=run.force,
-                    client=client,
-                    prompt=prompt,
-                )
+                if item.type == "classification":
+                    result = classify_job(
+                        session,
+                        job,
+                        prompt_key=run.prompt_key,
+                        force=run.force,
+                        client=client,
+                        prompt=prompt,
+                    )
+                else:
+                    result = score_job(
+                        session,
+                        job,
+                        prompt_key=run.prompt_key,
+                        force=run.force,
+                        client=client,
+                        prompt=prompt,
+                    )
                 item.status = result.outcome
                 item.error_message = result.error_message
             except JobScoringSkipped as exc:
                 session.rollback()
-                item = session.get(ScoreRunItem, item.id)
+                item = session.get(RunItem, item.id)
                 if item is None:
                     continue
                 item.status = "skipped"
                 item.error_message = str(exc)
             except Exception as exc:
                 session.rollback()
-                item = session.get(ScoreRunItem, item.id)
+                item = session.get(RunItem, item.id)
                 if item is None:
                     continue
                 item.status = "error"
@@ -249,7 +328,7 @@ def process_next_score_run() -> bool:
             item.finished_at = utcnow()
             _commit_scoring_progress(session)
 
-        run = session.get(ScoreRun, run.id)
+        run = session.get(Run, run.id)
         if run is not None:
             run.status = "completed"
             run.finished_at = utcnow()
@@ -258,6 +337,10 @@ def process_next_score_run() -> bool:
                 _deliver_callback(run.id)
 
     return True
+
+
+def process_next_score_run() -> bool:
+    return process_next_run()
 
 
 class ScoreRunWorker:
@@ -281,7 +364,7 @@ class ScoreRunWorker:
     def _run(self) -> None:
         while not self._stop_event.is_set():
             try:
-                processed = process_next_score_run()
+                processed = process_next_run()
             except Exception:
                 time.sleep(self.poll_interval_seconds)
                 continue

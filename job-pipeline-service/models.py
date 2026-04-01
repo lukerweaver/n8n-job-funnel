@@ -219,10 +219,11 @@ class InterviewRound(Base):
     job_application: Mapped["JobApplication"] = relationship(back_populates="interview_rounds")
 
 
-class ScoreRun(Base):
+class Run(Base):
     __tablename__ = "score_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    type: Mapped[str] = mapped_column(String(50), default="scoring", nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False, index=True)
     requested_status: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     requested_source: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
@@ -243,11 +244,12 @@ class ScoreRun(Base):
     )
 
 
-class ScoreRunItem(Base):
+class RunItem(Base):
     __tablename__ = "score_run_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     score_run_id: Mapped[int] = mapped_column(ForeignKey("score_runs.id"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(50), default="scoring", nullable=False, index=True)
     job_posting_id: Mapped[int] = mapped_column(ForeignKey("job_postings.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False, index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -259,3 +261,7 @@ class ScoreRunItem(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+
+
+ScoreRun = Run
+ScoreRunItem = RunItem

@@ -147,8 +147,9 @@ class JobsScoreRunRequest(BaseModel):
     callback_url: str | None = None
 
 
-class ScoreRunItemRead(BaseModel):
+class RunItemRead(BaseModel):
     id: int
+    type: str
     job_posting_id: int
     status: str
     error_message: str | None = None
@@ -156,8 +157,37 @@ class ScoreRunItemRead(BaseModel):
     finished_at: datetime | None = None
 
 
+class RunRead(BaseModel):
+    run_id: int
+    type: str
+    status: str
+    selected: int
+    processed: int
+    succeeded: int
+    errored: int
+    skipped: int
+    jobs: list[int]
+    callback_url: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    last_error: str | None = None
+    requested_status: str
+    requested_source: str | None = None
+    prompt_key: str | None = None
+    force: bool = False
+    callback_status: str | None = None
+    callback_error: str | None = None
+
+
+class RunItemsResponse(BaseModel):
+    total: int
+    items: list[RunItemRead]
+
+
 class JobsScoreRunResponse(BaseModel):
     run_id: int
+    type: str
     status: str
     selected: int
     processed: int
@@ -183,7 +213,7 @@ class ScoreRunRead(JobsScoreRunResponse):
 
 class ScoreRunItemsResponse(BaseModel):
     total: int
-    items: list[ScoreRunItemRead]
+    items: list[RunItemRead]
 
 
 class JobsBatchNotifyResponse(BaseModel):
@@ -385,6 +415,7 @@ class JobsClassificationRunRequest(BaseModel):
     source: str | None = None
     prompt_key: str | None = None
     force: bool = False
+    callback_url: str | None = None
 
 
 class JobClassificationResponse(BaseModel):
@@ -397,12 +428,20 @@ class JobClassificationResponse(BaseModel):
 
 
 class JobsClassificationRunResponse(BaseModel):
+    run_id: int
+    type: str
+    status: str
     selected: int
     processed: int
     classified: int
     errored: int
     skipped: int
     jobs: list[int]
+    callback_url: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    last_error: str | None = None
 
 
 class ApplicationsScoreRunRequest(BaseModel):
