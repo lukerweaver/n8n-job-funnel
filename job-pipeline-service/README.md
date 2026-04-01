@@ -57,7 +57,7 @@ There are now two orchestration styles:
 - legacy job-native flow:
   - queue batch scoring with `/jobs/score/run`
 
-The repository also includes thin n8n exports for classification, legacy job scoring, and application-native notification writeback under `../exports/workflows/`.
+The repository also includes thin n8n exports for classification, application generation, application scoring, legacy job scoring, and application-native notification writeback under `../exports/workflows/`.
 
 ## Workflow
 

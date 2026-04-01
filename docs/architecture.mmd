@@ -14,17 +14,18 @@ flowchart TD
   I --> E
 
   E --> J[job_postings.classification_key]
-  J --> K[application generation]
-  K --> L[(job_applications)]
+  J --> K[n8n application generation workflow]
+  K --> L[POST /applications/generate]
+  L --> M[(job_applications)]
 
-  L --> M[n8n legacy scoring workflow]
-  M --> N[POST /jobs/score/run]
-  N --> E
+  M --> N[n8n application scoring workflow]
+  N --> O[POST /applications/score/run]
+  O --> E
 
-  E --> O{Application score passes threshold?}
-  O -- Yes --> P[Tracker sync]
-  O -- Yes --> Q[POST /applications/{id}/notify]
-  Q --> E
-  O -- No --> R[Remain scored only]
+  E --> P{Application score passes threshold?}
+  P -- Yes --> Q[Tracker sync]
+  P -- Yes --> R[POST /applications/{id}/notify]
+  R --> E
+  P -- No --> S[Remain scored only]
 
-  S[Legacy GET /jobs/hiringcafe route\nPlaywright capture] -. optional / fallback .-> E
+  T[Legacy GET /jobs/hiringcafe route\nPlaywright capture] -. optional / fallback .-> E
