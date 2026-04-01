@@ -1,5 +1,5 @@
 {
-  "name": "Application Scoring",
+  "name": "Pipeline Orchestrator",
   "nodes": [
     {
       "parameters": {
@@ -18,16 +18,16 @@
         -80,
         -160
       ],
-      "id": "53bd2739-c5a0-4bd4-85bf-b3cc9dd59d6f",
+      "id": "8b9cdf57-a860-44d2-9b8f-4ca9c0c52f01",
       "name": "Schedule Trigger"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://<job-pipeline-service-host>:8000/applications/score/run",
+        "url": "http://<job-pipeline-service-host>:8000/jobs/classify/run",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"limit\": 100,\n  \"status\": \"new\",\n  \"force\": false\n}",
+        "jsonBody": "={\n  \"limit\": 100,\n  \"force\": false,\n  \"callback_url\": \"https://<n8n-host>/webhook/job-classification-complete\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -36,8 +36,8 @@
         176,
         -160
       ],
-      "id": "cb3d9839-60a0-4220-8a7b-a91206372223",
-      "name": "Run Application Scoring"
+      "id": "867d8a52-ac84-4250-b52b-a3cb2c11f3d7",
+      "name": "Queue Job Classification"
     }
   ],
   "pinData": {},
@@ -46,7 +46,7 @@
       "main": [
         [
           {
-            "node": "Run Application Scoring",
+            "node": "Queue Job Classification",
             "type": "main",
             "index": 0
           }
@@ -54,17 +54,17 @@
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "phase5-application-scoring",
+  "versionId": "callback-pipeline-orchestrator",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": ""
   },
-  "id": "2XlLHTtWlQq3BZP2",
+  "id": "aRrQ1sJH2cT3xV4b",
   "tags": []
 }

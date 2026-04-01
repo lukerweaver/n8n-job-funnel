@@ -8,7 +8,7 @@ The current operational source of truth is `job-pipeline-service`, which stores 
 
 - `job-pipeline-service/` - FastAPI API for job ingest, job classification, application generation, scoring, lifecycle tracking, prompt library CRUD, and legacy job-native compatibility routes.
 - `job-scraper-chrome/` - Chrome extension that scrapes LinkedIn job pages and captures Hiring Cafe search responses, then posts normalized jobs to the API.
-- `exports/workflows/` - n8n workflow exports.
+- `exports/workflows/` - n8n workflow exports for the callback-driven orchestration flow.
 - `exports/data/` - example prompt-library seed data.
 - `docs/` - architecture diagram and supporting docs.
 
@@ -30,10 +30,13 @@ LinkedIn job page or Hiring Cafe search page
                         -> active scoring prompt from prompt_library
                         -> configured LLM provider
                         -> score/error persistence on job_applications
+                    -> callback-driven n8n orchestration
+                        -> Pipeline Orchestrator.json
+                        -> Classification Callback.json
+                        -> Application Score Callback.json
                     -> legacy job-native scoring compatibility
                         -> POST /jobs/score/run
-                        -> score_runs + score_run_items
-                        -> sync into job_applications for migrated flows
+                        -> shared run queue + sync into job_applications for migrated flows
                     -> n8n notification workflow
                         -> tracker + email + notify writeback to API
 ```
@@ -68,7 +71,7 @@ Job-level scoring accepts both legacy and expanded JSON output shapes from the L
 - `POST /applications/generate` - create applications for resumes whose `classification_key` matches the posting
 - `POST /applications/{id}/score` - manual score writeback for a single application
 - `POST /applications/{id}/score/run` - score one application through the service
-- `POST /applications/score/run` - batch score applications through the service
+- `POST /applications/score/run` - enqueue a batch application scoring run
 - `POST /applications/{id}/notify` - mark one application notified
 - `POST /applications/{id}/error` - mark one application errored
 - `POST /applications/{id}/status` - advance the lifecycle, for example `applied`, `screening`, `interview`, `offer`, `rejected`, or `withdrawn`
@@ -93,12 +96,14 @@ Job-level scoring accepts both legacy and expanded JSON output shapes from the L
 
 Prompts now live in the service database and are resolved by `prompt_key` plus `prompt_type`, with `DEFAULT_PROMPT_KEY` used when a classify or score request does not pass one.
 
-### Score runs
+### Runs
 
+- `GET /runs/{run_id}`
+- `GET /runs/{run_id}/items`
 - `GET /score-runs/{run_id}`
 - `GET /score-runs/{run_id}/items`
 
-Legacy batch job scoring is asynchronous. `POST /jobs/score/run` creates a durable `score_runs` row for the request and one `score_run_items` row per selected job. The service worker updates those records as jobs move through `queued`, `running`, `scored`, `error`, or `skipped`.
+Async runs are backed by shared `score_runs` and `score_run_items` tables for classification, application scoring, and legacy job scoring. The service worker updates those records as items move through `queued`, `running`, `scored`, `classified`, `error`, or `skipped`.
 
 ## Data model
 
@@ -298,7 +303,7 @@ Service-side scoring is configured with environment variables such as:
 - `LLM_TIMEOUT_SECONDS`
 - `DEFAULT_PROMPT_KEY`
 
-The preferred flow is synchronous classification and application scoring through the service routes. Legacy job-native score runs are still processed asynchronously in the background worker. Use `POST /jobs/score/run` to queue that legacy work, then poll `GET /score-runs/{run_id}` and `GET /score-runs/{run_id}/items` to track progress from n8n or another client.
+The preferred flow is callback-driven orchestration through n8n with async classification and async application scoring. Legacy job-native score runs are still processed asynchronously in the background worker. Use `POST /jobs/score/run` to queue that legacy work, then inspect `GET /score-runs/{run_id}` and `GET /score-runs/{run_id}/items` when needed.
 
 ### Option 2: Run the API with the included compose example
 
@@ -342,21 +347,17 @@ Current behavior:
 
 The repo includes these exports:
 
-- `exports/workflows/Job Classification.json`
-- `exports/workflows/Application Generation.json`
-- `exports/workflows/Application Scoring.json`
-- `exports/workflows/Job Scoring.json`
-- `exports/workflows/Job Notification.json`
+- `exports/workflows/Pipeline Orchestrator.json`
+- `exports/workflows/Classification Callback.json`
+- `exports/workflows/Application Score Callback.json`
 
-These exports target the current API-backed flow, but they are checked in with placeholder hosts, credential IDs, recipient addresses, and external document IDs. Reconfigure those values in n8n after import.
+These exports target the current callback-driven API flow, but they are checked in with placeholder hosts, webhook URLs, credential IDs, recipient addresses, and external document IDs. Reconfigure those values in n8n after import.
 
-If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id` and internal numeric `id`.
+If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id`, internal numeric `job_posting_id`, and internal numeric `application_id`.
 
-- `Job Classification.json` is a thin trigger for `POST /jobs/classify/run`.
-- `Application Generation.json` reads classified `new` jobs from `GET /jobs` and fans out to `POST /applications/generate`.
-- `Application Scoring.json` is a thin trigger for `POST /applications/score/run`.
-- `Job Scoring.json` is the remaining legacy trigger for `POST /jobs/score/run`.
-- `Job Notification.json` reads scored rows from `/applications` and writes back with `POST /applications/{id}/notify`.
+- `Pipeline Orchestrator.json` starts the pipeline on a schedule and queues `POST /jobs/classify/run` with a callback URL.
+- `Classification Callback.json` receives classification completion, generates applications per returned job id, and queues `POST /applications/score/run` with a callback URL.
+- `Application Score Callback.json` receives application scoring completion, fetches run items, selects scored applications, and performs notify/tracker/email steps.
 
 ## Prompt setup
 

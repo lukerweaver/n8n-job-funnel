@@ -1,0 +1,415 @@
+{
+  "name": "Application Score Callback",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "application-score-complete",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -384,
+        -624
+      ],
+      "id": "ea663534-b534-49d8-a67d-02f2145be8ba",
+      "name": "Application Score Complete",
+      "webhookId": "application-score-complete"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const payload = $input.first().json;\nif (payload?.type !== 'application_scoring' || payload?.status !== 'completed' || !payload?.run_id) {\n  return [];\n}\nreturn [{ json: { run_id: payload.run_id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -112,
+        -624
+      ],
+      "id": "db683ad0-122e-4c7e-a7de-ae79dd1aa7a7",
+      "name": "Select Completed Run"
+    },
+    {
+      "parameters": {
+        "url": "=http://<job-pipeline-service-host>:8000/runs/{{ $json.run_id }}/items",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        144,
+        -624
+      ],
+      "id": "6fef95d4-b932-4af9-afce-0c91ef4fc2d7",
+      "name": "Get Run Items"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const response = $input.first().json;\nconst items = Array.isArray(response?.items) ? response.items : [];\nreturn items\n  .filter((item) => item.type === 'application_scoring' && item.status === 'scored' && item.job_application_id)\n  .map((item) => ({ json: { application_id: item.job_application_id } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -624
+      ],
+      "id": "60a0d93e-d6d4-45a9-929f-b80aa4d693d5",
+      "name": "Select Scored Applications"
+    },
+    {
+      "parameters": {
+        "url": "=http://<job-pipeline-service-host>:8000/applications/{{ $json.application_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        656,
+        -624
+      ],
+      "id": "0ab54df3-83ac-4ea8-b909-bf975ef72435",
+      "name": "Get Application"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "if ($json.status !== 'scored') {\n  return [];\n}\nif ($json.notified_at) {\n  return [];\n}\nif (($json.score ?? 0) < 18) {\n  return [];\n}\nreturn [{ json: $json }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        -624
+      ],
+      "id": "d17251db-c229-4d18-852f-62be70832bbf",
+      "name": "Select Applications To Notify"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://<job-pipeline-service-host>:8000/applications/{{ $json.id }}/notify",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"notified_at\": $now,\n  \"status\": \"notified\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1168,
+        -816
+      ],
+      "id": "88cb9f13-1987-4e61-b9e5-9987b2a0fd41",
+      "name": "Mark Application Notified"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "REPLACE_WITH_GOOGLE_SHEET_NAME",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_GOOGLE_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "REPLACE_WITH_SHEET_TAB_NAME",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date Submitted": "={{ $now.format('yyyy-MM-dd') }}",
+            "Company": "={{ $json.company_name }}",
+            "Title": "={{ $json.title }}",
+            "Status": "={{ $json.status }}",
+            "n8n score": "={{ $json.score }}",
+            "Job Link": "={{ $json.apply_url }}",
+            "Stage Reached": "={{ $json.status }}",
+            "Referal?": "n8n",
+            "Salary": "={{`$${Math.round($json.yearly_min_compensation/1000)}k-$${Math.round($json.yearly_max_compensation/1000)}k`}}",
+            "n8n screening likelihood": "={{ $json.screening_likelihood }}",
+            "Role Type": "={{ $json.role_type }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date Submitted",
+              "displayName": "Date Submitted",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Salary",
+              "displayName": "Salary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Link",
+              "displayName": "Job Link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Stage Reached",
+              "displayName": "Stage Reached",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "n8n score",
+              "displayName": "n8n score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "n8n screening likelihood",
+              "displayName": "n8n screening likelihood",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Role Type",
+              "displayName": "Role Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Referal?",
+              "displayName": "Referal?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1168,
+        -624
+      ],
+      "id": "e1239732-28a6-48dd-8a54-e5bfd4798939",
+      "name": "Add to Tracker",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "RECONNECT_GOOGLE_SHEETS_CREDENTIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        -624
+      ],
+      "id": "4ea385a0-8aea-4fd2-8155-2ddf4a9d9859",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "sendTo": "replace@example.com",
+        "subject": "Application matches found",
+        "message": "=<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" style=\"border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px;\">\n  <thead>\n    <tr style=\"font-weight:bold; background:#f2f2f2;\">\n      <th align=\"left\">Company</th>\n      <th align=\"left\">Title</th>\n      <th align=\"left\">Salary</th>\n      <th align=\"left\">n8n Score</th>\n      <th align=\"left\">n8n Screen</th>\n      <th align=\"left\">Role Type</th>\n      <th align=\"left\">Job Link</th>\n    </tr>\n  </thead>\n  <tbody>\n    {{\n      $json.data\n        .map(application => `\n          <tr>\n            <td>${application[\"Company\"] ?? \"\"}</td>\n            <td>${application[\"Title\"] ?? \"\"}</td>\n            <td>${application[\"Salary\"] ?? \"\"}</td>\n            <td>${application[\"n8n score\"] ?? \"\"}</td>\n            <td>${application[\"n8n screening likelihood\"] ?? \"\"}</td>\n            <td>${application[\"Role Type\"] ?? \"\"}</td>\n            <td><a href=\"${application[\"Job Link\"] ?? \"#\"}\">View</a></td>\n          </tr>\n        `)\n        .join(\"\")\n    }}\n  </tbody>\n</table>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        -624
+      ],
+      "id": "4a866df2-44e0-425e-86dc-fa032da96caf",
+      "name": "Send a message",
+      "webhookId": "",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "RECONNECT_GMAIL_CREDENTIAL"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Application Score Complete": {
+      "main": [
+        [
+          {
+            "node": "Select Completed Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Completed Run": {
+      "main": [
+        [
+          {
+            "node": "Get Run Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Run Items": {
+      "main": [
+        [
+          {
+            "node": "Select Scored Applications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Scored Applications": {
+      "main": [
+        [
+          {
+            "node": "Get Application",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Application": {
+      "main": [
+        [
+          {
+            "node": "Select Applications To Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Applications To Notify": {
+      "main": [
+        [
+          {
+            "node": "Mark Application Notified",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Add to Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to Tracker": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Application Notified": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "callback-application-score-complete",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": ""
+  },
+  "id": "Lc6nQ3dW9sMvT8pZ",
+  "tags": []
+}

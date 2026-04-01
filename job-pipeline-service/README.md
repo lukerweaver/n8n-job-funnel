@@ -57,7 +57,11 @@ There are now two orchestration styles:
 - legacy job-native flow:
   - queue batch scoring with `/jobs/score/run`
 
-The repository also includes thin n8n exports for classification, application generation, application scoring, legacy job scoring, and application-native notification writeback under `../exports/workflows/`.
+The repository includes callback-driven n8n exports under `../exports/workflows/`:
+
+- `Pipeline Orchestrator.json`
+- `Classification Callback.json`
+- `Application Score Callback.json`
 
 ## Workflow
 
@@ -373,17 +377,18 @@ GET http://localhost:8000/jobs?status=new&limit=25
 
 The preferred automation chain is:
 
-1. classify jobs:
+1. queue classification with a callback:
 
 ```json
 POST /jobs/classify/run
 {
   "limit": 100,
-  "force": false
+  "force": false,
+  "callback_url": "https://<n8n-host>/webhook/job-classification-complete"
 }
 ```
 
-2. generate applications for classified postings:
+2. on classification callback, generate applications per returned `job_posting_id`:
 
 ```json
 POST /applications/generate
@@ -392,21 +397,23 @@ POST /applications/generate
 }
 ```
 
-3. score applications in batch:
+3. queue application scoring with a callback, ideally narrowed by `job_posting_id`:
 
 ```json
 POST /applications/score/run
 {
   "limit": 100,
   "status": "new",
-  "force": false
+  "job_posting_id": 123,
+  "force": false,
+  "callback_url": "https://<n8n-host>/webhook/application-score-complete"
 }
 ```
 
-4. fetch high-scoring applications:
+4. on application-score callback, fetch scored run items and load application details:
 
 ```text
-GET /applications?status=scored&score=20
+GET /runs/{run_id}/items
 ```
 
 5. mark notified applications:
