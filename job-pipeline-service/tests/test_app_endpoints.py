@@ -1032,3 +1032,207 @@ def test_operational_error_handler_branches(db_session, monkeypatch):
         store_job_score(1, _score_payload(), db_session)
     generic_response = asyncio.run(app_module.operational_error_handler(None, generic_exc.value))
     assert generic_response.status_code == 500
+
+
+def test_validate_application_entities_error_paths(db_session):
+    user = seed_user(db_session, name="Entity User", email="entity-user@example.com")
+    other_user = seed_user(db_session, name="Other User", email="other-user@example.com")
+    job = seed_job(db_session, job_id="job-entity")
+    resume = seed_resume(db_session, user=user, prompt_key="default")
+    wrong_resume = seed_resume(db_session, user=other_user, name="Other Resume", prompt_key="default")
+
+    validated_user, validated_resume, validated_job = app_module._validate_application_entities(
+        db_session,
+        user_id=user.id,
+        resume_id=resume.id,
+        job_posting_id=job.id,
+    )
+    assert validated_user.id == user.id
+    assert validated_resume.id == resume.id
+    assert validated_job.id == job.id
+
+    with pytest.raises(HTTPException, match="User '9999' was not found"):
+        app_module._validate_application_entities(
+            db_session,
+            user_id=9999,
+            resume_id=resume.id,
+            job_posting_id=job.id,
+        )
+
+    with pytest.raises(HTTPException, match=f"Resume '{9999}' was not found"):
+        app_module._validate_application_entities(
+            db_session,
+            user_id=user.id,
+            resume_id=9999,
+            job_posting_id=job.id,
+        )
+
+    with pytest.raises(HTTPException, match="Resume does not belong to the selected user"):
+        app_module._validate_application_entities(
+            db_session,
+            user_id=user.id,
+            resume_id=wrong_resume.id,
+            job_posting_id=job.id,
+        )
+
+    with pytest.raises(HTTPException, match="Job '9999' was not found"):
+        app_module._validate_application_entities(
+            db_session,
+            user_id=user.id,
+            resume_id=resume.id,
+            job_posting_id=9999,
+        )
+
+
+@pytest.mark.parametrize(
+    ("status", "timestamp_field"),
+    [
+        ("offer", "offer_at"),
+        ("rejected", "rejected_at"),
+        ("withdrawn", "withdrawn_at"),
+    ],
+)
+def test_apply_application_status_sets_terminal_timestamps(status, timestamp_field):
+    application = JobApplication(status="new")
+
+    app_module.apply_application_status(application, ApplicationStatusWrite(status=status))
+
+    assert application.status == status
+    assert getattr(application, timestamp_field) is not None
+
+
+def test_apply_application_error_preserves_non_error_status():
+    application = JobApplication(status="scored")
+
+    app_module.apply_application_error(application, JobErrorWrite(status="rejected"))
+    assert application.status == "rejected"
+    assert application.last_error_at is not None
+
+    app_module.apply_application_error(application, JobErrorWrite(status="error"))
+    assert application.status == "new"
+
+
+def test_job_backfill_helpers_cover_legacy_status_paths(db_session):
+    pristine_job = seed_job(db_session, job_id="job-pristine", status="new")
+    pristine_job.score = None
+    pristine_job.recommendation = None
+    pristine_job.justification = None
+    pristine_job.screening_likelihood = None
+    pristine_job.dimension_scores = None
+    pristine_job.gating_flags = None
+    pristine_job.strengths = None
+    pristine_job.gaps = None
+    pristine_job.missing_from_jd = None
+    pristine_job.prompt_key = None
+    pristine_job.prompt_version = None
+    pristine_job.score_provider = None
+    pristine_job.score_model = None
+    pristine_job.score_error = None
+    pristine_job.score_raw_response = None
+    pristine_job.scored_at = None
+    pristine_job.notified_at = None
+    pristine_job.error_at = None
+    pristine_job.score_attempts = 0
+
+    scored_job = seed_job(db_session, job_id="job-scored", status="error")
+    scored_job.scored_at = datetime.now(timezone.utc)
+
+    unknown_job = seed_job(db_session, job_id="job-unknown", status="mystery")
+    prompted_job = seed_job(db_session, job_id="job-prompted", status="new")
+    prompted_job.prompt_key = "custom-key"
+
+    db_session.commit()
+
+    assert app_module._job_requires_application_backfill(pristine_job) is False
+    assert app_module._job_requires_application_backfill(prompted_job) is True
+    assert app_module._map_legacy_job_status_to_application_status(pristine_job) == "new"
+    assert app_module._map_legacy_job_status_to_application_status(scored_job) == "scored"
+    assert app_module._map_legacy_job_status_to_application_status(unknown_job) == "new"
+
+
+def test_legacy_resume_helpers_cover_fallbacks(db_session):
+    user = seed_user(db_session, name="Legacy Helper", email="legacy-helper@example.com")
+
+    assert app_module._legacy_resume_content(db_session, "missing-key").startswith(
+        "Legacy resume content unavailable"
+    )
+
+    blank_prompt = seed_prompt(db_session, key="blank-key", version=1, active=True)
+    blank_prompt.context = "   "
+    db_session.commit()
+
+    assert app_module._legacy_resume_content(db_session, "blank-key").startswith(
+        "Legacy resume content unavailable"
+    )
+
+    user_from_helper = app_module._get_or_create_legacy_user(db_session)
+    same_user = app_module._get_or_create_legacy_user(db_session)
+    assert user_from_helper.id == same_user.id
+
+    resume = app_module._get_or_create_legacy_resume(db_session, user, "missing-key")
+    same_resume = app_module._get_or_create_legacy_resume(db_session, user, "missing-key")
+    assert resume.id == same_resume.id
+
+
+def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
+    prompt_executed = []
+    resume_executed = []
+
+    class FakeConnection:
+        def __init__(self, executed):
+            self.executed = executed
+
+        def execute(self, statement):
+            self.executed.append(statement)
+
+    class FakeBegin:
+        def __init__(self, executed):
+            self.executed = executed
+
+        def __enter__(self):
+            return FakeConnection(self.executed)
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    fake_engine = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    monkeypatch.setattr(app_module, "engine", fake_engine)
+    monkeypatch.setattr(app_module, "text", lambda statement: statement)
+
+    monkeypatch.setattr(
+        app_module,
+        "inspect",
+        lambda _engine: SimpleNamespace(get_columns=lambda _table: [{"name": "system_prompt"}]),
+    )
+    monkeypatch.setattr(fake_engine, "begin", lambda: FakeBegin(prompt_executed), raising=False)
+
+    app_module.ensure_prompt_library_schema()
+
+    assert any("ADD COLUMN prompt_type VARCHAR(50)" in statement for statement in prompt_executed)
+    assert any("UPDATE prompt_library SET prompt_type = 'scoring'" in statement for statement in prompt_executed)
+    assert any("UPDATE prompt_library SET created_at = CURRENT_TIMESTAMP" in statement for statement in prompt_executed)
+    assert any("UPDATE prompt_library SET updated_at = CURRENT_TIMESTAMP" in statement for statement in prompt_executed)
+
+    monkeypatch.setattr(
+        app_module,
+        "inspect",
+        lambda _engine: SimpleNamespace(get_columns=lambda _table: [{"name": "classification_key"}]),
+    )
+    begin_calls = []
+    monkeypatch.setattr(fake_engine, "begin", lambda: begin_calls.append(True), raising=False)
+
+    app_module.ensure_resumes_schema()
+
+    assert begin_calls == []
+
+    monkeypatch.setattr(
+        app_module,
+        "inspect",
+        lambda _engine: SimpleNamespace(get_columns=lambda _table: [{"name": "prompt_key"}]),
+    )
+    monkeypatch.setattr(fake_engine, "begin", lambda: FakeBegin(resume_executed), raising=False)
+
+    app_module.ensure_resumes_schema()
+
+    assert any("ALTER TABLE resumes ADD COLUMN classification_key VARCHAR(100)" in statement for statement in resume_executed)
+    assert any("UPDATE resumes" in statement for statement in resume_executed)

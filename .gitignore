@@ -26,4 +26,9 @@ job-pipeline-service/data/
 # Node / frontend test artifacts
 node_modules/
 coverage/
+coverage.xml
+coverage.json
+htmlcov/
+.coverage
+.coverage.*
 *.tsbuildinfo
