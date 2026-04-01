@@ -150,7 +150,8 @@ class JobsScoreRunRequest(BaseModel):
 class RunItemRead(BaseModel):
     id: int
     type: str
-    job_posting_id: int
+    job_posting_id: int | None = None
+    job_application_id: int | None = None
     status: str
     error_message: str | None = None
     started_at: datetime | None = None
@@ -167,6 +168,7 @@ class RunRead(BaseModel):
     errored: int
     skipped: int
     jobs: list[int]
+    applications: list[int]
     callback_url: str | None = None
     created_at: datetime
     started_at: datetime | None = None
@@ -195,6 +197,7 @@ class JobsScoreRunResponse(BaseModel):
     errored: int
     skipped: int
     jobs: list[int]
+    applications: list[int]
     callback_url: str | None = None
     created_at: datetime
     started_at: datetime | None = None
@@ -437,6 +440,7 @@ class JobsClassificationRunResponse(BaseModel):
     errored: int
     skipped: int
     jobs: list[int]
+    applications: list[int] = []
     callback_url: str | None = None
     created_at: datetime
     started_at: datetime | None = None
@@ -452,15 +456,25 @@ class ApplicationsScoreRunRequest(BaseModel):
     job_posting_id: int | None = None
     prompt_key: str | None = None
     force: bool = False
+    callback_url: str | None = None
 
 
 class ApplicationsScoreRunResponse(BaseModel):
+    run_id: int
+    type: str
+    status: str
     selected: int
     processed: int
     scored: int
     errored: int
     skipped: int
+    jobs: list[int]
     applications: list[int]
+    callback_url: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    last_error: str | None = None
 
 
 class InterviewRoundCreate(BaseModel):

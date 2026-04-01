@@ -575,20 +575,90 @@ def test_run_applications_score_batch(db_session, monkeypatch):
     application_one = seed_application(db_session, user=user, job=job, resume=resume_one, status="new")
     application_two = seed_application(db_session, user=user, job=job, resume=resume_two, status="new")
 
-    outcomes = iter(
-        [
-            SimpleNamespace(application=application_one, outcome="scored"),
-            JobScoringSkipped("skip"),
-        ]
+    captured = {}
+
+    def _fake_enqueue(session, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            id=21,
+            type="application_scoring",
+            status="queued",
+            selected_count=2,
+            callback_url=kwargs.get("callback_url"),
+            created_at=datetime.now(timezone.utc),
+            started_at=None,
+            finished_at=None,
+            last_error=None,
+            requested_status=kwargs.get("status"),
+            requested_source=None,
+            prompt_key=kwargs.get("prompt_key"),
+            force=kwargs.get("force", False),
+            callback_status=None,
+            callback_error=None,
+        )
+
+    monkeypatch.setattr(app_module, "enqueue_application_score_run", _fake_enqueue)
+    monkeypatch.setattr(app_module, "_commit_or_fail", lambda _session: None)
+    monkeypatch.setattr(db_session, "refresh", lambda _obj: None)
+    monkeypatch.setattr(app_module, "serialize_application_score_run", lambda _session, run: {
+        "run_id": run.id,
+        "type": run.type,
+        "status": run.status,
+        "selected": run.selected_count,
+        "processed": 0,
+        "scored": 0,
+        "errored": 0,
+        "skipped": 0,
+        "jobs": [job.id, job.id],
+        "applications": [application_one.id, application_two.id],
+        "callback_url": run.callback_url,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "last_error": run.last_error,
+    })
+
+    result = run_applications_score(
+        ApplicationsScoreRunRequest(
+            status="new",
+            limit=10,
+            user_id=user.id,
+            prompt_key="default",
+            force=False,
+            callback_url="https://example.com/callback",
+        ),
+        db_session,
     )
 
-    def _fake_score_application(*_args, **_kwargs):
-        result = next(outcomes)
-        if isinstance(result, Exception):
-            raise result
-        return result
+    assert captured["status"] == "new"
+    assert captured["callback_url"] == "https://example.com/callback"
+    assert result.run_id == 21
+    assert result.type == "application_scoring"
+    assert result.selected == 2
+    assert result.processed == 0
+    assert result.scored == 0
+    assert result.skipped == 0
+    assert result.errored == 0
+    assert result.applications == [application_one.id, application_two.id]
 
-    monkeypatch.setattr(app_module, "score_application", _fake_score_application)
+
+def test_run_applications_score_empty_selection(db_session):
+    result = run_applications_score(
+        ApplicationsScoreRunRequest(status="new", limit=10, user_id=9999, force=False),
+        db_session,
+    )
+
+    assert result.selected == 0
+    assert result.processed == 0
+    assert result.applications == []
+
+
+def test_run_applications_score_creates_generic_run_items(db_session):
+    seed_prompt(db_session)
+    user = seed_user(db_session, name="Gina", email="gina2@example.com")
+    job = seed_job(db_session, job_id="job-batch-2")
+    resume = seed_resume(db_session, user=user, name="Resume 1", prompt_key="default", content="Resume body 1")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="new")
 
     result = run_applications_score(
         ApplicationsScoreRunRequest(
@@ -601,23 +671,12 @@ def test_run_applications_score_batch(db_session, monkeypatch):
         db_session,
     )
 
-    assert result.selected == 2
-    assert result.processed == 1
-    assert result.scored == 1
-    assert result.skipped == 1
-    assert result.errored == 0
-    assert result.applications == [application_one.id]
-
-
-def test_run_applications_score_empty_selection(db_session):
-    result = run_applications_score(
-        ApplicationsScoreRunRequest(status="new", limit=10, user_id=9999, force=False),
-        db_session,
-    )
-
-    assert result.selected == 0
-    assert result.processed == 0
-    assert result.applications == []
+    assert result.status == "queued"
+    assert result.selected == 1
+    assert result.applications == [application.id]
+    generic_items = list_run_items(result.run_id, db_session)
+    assert generic_items.items[0].job_application_id == application.id
+    assert generic_items.items[0].type == "application_scoring"
 
 
 def test_application_scoring_and_interview_rounds(db_session, monkeypatch):

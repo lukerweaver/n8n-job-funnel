@@ -78,8 +78,10 @@ from services.llm_client import LlmRequestError
 from services.prompt_service import PromptResolutionError
 from services.score_run_service import (
     ScoreRunWorker,
+    enqueue_application_score_run,
     enqueue_classification_run,
     enqueue_score_run,
+    serialize_application_score_run,
     serialize_classification_run,
     serialize_run,
     serialize_score_run,
@@ -459,6 +461,8 @@ def ensure_run_schema() -> None:
     item_statements = []
     if "type" not in item_columns:
         item_statements.append(f"ALTER TABLE score_run_items ADD COLUMN type {run_type}")
+    if "job_application_id" not in item_columns:
+        item_statements.append("ALTER TABLE score_run_items ADD COLUMN job_application_id INTEGER")
 
     if not run_statements and not item_statements:
         return
@@ -937,6 +941,7 @@ def list_run_items(run_id: int, session: Session = Depends(get_session)):
                 id=item.id,
                 type=item.type,
                 job_posting_id=item.job_posting_id,
+                job_application_id=item.job_application_id,
                 status=item.status,
                 error_message=item.error_message,
                 started_at=item.started_at,
@@ -1325,62 +1330,22 @@ def run_application_score(
     return _serialize_application_score(result.application)
 
 
-@app.post("/applications/score/run", response_model=ApplicationsScoreRunResponse)
+@app.post("/applications/score/run", response_model=ApplicationsScoreRunResponse, status_code=202)
 def run_applications_score(payload: ApplicationsScoreRunRequest, session: Session = Depends(get_session)):
-    query = select(JobApplication).order_by(JobApplication.created_at.asc())
-    if payload.status:
-        query = query.where(JobApplication.status == payload.status)
-    if payload.user_id is not None:
-        query = query.where(JobApplication.user_id == payload.user_id)
-    if payload.resume_id is not None:
-        query = query.where(JobApplication.resume_id == payload.resume_id)
-    if payload.job_posting_id is not None:
-        query = query.where(JobApplication.job_posting_id == payload.job_posting_id)
-
-    applications = session.scalars(query.limit(payload.limit)).all()
-    if not applications:
-        return ApplicationsScoreRunResponse(
-            selected=0,
-            processed=0,
-            scored=0,
-            errored=0,
-            skipped=0,
-            applications=[],
-        )
-
-    scored = 0
-    errored = 0
-    skipped = 0
-    processed_application_ids: list[int] = []
-
-    for application in applications:
-        try:
-            result = score_application(
-                session,
-                application,
-                prompt_key=payload.prompt_key,
-                force=payload.force,
-            )
-        except JobScoringSkipped:
-            session.rollback()
-            skipped += 1
-            continue
-
-        processed_application_ids.append(application.id)
-        if result.outcome == "scored":
-            scored += 1
-        elif result.outcome == "error":
-            errored += 1
-        _commit_or_fail(session)
-
-    return ApplicationsScoreRunResponse(
-        selected=len(applications),
-        processed=len(processed_application_ids),
-        scored=scored,
-        errored=errored,
-        skipped=skipped,
-        applications=processed_application_ids,
+    run = enqueue_application_score_run(
+        session,
+        limit=payload.limit,
+        status=payload.status,
+        user_id=payload.user_id,
+        resume_id=payload.resume_id,
+        job_posting_id=payload.job_posting_id,
+        prompt_key=payload.prompt_key,
+        force=payload.force,
+        callback_url=payload.callback_url,
     )
+    _commit_or_fail(session)
+    session.refresh(run)
+    return ApplicationsScoreRunResponse(**serialize_application_score_run(session, run))
 
 
 @app.post("/applications/{application_id}/notify", response_model=JobApplicationRead)

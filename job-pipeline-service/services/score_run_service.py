@@ -8,11 +8,11 @@ from urllib import error, request
 from sqlalchemy import func, select
 
 from database import SessionLocal
-from models import JobPosting, PromptLibrary, Run, RunItem
+from models import JobApplication, JobPosting, PromptLibrary, Run, RunItem
 from services.classification_service import classify_job
 from services.llm_client import build_llm_client
 from services.prompt_service import resolve_active_prompt
-from services.scoring_service import JobScoringSkipped, _commit_scoring_progress, score_job
+from services.scoring_service import JobScoringSkipped, _commit_scoring_progress, score_application, score_job
 
 
 def utcnow() -> datetime:
@@ -26,6 +26,7 @@ class ScoreRunCounts:
     errored: int
     skipped: int
     jobs: list[int]
+    applications: list[int]
 
 
 SUCCESS_STATUSES = {"scored", "classified"}
@@ -73,6 +74,57 @@ def enqueue_run(
                 score_run_id=run.id,
                 type=run_type,
                 job_posting_id=job.id,
+                status="queued",
+            )
+        )
+
+    return run
+
+
+def enqueue_application_score_run(
+    session,
+    *,
+    limit: int,
+    status: str,
+    user_id: int | None = None,
+    resume_id: int | None = None,
+    job_posting_id: int | None = None,
+    prompt_key: str | None = None,
+    force: bool = False,
+    callback_url: str | None = None,
+) -> Run:
+    query = select(JobApplication).order_by(JobApplication.created_at.asc()).limit(limit)
+
+    if status:
+        query = query.where(JobApplication.status == status)
+    if user_id is not None:
+        query = query.where(JobApplication.user_id == user_id)
+    if resume_id is not None:
+        query = query.where(JobApplication.resume_id == resume_id)
+    if job_posting_id is not None:
+        query = query.where(JobApplication.job_posting_id == job_posting_id)
+
+    applications = list(session.scalars(query).all())
+    run = Run(
+        type="application_scoring",
+        status="queued",
+        requested_status=status,
+        requested_source=None,
+        prompt_key=prompt_key,
+        force=force,
+        callback_url=callback_url,
+        selected_count=len(applications),
+    )
+    session.add(run)
+    session.flush()
+
+    for application in applications:
+        session.add(
+            RunItem(
+                score_run_id=run.id,
+                type="application_scoring",
+                job_posting_id=application.job_posting_id,
+                job_application_id=application.id,
                 status="queued",
             )
         )
@@ -133,6 +185,15 @@ def get_run_counts(session, run_id: int) -> ScoreRunCounts:
         session.scalars(
             select(RunItem.job_posting_id)
             .where(RunItem.score_run_id == run_id)
+            .where(RunItem.job_posting_id.is_not(None))
+            .order_by(RunItem.id.asc())
+        ).all()
+    )
+    application_ids = list(
+        session.scalars(
+            select(RunItem.job_application_id)
+            .where(RunItem.score_run_id == run_id)
+            .where(RunItem.job_application_id.is_not(None))
             .order_by(RunItem.id.asc())
         ).all()
     )
@@ -142,6 +203,7 @@ def get_run_counts(session, run_id: int) -> ScoreRunCounts:
         errored=counts.get("error", 0),
         skipped=counts.get("skipped", 0),
         jobs=job_ids,
+        applications=application_ids,
     )
 
 
@@ -157,6 +219,7 @@ def serialize_run(session, run: Run) -> dict:
         "errored": counts.errored,
         "skipped": counts.skipped,
         "jobs": counts.jobs,
+        "applications": counts.applications,
         "callback_url": run.callback_url,
         "created_at": run.created_at,
         "started_at": run.started_at,
@@ -180,6 +243,12 @@ def serialize_score_run(session, run: Run) -> dict:
 def serialize_classification_run(session, run: Run) -> dict:
     payload = serialize_run(session, run)
     payload["classified"] = payload.pop("succeeded")
+    return payload
+
+
+def serialize_application_score_run(session, run: Run) -> dict:
+    payload = serialize_run(session, run)
+    payload["scored"] = payload.pop("succeeded")
     return payload
 
 
@@ -281,15 +350,32 @@ def process_next_run() -> bool:
             item.error_message = None
             _commit_scoring_progress(session)
 
-            job = session.get(JobPosting, item.job_posting_id)
-            if job is None:
-                item.status = "error"
-                item.error_message = f"Job '{item.job_posting_id}' was not found"
-                item.finished_at = utcnow()
-                _commit_scoring_progress(session)
-                continue
-
             try:
+                if item.type == "application_scoring":
+                    application = session.get(JobApplication, item.job_application_id)
+                    if application is None:
+                        item.status = "error"
+                        item.error_message = f"Application '{item.job_application_id}' was not found"
+                    else:
+                        result = score_application(
+                            session,
+                            application,
+                            prompt_key=run.prompt_key,
+                            force=run.force,
+                            client=client,
+                            prompt=prompt,
+                        )
+                        item.status = result.outcome
+                        item.error_message = result.error_message
+                else:
+                    job = session.get(JobPosting, item.job_posting_id)
+                    if job is None:
+                        item.status = "error"
+                        item.error_message = f"Job '{item.job_posting_id}' was not found"
+                        item.finished_at = utcnow()
+                        _commit_scoring_progress(session)
+                        continue
+
                 if item.type == "classification":
                     result = classify_job(
                         session,
@@ -299,7 +385,9 @@ def process_next_run() -> bool:
                         client=client,
                         prompt=prompt,
                     )
-                else:
+                    item.status = result.outcome
+                    item.error_message = result.error_message
+                elif item.type == "scoring":
                     result = score_job(
                         session,
                         job,
@@ -308,8 +396,8 @@ def process_next_run() -> bool:
                         client=client,
                         prompt=prompt,
                     )
-                item.status = result.outcome
-                item.error_message = result.error_message
+                    item.status = result.outcome
+                    item.error_message = result.error_message
             except JobScoringSkipped as exc:
                 session.rollback()
                 item = session.get(RunItem, item.id)
