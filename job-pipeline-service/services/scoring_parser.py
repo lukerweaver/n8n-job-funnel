@@ -15,7 +15,6 @@ class ParsedScore:
     strengths: list[Any] | dict[str, Any] | None
     gaps: list[Any] | dict[str, Any] | None
     missing_from_jd: list[Any] | dict[str, Any] | None
-    role_type: str | None
     screening_likelihood: float | None
     dimension_scores: dict[str, float] | None
     gating_flags: list[str] | None
@@ -88,10 +87,6 @@ def parse_scoring_response(raw_response: str) -> ParsedScore:
     if justification is not None and not isinstance(justification, str):
         raise ScoringParseError("Field 'justification' must be a string or null")
 
-    role_type = payload.get("role_type")
-    if role_type is not None and not isinstance(role_type, str):
-        raise ScoringParseError("Field 'role_type' must be a string or null")
-
     screening_likelihood = _validate_optional_number(payload.get("screening_likelihood"), "screening_likelihood")
     dimension_scores = _validate_dimension_scores(payload.get("dimension_scores"), "dimension_scores")
     gating_flags = _validate_string_list(payload.get("gating_flags"), "gating_flags")
@@ -103,7 +98,6 @@ def parse_scoring_response(raw_response: str) -> ParsedScore:
         strengths=_validate_collection(payload.get("strengths"), "strengths"),
         gaps=_validate_collection(payload.get("gaps"), "gaps"),
         missing_from_jd=_validate_collection(payload.get("missing_from_jd"), "missing_from_jd"),
-        role_type=role_type,
         screening_likelihood=screening_likelihood,
         dimension_scores=dimension_scores,
         gating_flags=gating_flags,

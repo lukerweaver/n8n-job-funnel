@@ -12,7 +12,7 @@ from models import JobApplication, JobPosting, PromptLibrary, Run, RunItem
 from services.classification_service import classify_job
 from services.llm_client import build_llm_client
 from services.prompt_service import resolve_active_prompt, resolve_prompt_selector
-from services.scoring_service import JobScoringSkipped, _commit_scoring_progress, score_application, score_job
+from services.scoring_service import JobScoringSkipped, _commit_scoring_progress, score_application
 
 
 def utcnow() -> datetime:
@@ -20,7 +20,7 @@ def utcnow() -> datetime:
 
 
 @dataclass
-class ScoreRunCounts:
+class RunCounts:
     processed: int
     succeeded: int
     errored: int
@@ -29,59 +29,7 @@ class ScoreRunCounts:
     applications: list[int]
 
 
-SUCCESS_STATUSES = {"scored", "classified"}
-
-
-def enqueue_run(
-    session,
-    *,
-    run_type: str,
-    limit: int,
-    status: str = "",
-    source: str | None = None,
-    classification_key: str | None = None,
-    prompt_key: str | None = None,
-    force: bool = False,
-    callback_url: str | None = None,
-) -> Run:
-    query = select(JobPosting).order_by(JobPosting.created_at.asc()).limit(limit)
-
-    if status:
-        query = query.where(JobPosting.status == status)
-
-    if source:
-        query = query.where(JobPosting.source == source)
-
-    if run_type == "classification" and not force:
-        query = query.where(JobPosting.classification_key.is_(None))
-
-    jobs = list(session.scalars(query).all())
-    effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
-    run = Run(
-        type=run_type,
-        status="queued",
-        requested_status=status,
-        requested_source=source,
-        classification_key=classification_key,
-        prompt_key=effective_prompt_key,
-        force=force,
-        callback_url=callback_url,
-        selected_count=len(jobs),
-    )
-    session.add(run)
-    session.flush()
-
-    for job in jobs:
-        session.add(
-            RunItem(
-                score_run_id=run.id,
-                type=run_type,
-                job_posting_id=job.id,
-                status="queued",
-            )
-        )
-
-    return run
+SUCCESS_STATUSES = {"classified", "scored"}
 
 
 def enqueue_application_score_run(
@@ -127,7 +75,7 @@ def enqueue_application_score_run(
     for application in applications:
         session.add(
             RunItem(
-                score_run_id=run.id,
+                run_id=run.id,
                 type="application_scoring",
                 job_posting_id=application.job_posting_id,
                 job_application_id=application.id,
@@ -136,30 +84,6 @@ def enqueue_application_score_run(
         )
 
     return run
-
-
-def enqueue_score_run(
-    session,
-    *,
-    limit: int,
-    status: str,
-    source: str | None = None,
-    classification_key: str | None = None,
-    prompt_key: str | None = None,
-    force: bool = False,
-    callback_url: str | None = None,
-) -> Run:
-    return enqueue_run(
-        session,
-        run_type="scoring",
-        limit=limit,
-        status=status,
-        source=source,
-        classification_key=classification_key,
-        prompt_key=prompt_key,
-        force=force,
-        callback_url=callback_url,
-    )
 
 
 def enqueue_classification_run(
@@ -172,29 +96,54 @@ def enqueue_classification_run(
     force: bool = False,
     callback_url: str | None = None,
 ) -> Run:
-    return enqueue_run(
-        session,
-        run_type="classification",
-        limit=limit,
-        source=source,
+    query = select(JobPosting).order_by(JobPosting.created_at.asc()).limit(limit)
+
+    if source:
+        query = query.where(JobPosting.source == source)
+
+    if not force:
+        query = query.where(JobPosting.classification_key.is_(None))
+
+    jobs = list(session.scalars(query).all())
+    effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
+    run = Run(
+        type="classification",
+        status="queued",
+        requested_status="",
+        requested_source=source,
         classification_key=classification_key,
-        prompt_key=prompt_key,
+        prompt_key=effective_prompt_key,
         force=force,
         callback_url=callback_url,
+        selected_count=len(jobs),
     )
+    session.add(run)
+    session.flush()
+
+    for job in jobs:
+        session.add(
+            RunItem(
+                run_id=run.id,
+                type="classification",
+                job_posting_id=job.id,
+                status="queued",
+            )
+        )
+
+    return run
 
 
-def get_run_counts(session, run_id: int) -> ScoreRunCounts:
+def get_run_counts(session, run_id: int) -> RunCounts:
     rows = session.execute(
         select(RunItem.status, func.count())
-        .where(RunItem.score_run_id == run_id)
+        .where(RunItem.run_id == run_id)
         .group_by(RunItem.status)
     ).all()
     counts = {status: count for status, count in rows}
     job_ids = list(
         session.scalars(
             select(RunItem.job_posting_id)
-            .where(RunItem.score_run_id == run_id)
+            .where(RunItem.run_id == run_id)
             .where(RunItem.job_posting_id.is_not(None))
             .order_by(RunItem.id.asc())
         ).all()
@@ -202,12 +151,12 @@ def get_run_counts(session, run_id: int) -> ScoreRunCounts:
     application_ids = list(
         session.scalars(
             select(RunItem.job_application_id)
-            .where(RunItem.score_run_id == run_id)
+            .where(RunItem.run_id == run_id)
             .where(RunItem.job_application_id.is_not(None))
             .order_by(RunItem.id.asc())
         ).all()
     )
-    return ScoreRunCounts(
+    return RunCounts(
         processed=sum(counts.get(key, 0) for key in (*SUCCESS_STATUSES, "error", "skipped")),
         succeeded=sum(counts.get(key, 0) for key in SUCCESS_STATUSES),
         errored=counts.get("error", 0),
@@ -245,12 +194,6 @@ def serialize_run(session, run: Run) -> dict:
     }
 
 
-def serialize_score_run(session, run: Run) -> dict:
-    payload = serialize_run(session, run)
-    payload["scored"] = payload.pop("succeeded")
-    return payload
-
-
 def serialize_classification_run(session, run: Run) -> dict:
     payload = serialize_run(session, run)
     payload["classified"] = payload.pop("succeeded")
@@ -266,7 +209,7 @@ def serialize_application_score_run(session, run: Run) -> dict:
 def _mark_run_failed(session, run: Run, message: str) -> None:
     pending_items = session.scalars(
         select(RunItem).where(
-            RunItem.score_run_id == run.id,
+            RunItem.run_id == run.id,
             RunItem.status.in_(("queued", "running")),
         )
     ).all()
@@ -347,7 +290,7 @@ def process_next_run() -> bool:
         items = list(
             session.scalars(
                 select(RunItem)
-                .where(RunItem.score_run_id == run.id)
+                .where(RunItem.run_id == run.id)
                 .order_by(RunItem.id.asc())
             ).all()
         )
@@ -400,18 +343,6 @@ def process_next_run() -> bool:
                     )
                     item.status = result.outcome
                     item.error_message = result.error_message
-                elif item.type == "scoring":
-                    result = score_job(
-                        session,
-                        job,
-                        classification_key=run.classification_key or job.classification_key,
-                        prompt_key=run.prompt_key,
-                        force=run.force,
-                        client=client,
-                        prompt=prompt,
-                    )
-                    item.status = result.outcome
-                    item.error_message = result.error_message
             except JobScoringSkipped as exc:
                 session.rollback()
                 item = session.get(RunItem, item.id)
@@ -441,11 +372,7 @@ def process_next_run() -> bool:
     return True
 
 
-def process_next_score_run() -> bool:
-    return process_next_run()
-
-
-class ScoreRunWorker:
+class RunWorker:
     def __init__(self, poll_interval_seconds: float = 1.0) -> None:
         self.poll_interval_seconds = poll_interval_seconds
         self._stop_event = threading.Event()

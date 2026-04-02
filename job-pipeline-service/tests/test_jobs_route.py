@@ -1,39 +1,36 @@
+from datetime import datetime, timedelta, timezone
+
 from app import list_jobs
 from models import JobPosting
 
 
-def test_get_jobs_returns_role_type_and_supports_optional_filters(db_session):
+def test_get_jobs_returns_classification_metadata_and_supports_optional_filters(db_session):
+    now = datetime.now(timezone.utc)
     db_session.add_all(
         [
             JobPosting(
                 job_id="job-1",
                 source="linkedin",
-                status="scored",
                 company_name="Acme",
                 title="PM",
-                role_type="Product Manager",
-                screening_likelihood=30,
-                score=20,
+                classification_key="Product Manager",
+                classified_at=now,
             ),
             JobPosting(
                 job_id="job-2",
                 source="linkedin",
-                status="scored",
                 company_name="Beta",
                 title="Platform PM",
-                role_type="Product Manager",
-                screening_likelihood=15,
-                score=18,
+                classification_key="Product Manager",
+                classified_at=now - timedelta(days=2),
             ),
             JobPosting(
                 job_id="job-3",
                 source="linkedin",
-                status="scored",
                 company_name="Gamma",
                 title="Designer",
-                role_type="Designer",
-                screening_likelihood=40,
-                score=25,
+                classification_key="Designer",
+                classified_at=now,
             ),
         ]
     )
@@ -41,12 +38,9 @@ def test_get_jobs_returns_role_type_and_supports_optional_filters(db_session):
 
     response = list_jobs(
         db_session,
-        status=None,
         source=None,
-        score=None,
-        role_type="Product Manager",
-        screening_likelihood=20,
-        scored_since=None,
+        classification_key="Product Manager",
+        classified_since=now - timedelta(days=1),
         limit=100,
         offset=0,
     )
@@ -54,5 +48,4 @@ def test_get_jobs_returns_role_type_and_supports_optional_filters(db_session):
     assert response.total == 1
     assert len(response.items) == 1
     assert response.items[0].job_id == "job-1"
-    assert response.items[0].role_type == "Product Manager"
-    assert response.items[0].screening_likelihood == 30
+    assert response.items[0].classification_key == "Product Manager"

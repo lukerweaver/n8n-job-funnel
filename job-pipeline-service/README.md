@@ -6,7 +6,7 @@ FastAPI service for:
 2. classifying job postings into reusable role buckets
 3. generating and scoring user-owned job applications from matching resumes
 4. exposing routes that n8n can use to automate classification, scoring, tailoring-adjacent workflow, and notification state
-5. keeping a legacy job-native scoring bridge and Hiring Cafe Playwright capture route available
+5. keeping the Hiring Cafe Playwright capture route available when browser-side capture is needed
 
 The primary ingestion path is `POST /jobs/ingest` from `job-scraper-chrome`.
 
@@ -20,8 +20,7 @@ The primary ingestion path is `POST /jobs/ingest` from `job-scraper-chrome`.
 This service supports both SQLite and Postgres.
 
 - If `DATABASE_URL` is set, that value is used.
-- If `DATABASE_URL` is not set and `./data/jobs.db` already exists, the service uses `sqlite:///./data/jobs.db`.
-- Otherwise it uses `sqlite:///./jobs.db`.
+- Otherwise it uses `sqlite:///./data/jobs.db`.
 
 Tables are created automatically on startup. The current data model centers on:
 
@@ -31,7 +30,7 @@ Tables are created automatically on startup. The current data model centers on:
 - `job_applications` for resume-specific scoring and workflow lifecycle
 - `interview_rounds` for variable interview tracking
 
-`job_postings` still retains legacy job-level score fields during the migration. In addition to those tables, the service persists async legacy job scoring state in `score_runs` and `score_run_items`. Those tables still back the older `/jobs/score/run` flow, and the service syncs that legacy score data into generated `job_applications` where possible.
+Async classification and application-scoring runs are stored in `runs` and `run_items`.
 
 ## LLM configuration
 
@@ -44,18 +43,14 @@ Supported environment variables:
 - `OLLAMA_BASE_URL` default `http://localhost:11434`
 - `OLLAMA_NUM_CTX` default `50000`
 - `LLM_TIMEOUT_SECONDS` default `180`
-- `DEFAULT_PROMPT_KEY` optional
 
 The current implementation supports `ollama` as the provider.
 
-There are now two orchestration styles:
+Preferred orchestration flow:
 
-- preferred application-native flow:
-  - classify postings with `/jobs/classify/run`
-  - generate user applications with `/applications/generate/run`
-  - score applications with `/applications/score/run`
-- legacy job-native flow:
-  - queue batch scoring with `/jobs/score/run`
+- classify postings with `/jobs/classify/run`
+- generate user applications with `/applications/generate/run`
+- score applications with `/applications/score/run`
 
 The repository includes callback-driven n8n exports under `../exports/workflows/`:
 
@@ -73,12 +68,6 @@ The intended automated workflow is:
 4. score `JobApplication`
 5. tailor and notify from application thresholds
 6. let the user drive `applied`, `screening`, `interview`, `offer`, `rejected`, or `withdrawn`
-
-Legacy compatibility flow:
-
-1. ingest `JobPosting`
-2. optionally score `JobPosting` through `/jobs/{id}/score/run` or `/jobs/score/run`
-3. let the legacy sync bridge mirror score state onto `job_applications` until downstream automation is fully moved to the application-native routes
 
 ## Prompt library
 
@@ -107,8 +96,7 @@ Prompt resolution uses:
 
 - the explicit `prompt_key` override passed to a classify or score route, or
 - the provided `classification_key` for that run, or
-- the job's stored `classification_key` for single-item score/application score routes, or
-- `DEFAULT_PROMPT_KEY` if no selector is available
+- the job's stored `classification_key` for single-item score/application score routes
 
 The repo includes a sanitized example seed at `exports/data/prompt_library.seed.mock.json`. It demonstrates the scoring schema and customization points without exposing a production prompt.
 
@@ -155,16 +143,18 @@ Example prompt payload:
 
 ### Scoring payload schema
 
-The scoring parser accepts both legacy and updated LLM JSON outputs.
+The scoring parser expects `total_score` and may also accept:
 
-- Legacy supported fields: `total_score`, `recommendation`, `justification`, `strengths`, `gaps`, `missing_from_jd`.
-- New optional fields:
-  - `role_type`
-  - `screening_likelihood`
-  - `dimension_scores`
-  - `gating_flags`
+- `recommendation`
+- `justification`
+- `strengths`
+- `gaps`
+- `missing_from_jd`
+- `screening_likelihood`
+- `dimension_scores`
+- `gating_flags`
 
-The parser is backwards compatible: old prompt outputs still parse and persist without requiring the new fields.
+Application scoring owns the persisted score metadata. Job postings only retain ingest and classification state.
 
 ## Local run
 
@@ -290,15 +280,8 @@ The compose example:
 - `GET /jobs/{id}`
 - `POST /jobs/{id}/classify/run`
 - `POST /jobs/classify/run`
-- `POST /jobs/{id}/score`
-- `POST /jobs/{id}/score/run`
-- `POST /jobs/score/run`
-- `GET /score-runs/{run_id}`
-- `GET /score-runs/{run_id}/items`
-- `POST /jobs/scores`
-- `POST /jobs/{id}/notify`
-- `POST /jobs/notify`
-- `POST /jobs/{id}/error`
+- `GET /runs/{run_id}`
+- `GET /runs/{run_id}/items`
 - `GET /users`
 - `POST /users`
 - `GET /resumes`
@@ -325,7 +308,7 @@ The compose example:
 
 ### Primary route groups
 
-- Jobs: ingest and classify source postings, with legacy job-native score/writeback routes still available
+- Jobs: ingest and classify source postings
 - Users and resumes: define owners plus resume inventories with independent `classification_key`, `prompt_key`, and `is_default`
 - Applications: create, generate, score, notify, error, and update lifecycle state on `job_applications`
 - Interview rounds: track multi-round interview progress per application
@@ -338,7 +321,7 @@ The service uses two job identifiers:
 - `job_id` - external string identifier used for ingest dedupe
 - `id` - internal numeric database primary key used by most read/write routes
 
-That distinction matters for integrations. Ingest works with external `job_id`, while classify, score, notify, resume, application, and prompt-library routes use internal numeric IDs.
+That distinction matters for integrations. Ingest works with external `job_id`, while classify, resume, application, and prompt-library routes use internal numeric IDs.
 
 ### `POST /jobs/ingest`
 
@@ -373,19 +356,16 @@ Response fields:
 
 Supported query parameters:
 
-- `status`
 - `source`
-- `score`
-- `role_type`
-- `screening_likelihood`
-- `scored_since`
+- `classification_key`
+- `classified_since`
 - `limit`
 - `offset`
 
 Example:
 
 ```text
-GET http://localhost:8000/jobs?status=new&limit=25
+GET http://localhost:8000/jobs?classification_key=Product%20Manager&limit=25
 ```
 
 ### Preferred n8n sequence
@@ -551,82 +531,6 @@ Example payload:
   "status": "scheduled"
 }
 ```
-
-### `POST /jobs/{id}/score`
-
-Stores scoring output for a single job identified by internal numeric `id`. This is a legacy/manual writeback route retained for compatibility.
-
-Example payload:
-
-```json
-{
-  "score": 22,
-  "recommendation": "apply",
-  "justification": "Strong fit for the role",
-  "strengths": ["B2B product experience", "roadmapping"],
-  "gaps": ["No direct fintech background"],
-  "missing_from_jd": ["SQL"],
-  "screening_likelihood": 20,
-  "dimension_scores": {
-    "domain_fit": 4,
-    "execution_ownership_fit": 5,
-    "customer_discovery_fit": 3,
-    "environment_fit": 4,
-    "role_readiness": 4
-  },
-  "gating_flags": ["No major blockers"],
-  "prompt_key": "product",
-  "prompt_version": 3
-}
-```
-
-If `scored_at` is omitted, the service uses the current UTC time. The response includes the current `status`, `score`, `scoring metadata`, `scored_at`, `notified_at`, and `error_at` values for that row.
-
-Scoring writeback responses expose legacy fields such as `role_type`, `screening_likelihood`, `dimension_scores`, and `gating_flags` when present.
-
-### `POST /jobs/scores`
-
-Batch score writeback route. Each item must include numeric `id`.
-
-### Legacy scoring routes
-
-`POST /jobs/{id}/score/run`, `POST /jobs/score/run`, `GET /score-runs/{run_id}`, and `GET /score-runs/{run_id}/items` are still available for backward compatibility while older n8n flows are being retired.
-
-### Legacy notify/error routes
-
-`POST /jobs/{id}/error`, `POST /jobs/{id}/notify`, and `POST /jobs/notify` are also retained for backward compatibility with older job-based automation.
-
-### `POST /jobs/{id}/error`
-
-Marks a job as error and sets `error_at`.
-
-Example payload:
-
-```json
-{
-  "status": "error"
-}
-```
-
-If `error_at` is omitted, the service uses the current UTC time.
-
-### `POST /jobs/{id}/notify`
-
-Marks a job as notified and sets `notified_at`.
-
-Example payload:
-
-```json
-{
-  "status": "notified"
-}
-```
-
-If `notified_at` is omitted, the service uses the current UTC time.
-
-### `POST /jobs/notify`
-
-Batch notification writeback route. Each item must include numeric `id`.
 
 ### Prompt library routes
 

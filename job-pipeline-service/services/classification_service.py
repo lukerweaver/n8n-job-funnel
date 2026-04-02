@@ -37,7 +37,6 @@ def _apply_classification(job: JobPosting, classification_key: str, prompt: Prom
     job.classification_error = None
     job.classification_raw_response = raw_response
     job.classified_at = now
-    job.role_type = classification_key
 
 
 def _apply_classification_error(job: JobPosting, error_message: str, raw_response: str | None, client: LlmClient) -> None:
@@ -88,7 +87,7 @@ def classify_jobs(
     prompt_key: str | None = None,
     force: bool = False,
 ) -> BatchClassificationResult:
-    jobs = select_jobs_for_scoring(session, status="", source=source, limit=limit)
+    jobs = select_jobs_for_scoring(session, source=source, limit=limit)
     if not jobs:
         return BatchClassificationResult(selected=0, classified=0, errored=0, skipped=0, job_ids=[])
 
