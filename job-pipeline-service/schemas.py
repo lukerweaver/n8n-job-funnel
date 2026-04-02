@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -134,6 +135,7 @@ class JobErrorResponse(BaseModel):
 
 
 class JobScoreRunRequest(BaseModel):
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
 
@@ -142,22 +144,56 @@ class JobsScoreRunRequest(BaseModel):
     limit: int = 25
     status: str = "new"
     source: str | None = None
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
     callback_url: str | None = None
 
 
-class ScoreRunItemRead(BaseModel):
+class RunItemRead(BaseModel):
     id: int
-    job_posting_id: int
+    type: str
+    job_posting_id: int | None = None
+    job_application_id: int | None = None
     status: str
     error_message: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
 
+class RunRead(BaseModel):
+    run_id: int
+    type: str
+    status: str
+    selected: int
+    processed: int
+    succeeded: int
+    errored: int
+    skipped: int
+    jobs: list[int]
+    applications: list[int]
+    callback_url: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    last_error: str | None = None
+    requested_status: str
+    requested_source: str | None = None
+    classification_key: str | None = None
+    prompt_key: str | None = None
+    force: bool = False
+    callback_status: str | None = None
+    callback_error: str | None = None
+
+
+class RunItemsResponse(BaseModel):
+    total: int
+    items: list[RunItemRead]
+
+
 class JobsScoreRunResponse(BaseModel):
     run_id: int
+    type: str
     status: str
     selected: int
     processed: int
@@ -165,6 +201,7 @@ class JobsScoreRunResponse(BaseModel):
     errored: int
     skipped: int
     jobs: list[int]
+    applications: list[int]
     callback_url: str | None = None
     created_at: datetime
     started_at: datetime | None = None
@@ -175,6 +212,7 @@ class JobsScoreRunResponse(BaseModel):
 class ScoreRunRead(JobsScoreRunResponse):
     requested_status: str
     requested_source: str | None = None
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
     callback_status: str | None = None
@@ -183,7 +221,7 @@ class ScoreRunRead(JobsScoreRunResponse):
 
 class ScoreRunItemsResponse(BaseModel):
     total: int
-    items: list[ScoreRunItemRead]
+    items: list[RunItemRead]
 
 
 class JobsBatchNotifyResponse(BaseModel):
@@ -193,10 +231,13 @@ class JobsBatchNotifyResponse(BaseModel):
 
 class PromptLibraryBase(BaseModel):
     prompt_key: str
+    prompt_type: str = "scoring"
     prompt_version: int
     system_prompt: str
     user_prompt_template: str
-    base_resume_template: str
+    context: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
     is_active: bool = True
 
 
@@ -206,10 +247,13 @@ class PromptLibraryCreate(PromptLibraryBase):
 
 class PromptLibraryUpdate(BaseModel):
     prompt_key: str | None = None
+    prompt_type: str | None = None
     prompt_version: int | None = None
     system_prompt: str | None = None
     user_prompt_template: str | None = None
-    base_resume_template: str | None = None
+    context: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
     is_active: bool | None = None
 
 
@@ -222,3 +266,271 @@ class PromptLibraryRead(PromptLibraryBase):
 class PromptLibraryListResponse(BaseModel):
     total: int
     items: list[PromptLibraryRead]
+
+
+class UserCreate(BaseModel):
+    name: str
+    email: str
+
+
+class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    email: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserListResponse(BaseModel):
+    total: int
+    items: list[UserRead]
+
+
+class ResumeCreate(BaseModel):
+    user_id: int
+    name: str
+    prompt_key: str | None = None
+    classification_key: str | None = None
+    content: str
+    is_active: bool = True
+    is_default: bool = False
+
+
+class ResumeUpdate(BaseModel):
+    name: str | None = None
+    prompt_key: str | None = None
+    classification_key: str | None = None
+    content: str | None = None
+    is_active: bool | None = None
+    is_default: bool | None = None
+
+
+class ResumeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    name: str
+    prompt_key: str
+    classification_key: str | None = None
+    content: str
+    is_active: bool
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ResumeListResponse(BaseModel):
+    total: int
+    items: list[ResumeRead]
+
+
+class ApplicationCreate(BaseModel):
+    user_id: int
+    job_posting_id: int
+    resume_id: int
+    status: str = "new"
+
+
+class ApplicationGenerateRequest(BaseModel):
+    job_posting_id: int
+    user_id: int | None = None
+    resume_strategy: Literal["classification_first", "default_only", "default_fallback"] = "classification_first"
+
+
+class ApplicationGenerateResponse(BaseModel):
+    created: int
+    skipped: int
+    applications: list[int]
+
+
+class ApplicationsGenerateRunRequest(BaseModel):
+    user_id: int
+    limit: int = 100
+    resume_strategy: Literal["classification_first", "default_only", "default_fallback"] = "classification_first"
+
+
+class ApplicationsGenerateRunResponse(BaseModel):
+    selected: int
+    processed: int
+    created: int
+    skipped: int
+    jobs: list[int]
+    applications: list[int]
+
+
+class ApplicationStatusWrite(BaseModel):
+    status: str
+    applied_at: datetime | None = None
+    offer_at: datetime | None = None
+    rejected_at: datetime | None = None
+    withdrawn_at: datetime | None = None
+
+
+class JobApplicationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    job_posting_id: int
+    resume_id: int
+    job_id: str | None = None
+    source: str | None = None
+    company_name: str | None = None
+    title: str | None = None
+    yearly_min_compensation: float | None = None
+    yearly_max_compensation: float | None = None
+    apply_url: str | None = None
+    role_type: str | None = None
+    resume_name: str | None = None
+    status: str
+    score: float | None = None
+    recommendation: str | None = None
+    justification: str | None = None
+    screening_likelihood: float | None = None
+    dimension_scores: dict[str, float] | None = None
+    gating_flags: list[str] | None = None
+    strengths: list[Any] | dict[str, Any] | None = None
+    gaps: list[Any] | dict[str, Any] | None = None
+    missing_from_jd: list[Any] | dict[str, Any] | None = None
+    scoring_prompt_key: str | None = None
+    scoring_prompt_version: int | None = None
+    score_error: str | None = None
+    scored_at: datetime | None = None
+    tailored_resume_content: str | None = None
+    tailoring_prompt_key: str | None = None
+    tailoring_prompt_version: int | None = None
+    tailoring_error: str | None = None
+    tailored_at: datetime | None = None
+    notified_at: datetime | None = None
+    applied_at: datetime | None = None
+    offer_at: datetime | None = None
+    rejected_at: datetime | None = None
+    withdrawn_at: datetime | None = None
+    last_error_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobApplicationListResponse(BaseModel):
+    total: int
+    items: list[JobApplicationRead]
+
+
+class JobApplicationScoreResponse(BaseModel):
+    id: int
+    job_posting_id: int
+    resume_id: int
+    status: str
+    score: float | None = None
+    recommendation: str | None = None
+    screening_likelihood: float | None = None
+    dimension_scores: dict[str, float] | None = None
+    gating_flags: list[str] | None = None
+    scored_at: datetime | None = None
+    notified_at: datetime | None = None
+    last_error_at: datetime | None = None
+    score_error: str | None = None
+
+
+class JobClassificationRunRequest(BaseModel):
+    classification_key: str | None = None
+    prompt_key: str | None = None
+    force: bool = False
+
+
+class JobsClassificationRunRequest(BaseModel):
+    limit: int = 25
+    source: str | None = None
+    classification_key: str | None = None
+    prompt_key: str | None = None
+    force: bool = False
+    callback_url: str | None = None
+
+
+class JobClassificationResponse(BaseModel):
+    id: int
+    job_id: str
+    classification_key: str | None = None
+    classification_prompt_version: int | None = None
+    classified_at: datetime | None = None
+    classification_error: str | None = None
+
+
+class JobsClassificationRunResponse(BaseModel):
+    run_id: int
+    type: str
+    status: str
+    selected: int
+    processed: int
+    classified: int
+    errored: int
+    skipped: int
+    jobs: list[int]
+    applications: list[int] = []
+    callback_url: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    last_error: str | None = None
+
+
+class ApplicationsScoreRunRequest(BaseModel):
+    limit: int = 25
+    status: str = "new"
+    user_id: int | None = None
+    resume_id: int | None = None
+    job_posting_id: int | None = None
+    classification_key: str | None = None
+    prompt_key: str | None = None
+    force: bool = False
+    callback_url: str | None = None
+
+
+class ApplicationsScoreRunResponse(BaseModel):
+    run_id: int
+    type: str
+    status: str
+    selected: int
+    processed: int
+    scored: int
+    errored: int
+    skipped: int
+    jobs: list[int]
+    applications: list[int]
+    callback_url: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    last_error: str | None = None
+
+
+class InterviewRoundCreate(BaseModel):
+    round_number: int
+    stage_name: str | None = None
+    status: str = "scheduled"
+    notes: str | None = None
+    scheduled_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class InterviewRoundRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_application_id: int
+    round_number: int
+    stage_name: str | None = None
+    status: str
+    notes: str | None = None
+    scheduled_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class InterviewRoundListResponse(BaseModel):
+    total: int
+    items: list[InterviewRoundRead]

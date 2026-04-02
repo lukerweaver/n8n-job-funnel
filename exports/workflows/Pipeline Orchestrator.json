@@ -1,5 +1,5 @@
 {
-  "name": "Job Scoring",
+  "name": "Pipeline Orchestrator",
   "nodes": [
     {
       "parameters": {
@@ -18,16 +18,16 @@
         -80,
         -160
       ],
-      "id": "fb965bdf-d92f-4024-9f71-39a8e98ba358",
+      "id": "8b9cdf57-a860-44d2-9b8f-4ca9c0c52f01",
       "name": "Schedule Trigger"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://<job-pipeline-service-host>:8000/jobs/score/run",
+        "url": "http://<job-pipeline-service-host>:8000/jobs/classify/run",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"limit\": 100,\n  \"status\": \"new\",\n  \"dry_run\": false,\n  \"force\": false\n}",
+        "jsonBody": "={\n  \"limit\": 100,\n  \"force\": false,\n  \"callback_url\": \"https://<n8n-host>/webhook/job-classification-complete\"\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -36,8 +36,8 @@
         176,
         -160
       ],
-      "id": "d9b0a6c6-515a-4ce6-8386-076a17445c7b",
-      "name": "Run Service Scoring"
+      "id": "867d8a52-ac84-4250-b52b-a3cb2c11f3d7",
+      "name": "Queue Job Classification"
     }
   ],
   "pinData": {},
@@ -46,7 +46,7 @@
       "main": [
         [
           {
-            "node": "Run Service Scoring",
+            "node": "Queue Job Classification",
             "type": "main",
             "index": 0
           }
@@ -54,17 +54,17 @@
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "phase3-service-scoring",
+  "versionId": "callback-pipeline-orchestrator",
   "meta": {
     "templateCredsSetupCompleted": true,
-    "instanceId": "4b822023187a5edc90d108fd34ec387e96fd3f58e06d64a8f9f7e008f280d4e3"
+    "instanceId": ""
   },
-  "id": "F0TMoxmJhHodyYuS",
+  "id": "aRrQ1sJH2cT3xV4b",
   "tags": []
 }
