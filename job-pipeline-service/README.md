@@ -84,6 +84,19 @@ Legacy compatibility flow:
 
 Prompt templates are stored in the `prompt_library` table and resolved by `prompt_key` plus `prompt_type`.
 
+Current key contract:
+
+- `classification_key` is the routing key for matching jobs to resumes
+- `prompt_key` is the prompt-family key for prompt lookup and audit metadata
+- in the standard flow, classify/score routes may accept `classification_key`, and the service derives prompt lookup from `(classification_key, prompt_type)`
+- `prompt_key` can still be passed explicitly as an override for low-level or compatibility use
+
+Resume contract:
+
+- resumes can be classification-specific with `classification_key` set
+- resumes can be generic/default with `classification_key = null` and `is_default = true`
+- generation routes can choose between classification-matched resumes and the user's default resume via `resume_strategy`
+
 Supported prompt types:
 
 - `classification`
@@ -92,8 +105,10 @@ Supported prompt types:
 
 Prompt resolution uses:
 
-- the explicit `prompt_key` passed to a classify or score route, or
-- `DEFAULT_PROMPT_KEY` if the request does not pass one
+- the explicit `prompt_key` override passed to a classify or score route, or
+- the provided `classification_key` for that run, or
+- the job's stored `classification_key` for single-item score/application score routes, or
+- `DEFAULT_PROMPT_KEY` if no selector is available
 
 The repo includes a sanitized example seed at `exports/data/prompt_library.seed.mock.json`. It demonstrates the scoring schema and customization points without exposing a production prompt.
 
@@ -311,7 +326,7 @@ The compose example:
 ### Primary route groups
 
 - Jobs: ingest and classify source postings, with legacy job-native score/writeback routes still available
-- Users and resumes: define owners plus resume inventories keyed by `classification_key`
+- Users and resumes: define owners plus resume inventories with independent `classification_key`, `prompt_key`, and `is_default`
 - Applications: create, generate, score, notify, error, and update lifecycle state on `job_applications`
 - Interview rounds: track multi-round interview progress per application
 - Prompt library: manage versioned prompts by `prompt_key` and `prompt_type`
@@ -433,7 +448,7 @@ Example payload:
 
 ```json
 {
-  "prompt_key": "Product Manager",
+  "classification_key": "product",
   "force": false
 }
 ```
@@ -448,32 +463,40 @@ Example payload:
 {
   "limit": 100,
   "source": "linkedin",
+  "classification_key": "product",
   "force": false
 }
 ```
 
 ### `POST /applications/generate`
 
-Creates `job_applications` for resumes whose `classification_key` matches the posting classification.
+Creates `job_applications` using one of three resume-selection strategies:
+
+- `classification_first`: use active resumes whose `classification_key` matches the posting
+- `default_only`: use the user's active default resume only
+- `default_fallback`: use a matching classified resume when present, otherwise fall back to the user's default resume
 
 Example payload:
 
 ```json
 {
-  "job_posting_id": 123
+  "job_posting_id": 123,
+  "user_id": 1,
+  "resume_strategy": "default_fallback"
 }
 ```
 
 ### `POST /applications/generate/run`
 
-Creates missing `job_applications` for one user across classified postings where that user has at least one active matching resume and no application exists yet for the posting.
+Creates missing `job_applications` for one user across classified postings where the selected `resume_strategy` yields at least one eligible resume and no application exists yet for the posting.
 
 Example payload:
 
 ```json
 {
   "user_id": 1,
-  "limit": 100
+  "limit": 100,
+  "resume_strategy": "classification_first"
 }
 ```
 
