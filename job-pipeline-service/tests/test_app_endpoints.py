@@ -41,6 +41,7 @@ from app import (
     operational_error_handler,
     run_phase_two_backfill,
     run_application_score,
+    run_applications_generate,
     run_applications_score,
     run_job_classification,
     run_jobs_classification,
@@ -57,6 +58,7 @@ from models import JobApplication, Resume, User
 from schemas import (
     ApplicationCreate,
     ApplicationGenerateRequest,
+    ApplicationsGenerateRunRequest,
     ApplicationsScoreRunRequest,
     ApplicationStatusWrite,
     InterviewRoundCreate,
@@ -496,6 +498,60 @@ def test_application_crud_generate_and_status_flow(db_session):
     assert notified.notified_at is not None
     assert errored.status == "new"
     assert errored.last_error_at is not None
+
+
+def test_run_applications_generate_for_user(db_session):
+    user = seed_user(db_session, name="Batch User", email="batch@example.com")
+    other_user = seed_user(db_session, name="Other User", email="other-batch@example.com")
+    matching_resume = seed_resume(db_session, user=user, name="PM Resume", prompt_key="Product Manager", content="Resume")
+    seed_resume(db_session, user=other_user, name="Other Resume", prompt_key="Product Manager", content="Resume")
+
+    eligible = seed_job(db_session, job_id="job-eligible")
+    eligible.classification_key = "Product Manager"
+    already_generated = seed_job(db_session, job_id="job-existing")
+    already_generated.classification_key = "Product Manager"
+    no_match = seed_job(db_session, job_id="job-no-match")
+    no_match.classification_key = "Designer"
+    unclassified = seed_job(db_session, job_id="job-unclassified")
+    db_session.commit()
+
+    seed_application(db_session, user=user, job=already_generated, resume=matching_resume, status="new")
+
+    result = run_applications_generate(
+        ApplicationsGenerateRunRequest(user_id=user.id, limit=10),
+        db_session,
+    )
+
+    assert result.selected == 1
+    assert result.processed == 1
+    assert result.created == 1
+    assert result.skipped == 0
+    assert result.jobs == [eligible.id]
+    created_applications = db_session.scalars(
+        select(JobApplication).where(JobApplication.user_id == user.id, JobApplication.job_posting_id == eligible.id)
+    ).all()
+    assert result.applications == [created_applications[0].id]
+    assert len(created_applications) == 1
+
+
+def test_run_applications_generate_empty_selection_and_missing_user(db_session):
+    user = seed_user(db_session, name="No Match", email="nomatch@example.com")
+    job = seed_job(db_session, job_id="job-designer")
+    job.classification_key = "Designer"
+    seed_resume(db_session, user=user, name="PM Resume", prompt_key="Product Manager", content="Resume")
+    db_session.commit()
+
+    result = run_applications_generate(
+        ApplicationsGenerateRunRequest(user_id=user.id, limit=10),
+        db_session,
+    )
+
+    assert result.selected == 0
+    assert result.jobs == []
+    assert result.applications == []
+
+    with pytest.raises(HTTPException):
+        run_applications_generate(ApplicationsGenerateRunRequest(user_id=9999, limit=10), db_session)
 
 
 def test_application_endpoint_conflicts_and_not_found(db_session):

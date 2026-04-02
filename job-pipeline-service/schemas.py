@@ -334,6 +334,20 @@ class ApplicationGenerateResponse(BaseModel):
     applications: list[int]
 
 
+class ApplicationsGenerateRunRequest(BaseModel):
+    user_id: int
+    limit: int = 100
+
+
+class ApplicationsGenerateRunResponse(BaseModel):
+    selected: int
+    processed: int
+    created: int
+    skipped: int
+    jobs: list[int]
+    applications: list[int]
+
+
 class ApplicationStatusWrite(BaseModel):
     status: str
     applied_at: datetime | None = None

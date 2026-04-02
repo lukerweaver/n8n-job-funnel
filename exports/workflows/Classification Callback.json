@@ -21,7 +21,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const payload = $input.first().json;\nif (payload?.type !== 'classification' || payload?.status !== 'completed') {\n  return [];\n}\nconst jobs = Array.isArray(payload.jobs) ? payload.jobs : [];\nreturn jobs.map((jobPostingId) => ({\n  json: {\n    job_posting_id: jobPostingId,\n    score_callback_url: 'https://<n8n-host>/webhook/application-score-complete',\n  },\n}));"
+        "jsCode": "const payload = $input.first().json;\nif (payload?.type !== 'classification' || payload?.status !== 'completed') {\n  return [];\n}\nconst jobs = Array.isArray(payload.jobs) ? payload.jobs : [];\nif (!jobs.length) {\n  return [];\n}\nreturn [{\n  json: {\n    user_id: 1,\n    score_callback_url: 'https://<n8n-host>/webhook/application-score-complete',\n  },\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -35,10 +35,10 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://<job-pipeline-service-host>:8000/applications/generate",
+        "url": "http://<job-pipeline-service-host>:8000/applications/generate/run",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { \"job_posting_id\": $json.job_posting_id } }}",
+        "jsonBody": "={{ { \"user_id\": $json.user_id, \"limit\": 100 } }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -56,7 +56,7 @@
         "url": "http://<job-pipeline-service-host>:8000/applications/score/run",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { \"limit\": 100, \"status\": \"new\", \"job_posting_id\": $json.job_posting_id, \"force\": false, \"callback_url\": $json.score_callback_url } }}",
+        "jsonBody": "={{ { \"limit\": 100, \"status\": \"new\", \"force\": false, \"callback_url\": $json.score_callback_url } }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",

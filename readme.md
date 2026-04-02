@@ -68,7 +68,8 @@ Job-level scoring accepts both legacy and expanded JSON output shapes from the L
 - `GET /applications` - list generated application rows with filters such as `user_id`, `resume_id`, `job_posting_id`, `status`, and `score`
 - `GET /applications/{id}` - fetch one application
 - `POST /applications` - create or upsert a specific posting/resume application pair
-- `POST /applications/generate` - create applications for resumes whose `classification_key` matches the posting
+- `POST /applications/generate` - create applications for resumes whose `classification_key` matches one posting
+- `POST /applications/generate/run` - create missing applications for one user across eligible classified postings
 - `POST /applications/{id}/score` - manual score writeback for a single application
 - `POST /applications/{id}/score/run` - score one application through the service
 - `POST /applications/score/run` - enqueue a batch application scoring run
@@ -356,7 +357,7 @@ These exports target the current callback-driven API flow, but they are checked 
 If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id`, internal numeric `job_posting_id`, and internal numeric `application_id`.
 
 - `Pipeline Orchestrator.json` starts the pipeline on a schedule and queues `POST /jobs/classify/run` with a callback URL.
-- `Classification Callback.json` receives classification completion, generates applications per returned job id, and queues `POST /applications/score/run` with a callback URL.
+- `Classification Callback.json` receives classification completion, calls `POST /applications/generate/run` for the target user, and then queues `POST /applications/score/run` with a callback URL.
 - `Application Score Callback.json` receives application scoring completion, fetches run items, selects scored applications, and performs notify/tracker/email steps.
 
 ## Prompt setup

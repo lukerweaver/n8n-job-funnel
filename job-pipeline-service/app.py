@@ -20,6 +20,8 @@ from models import InterviewRound, JobApplication, JobPosting, PromptLibrary, Re
 from schemas import (
     ApplicationCreate,
     ApplicationGenerateRequest,
+    ApplicationsGenerateRunRequest,
+    ApplicationsGenerateRunResponse,
     ApplicationGenerateResponse,
     ApplicationsScoreRunRequest,
     ApplicationsScoreRunResponse,
@@ -122,6 +124,16 @@ ALLOWED_APPLICATION_STATUSES = {
     "rejected",
     "withdrawn",
 }
+
+OPENAPI_TAGS = [
+    {"name": "system", "description": "Health and operational utility endpoints."},
+    {"name": "jobs", "description": "Job ingest, listing, classification, scoring, notification, and legacy compatibility routes."},
+    {"name": "applications", "description": "Application generation, scoring, notification, status, and interview lifecycle routes."},
+    {"name": "runs", "description": "Async run inspection for classification, application scoring, and legacy job scoring."},
+    {"name": "users", "description": "User records that own resumes and applications."},
+    {"name": "resumes", "description": "Resume inventory keyed to classification domains."},
+    {"name": "prompt-library", "description": "Versioned prompt templates resolved by prompt key and prompt type."},
+]
 
 
 def apply_job_updates(job: JobPosting, payload: JobIngestItem) -> None:
@@ -683,7 +695,7 @@ async def lifespan(_app: FastAPI):
     score_run_worker.stop()
 
 
-app = FastAPI(title="Job Pipeline Service", lifespan=lifespan)
+app = FastAPI(title="Job Pipeline Service", lifespan=lifespan, openapi_tags=OPENAPI_TAGS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -711,12 +723,12 @@ async def llm_request_error_handler(_: Request, exc: LlmRequestError) -> JSONRes
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
-@app.get("/health")
+@app.get("/health", tags=["system"])
 async def health():
     return {"ok": True}
 
 
-@app.post("/jobs/ingest", response_model=JobIngestResponse)
+@app.post("/jobs/ingest", response_model=JobIngestResponse, tags=["jobs"])
 def ingest_jobs(
     payload: Annotated[JobIngestItem | list[JobIngestItem], Body(...)],
     session: Session = Depends(get_session),
@@ -751,7 +763,7 @@ def ingest_jobs(
     )
 
 
-@app.get("/jobs", response_model=JobListResponse)
+@app.get("/jobs", response_model=JobListResponse, tags=["jobs"])
 def list_jobs(
     session: Session = Depends(get_session),
     status: str | None = Query(default=None),
@@ -803,7 +815,7 @@ def list_jobs(
     return JobListResponse(total=total, items=[JobRead.model_validate(item) for item in items])
 
 
-@app.get("/jobs/{job_id}", response_model=JobRead)
+@app.get("/jobs/{job_id}", response_model=JobRead, tags=["jobs"])
 def get_job(job_id: int, session: Session = Depends(get_session)):
     job = _get_job_by_id(session, job_id)
     if job is None:
@@ -812,7 +824,7 @@ def get_job(job_id: int, session: Session = Depends(get_session)):
     return JobRead.model_validate(job)
 
 
-@app.post("/jobs/{job_id}/classify/run", response_model=JobClassificationResponse)
+@app.post("/jobs/{job_id}/classify/run", response_model=JobClassificationResponse, tags=["jobs"])
 def run_job_classification(job_id: int, payload: JobClassificationRunRequest, session: Session = Depends(get_session)):
     job = _get_job_by_id(session, job_id)
     if job is None:
@@ -827,7 +839,7 @@ def run_job_classification(job_id: int, payload: JobClassificationRunRequest, se
     return _serialize_job_classification(result.job)
 
 
-@app.post("/jobs/classify/run", response_model=JobsClassificationRunResponse, status_code=202)
+@app.post("/jobs/classify/run", response_model=JobsClassificationRunResponse, status_code=202, tags=["jobs"])
 def run_jobs_classification(payload: JobsClassificationRunRequest, session: Session = Depends(get_session)):
     run = enqueue_classification_run(
         session,
@@ -842,7 +854,7 @@ def run_jobs_classification(payload: JobsClassificationRunRequest, session: Sess
     return JobsClassificationRunResponse(**serialize_classification_run(session, run))
 
 
-@app.post("/jobs/{job_id}/score", response_model=JobScoreResponse)
+@app.post("/jobs/{job_id}/score", response_model=JobScoreResponse, tags=["jobs"])
 def store_job_score(job_id: int, score_payload: JobScoreWrite, session: Session = Depends(get_session)):
     job = _get_job_by_id(session, job_id)
     if job is None:
@@ -869,7 +881,7 @@ def store_job_score(job_id: int, score_payload: JobScoreWrite, session: Session 
     )
 
 
-@app.post("/jobs/{job_id}/score/run", response_model=JobScoreResponse)
+@app.post("/jobs/{job_id}/score/run", response_model=JobScoreResponse, tags=["jobs"])
 def run_job_score(job_id: int, payload: JobScoreRunRequest, session: Session = Depends(get_session)):
     job = _get_job_by_id(session, job_id)
     if job is None:
@@ -899,7 +911,7 @@ def run_job_score(job_id: int, payload: JobScoreRunRequest, session: Session = D
     )
 
 
-@app.post("/jobs/score/run", response_model=JobsScoreRunResponse, status_code=202)
+@app.post("/jobs/score/run", response_model=JobsScoreRunResponse, status_code=202, tags=["jobs"])
 def run_jobs_score(payload: JobsScoreRunRequest, session: Session = Depends(get_session)):
     run = enqueue_score_run(
         session,
@@ -914,7 +926,7 @@ def run_jobs_score(payload: JobsScoreRunRequest, session: Session = Depends(get_
     session.refresh(run)
     return JobsScoreRunResponse(**serialize_score_run(session, run))
 
-@app.get("/runs/{run_id}", response_model=RunRead)
+@app.get("/runs/{run_id}", response_model=RunRead, tags=["runs"])
 def get_run(run_id: int, session: Session = Depends(get_session)):
     run = _get_run_by_id(session, run_id)
     if run is None:
@@ -923,7 +935,7 @@ def get_run(run_id: int, session: Session = Depends(get_session)):
     return RunRead(**serialize_run(session, run))
 
 
-@app.get("/runs/{run_id}/items", response_model=RunItemsResponse)
+@app.get("/runs/{run_id}/items", response_model=RunItemsResponse, tags=["runs"])
 def list_run_items(run_id: int, session: Session = Depends(get_session)):
     run = _get_run_by_id(session, run_id)
     if run is None:
@@ -952,7 +964,7 @@ def list_run_items(run_id: int, session: Session = Depends(get_session)):
     )
 
 
-@app.get("/score-runs/{run_id}", response_model=ScoreRunRead)
+@app.get("/score-runs/{run_id}", response_model=ScoreRunRead, tags=["runs"])
 def get_score_run(run_id: int, session: Session = Depends(get_session)):
     run = _get_score_run_by_id(session, run_id)
     if run is None:
@@ -963,7 +975,7 @@ def get_score_run(run_id: int, session: Session = Depends(get_session)):
     return ScoreRunRead(**serialize_score_run(session, run))
 
 
-@app.get("/score-runs/{run_id}/items", response_model=ScoreRunItemsResponse)
+@app.get("/score-runs/{run_id}/items", response_model=ScoreRunItemsResponse, tags=["runs"])
 def list_score_run_items(run_id: int, session: Session = Depends(get_session)):
     run = _get_score_run_by_id(session, run_id)
     if run is None:
@@ -975,7 +987,7 @@ def list_score_run_items(run_id: int, session: Session = Depends(get_session)):
     return ScoreRunItemsResponse(total=items.total, items=items.items)
 
 
-@app.post("/jobs/scores", response_model=JobsBatchScoreResponse)
+@app.post("/jobs/scores", response_model=JobsBatchScoreResponse, tags=["jobs"])
 def store_job_scores(score_payloads: list[JobScoreBatchItem], session: Session = Depends(get_session)):
     updated_job_ids: list[int] = []
 
@@ -996,7 +1008,7 @@ def store_job_scores(score_payloads: list[JobScoreBatchItem], session: Session =
     return JobsBatchScoreResponse(updated=len(updated_job_ids), jobs=updated_job_ids)
 
 
-@app.post("/jobs/{job_id}/notify", response_model=JobNotifyResponse)
+@app.post("/jobs/{job_id}/notify", response_model=JobNotifyResponse, tags=["jobs"])
 def mark_job_notified(job_id: int, notify_payload: JobNotifyWrite, session: Session = Depends(get_session)):
     job = _get_job_by_id(session, job_id)
     if job is None:
@@ -1014,7 +1026,7 @@ def mark_job_notified(job_id: int, notify_payload: JobNotifyWrite, session: Sess
     )
 
 
-@app.post("/jobs/{job_id}/error", response_model=JobErrorResponse)
+@app.post("/jobs/{job_id}/error", response_model=JobErrorResponse, tags=["jobs"])
 def mark_job_error(job_id: int, error_payload: JobErrorWrite, session: Session = Depends(get_session)):
     job = _get_job_by_id(session, job_id)
     if job is None:
@@ -1033,7 +1045,7 @@ def mark_job_error(job_id: int, error_payload: JobErrorWrite, session: Session =
     )
 
 
-@app.post("/jobs/notify", response_model=JobsBatchNotifyResponse)
+@app.post("/jobs/notify", response_model=JobsBatchNotifyResponse, tags=["jobs"])
 def mark_jobs_notified(notify_payloads: list[JobNotifyBatchItem], session: Session = Depends(get_session)):
     updated_job_ids: list[int] = []
 
@@ -1054,7 +1066,7 @@ def mark_jobs_notified(notify_payloads: list[JobNotifyBatchItem], session: Sessi
     return JobsBatchNotifyResponse(updated=len(updated_job_ids), jobs=updated_job_ids)
 
 
-@app.get("/users", response_model=UserListResponse)
+@app.get("/users", response_model=UserListResponse, tags=["users"])
 def list_users(
     session: Session = Depends(get_session),
     limit: int = Query(default=100, ge=1, le=500),
@@ -1065,7 +1077,7 @@ def list_users(
     return UserListResponse(total=total, items=[UserRead.model_validate(item) for item in items])
 
 
-@app.post("/users", response_model=UserRead)
+@app.post("/users", response_model=UserRead, tags=["users"])
 def create_user(payload: UserCreate, session: Session = Depends(get_session)):
     user = User(name=payload.name, email=payload.email)
     session.add(user)
@@ -1077,7 +1089,7 @@ def create_user(payload: UserCreate, session: Session = Depends(get_session)):
     return UserRead.model_validate(user)
 
 
-@app.get("/resumes", response_model=ResumeListResponse)
+@app.get("/resumes", response_model=ResumeListResponse, tags=["resumes"])
 def list_resumes(
     session: Session = Depends(get_session),
     user_id: int | None = Query(default=None),
@@ -1102,7 +1114,7 @@ def list_resumes(
     return ResumeListResponse(total=total, items=[ResumeRead.model_validate(item) for item in items])
 
 
-@app.post("/resumes", response_model=ResumeRead)
+@app.post("/resumes", response_model=ResumeRead, tags=["resumes"])
 def create_resume(payload: ResumeCreate, session: Session = Depends(get_session)):
     user = _get_user_by_id(session, payload.user_id)
     if user is None:
@@ -1120,7 +1132,7 @@ def create_resume(payload: ResumeCreate, session: Session = Depends(get_session)
     return ResumeRead.model_validate(resume)
 
 
-@app.put("/resumes/{resume_id}", response_model=ResumeRead)
+@app.put("/resumes/{resume_id}", response_model=ResumeRead, tags=["resumes"])
 def update_resume(resume_id: int, payload: ResumeUpdate, session: Session = Depends(get_session)):
     resume = _get_resume_by_id(session, resume_id)
     if resume is None:
@@ -1138,7 +1150,7 @@ def update_resume(resume_id: int, payload: ResumeUpdate, session: Session = Depe
     return ResumeRead.model_validate(resume)
 
 
-@app.get("/applications", response_model=JobApplicationListResponse)
+@app.get("/applications", response_model=JobApplicationListResponse, tags=["applications"])
 def list_applications(
     session: Session = Depends(get_session),
     user_id: int | None = Query(default=None),
@@ -1175,7 +1187,7 @@ def list_applications(
     return JobApplicationListResponse(total=total, items=[_serialize_application(item) for item in items])
 
 
-@app.get("/applications/{application_id}", response_model=JobApplicationRead)
+@app.get("/applications/{application_id}", response_model=JobApplicationRead, tags=["applications"])
 def get_application(application_id: int, session: Session = Depends(get_session)):
     application = session.scalar(
         select(JobApplication)
@@ -1187,7 +1199,7 @@ def get_application(application_id: int, session: Session = Depends(get_session)
     return _serialize_application(application)
 
 
-@app.post("/applications", response_model=JobApplicationRead)
+@app.post("/applications", response_model=JobApplicationRead, tags=["applications"])
 def create_application(payload: ApplicationCreate, session: Session = Depends(get_session)):
     _, resume, _ = _validate_application_entities(
         session,
@@ -1255,7 +1267,7 @@ def create_application(payload: ApplicationCreate, session: Session = Depends(ge
     return _serialize_application(application)
 
 
-@app.post("/applications/generate", response_model=ApplicationGenerateResponse)
+@app.post("/applications/generate", response_model=ApplicationGenerateResponse, tags=["applications"])
 def generate_applications(payload: ApplicationGenerateRequest, session: Session = Depends(get_session)):
     job = _get_job_by_id(session, payload.job_posting_id)
     if job is None:
@@ -1299,7 +1311,77 @@ def generate_applications(payload: ApplicationGenerateRequest, session: Session 
     return ApplicationGenerateResponse(created=created, skipped=skipped, applications=application_ids)
 
 
-@app.post("/applications/{application_id}/score", response_model=JobApplicationScoreResponse)
+@app.post("/applications/generate/run", response_model=ApplicationsGenerateRunResponse, tags=["applications"])
+def run_applications_generate(payload: ApplicationsGenerateRunRequest, session: Session = Depends(get_session)):
+    user = _get_user_by_id(session, payload.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{payload.user_id}' was not found")
+
+    matching_resume_exists = (
+        select(Resume.id)
+        .where(
+            Resume.user_id == payload.user_id,
+            Resume.is_active.is_(True),
+            Resume.classification_key == JobPosting.classification_key,
+        )
+        .exists()
+    )
+    existing_application_exists = (
+        select(JobApplication.id)
+        .where(
+            JobApplication.user_id == payload.user_id,
+            JobApplication.job_posting_id == JobPosting.id,
+        )
+        .exists()
+    )
+
+    jobs = session.scalars(
+        select(JobPosting)
+        .where(
+            JobPosting.classification_key.is_not(None),
+            matching_resume_exists,
+            ~existing_application_exists,
+        )
+        .order_by(JobPosting.created_at.asc())
+        .limit(payload.limit)
+    ).all()
+
+    if not jobs:
+        return ApplicationsGenerateRunResponse(
+            selected=0,
+            processed=0,
+            created=0,
+            skipped=0,
+            jobs=[],
+            applications=[],
+        )
+
+    created = 0
+    skipped = 0
+    processed_jobs: list[int] = []
+    application_ids: list[int] = []
+
+    for job in jobs:
+        result = generate_applications(
+            ApplicationGenerateRequest(job_posting_id=job.id, user_id=payload.user_id),
+            session,
+        )
+        processed_jobs.append(job.id)
+        created += result.created
+        skipped += result.skipped
+        application_ids.extend(result.applications)
+
+    return ApplicationsGenerateRunResponse(
+        selected=len(jobs),
+        processed=len(processed_jobs),
+        created=created,
+        skipped=skipped,
+        jobs=processed_jobs,
+        applications=application_ids,
+    )
+
+
+@app.post("/applications/{application_id}/score", response_model=JobApplicationScoreResponse, tags=["applications"])
 def store_application_score(
     application_id: int,
     score_payload: JobScoreWrite,
@@ -1313,7 +1395,7 @@ def store_application_score(
     return _serialize_application_score(application)
 
 
-@app.post("/applications/{application_id}/score/run", response_model=JobApplicationScoreResponse)
+@app.post("/applications/{application_id}/score/run", response_model=JobApplicationScoreResponse, tags=["applications"])
 def run_application_score(
     application_id: int,
     payload: JobScoreRunRequest,
@@ -1330,7 +1412,7 @@ def run_application_score(
     return _serialize_application_score(result.application)
 
 
-@app.post("/applications/score/run", response_model=ApplicationsScoreRunResponse, status_code=202)
+@app.post("/applications/score/run", response_model=ApplicationsScoreRunResponse, status_code=202, tags=["applications"])
 def run_applications_score(payload: ApplicationsScoreRunRequest, session: Session = Depends(get_session)):
     run = enqueue_application_score_run(
         session,
@@ -1348,7 +1430,7 @@ def run_applications_score(payload: ApplicationsScoreRunRequest, session: Sessio
     return ApplicationsScoreRunResponse(**serialize_application_score_run(session, run))
 
 
-@app.post("/applications/{application_id}/notify", response_model=JobApplicationRead)
+@app.post("/applications/{application_id}/notify", response_model=JobApplicationRead, tags=["applications"])
 def mark_application_notified(
     application_id: int,
     notify_payload: JobNotifyWrite,
@@ -1362,7 +1444,7 @@ def mark_application_notified(
     return _serialize_application(application)
 
 
-@app.post("/applications/{application_id}/error", response_model=JobApplicationRead)
+@app.post("/applications/{application_id}/error", response_model=JobApplicationRead, tags=["applications"])
 def mark_application_error(
     application_id: int,
     error_payload: JobErrorWrite,
@@ -1376,7 +1458,7 @@ def mark_application_error(
     return _serialize_application(application)
 
 
-@app.post("/applications/{application_id}/status", response_model=JobApplicationRead)
+@app.post("/applications/{application_id}/status", response_model=JobApplicationRead, tags=["applications"])
 def update_application_status(
     application_id: int,
     payload: ApplicationStatusWrite,
@@ -1390,7 +1472,7 @@ def update_application_status(
     return _serialize_application(application)
 
 
-@app.get("/applications/{application_id}/interview-rounds", response_model=InterviewRoundListResponse)
+@app.get("/applications/{application_id}/interview-rounds", response_model=InterviewRoundListResponse, tags=["applications"])
 def list_interview_rounds(application_id: int, session: Session = Depends(get_session)):
     application = _get_application_by_id(session, application_id)
     if application is None:
@@ -1403,7 +1485,7 @@ def list_interview_rounds(application_id: int, session: Session = Depends(get_se
     return InterviewRoundListResponse(total=len(items), items=[InterviewRoundRead.model_validate(item) for item in items])
 
 
-@app.post("/applications/{application_id}/interview-rounds", response_model=InterviewRoundRead)
+@app.post("/applications/{application_id}/interview-rounds", response_model=InterviewRoundRead, tags=["applications"])
 def create_interview_round(
     application_id: int,
     payload: InterviewRoundCreate,
@@ -1433,7 +1515,7 @@ def create_interview_round(
     return InterviewRoundRead.model_validate(interview_round)
 
 
-@app.get("/prompt-library", response_model=PromptLibraryListResponse)
+@app.get("/prompt-library", response_model=PromptLibraryListResponse, tags=["prompt-library"])
 def list_prompt_library(
     session: Session = Depends(get_session),
     prompt_key: str | None = Query(default=None),
@@ -1459,7 +1541,7 @@ def list_prompt_library(
     return PromptLibraryListResponse(total=len(items), items=[PromptLibraryRead.model_validate(item) for item in items])
 
 
-@app.get("/prompt-library/{prompt_id}", response_model=PromptLibraryRead)
+@app.get("/prompt-library/{prompt_id}", response_model=PromptLibraryRead, tags=["prompt-library"])
 def get_prompt_library(prompt_id: int, session: Session = Depends(get_session)):
     prompt = session.get(PromptLibrary, prompt_id)
     if prompt is None:
@@ -1468,7 +1550,7 @@ def get_prompt_library(prompt_id: int, session: Session = Depends(get_session)):
     return PromptLibraryRead.model_validate(prompt)
 
 
-@app.post("/prompt-library", response_model=PromptLibraryRead)
+@app.post("/prompt-library", response_model=PromptLibraryRead, tags=["prompt-library"])
 def create_prompt_library(
     payload: PromptLibraryCreate,
     session: Session = Depends(get_session),
@@ -1497,7 +1579,7 @@ def create_prompt_library(
     return PromptLibraryRead.model_validate(prompt)
 
 
-@app.put("/prompt-library/{prompt_id}", response_model=PromptLibraryRead)
+@app.put("/prompt-library/{prompt_id}", response_model=PromptLibraryRead, tags=["prompt-library"])
 def update_prompt_library(
     prompt_id: int,
     payload: PromptLibraryUpdate,
@@ -1538,7 +1620,7 @@ def update_prompt_library(
     return PromptLibraryRead.model_validate(prompt)
 
 
-@app.delete("/prompt-library/{prompt_id}")
+@app.delete("/prompt-library/{prompt_id}", tags=["prompt-library"])
 def delete_prompt_library(prompt_id: int, session: Session = Depends(get_session)):
     prompt = session.get(PromptLibrary, prompt_id)
     if prompt is None:
@@ -1550,7 +1632,7 @@ def delete_prompt_library(prompt_id: int, session: Session = Depends(get_session
     return {"deleted": True, "id": prompt_id}
 
 
-@app.get("/jobs/hiringcafe")
+@app.get("/jobs/hiringcafe", tags=["jobs"])
 async def jobs(search_url: str):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)

@@ -52,7 +52,7 @@ There are now two orchestration styles:
 
 - preferred application-native flow:
   - classify postings with `/jobs/classify/run`
-  - generate applications with `/applications/generate`
+  - generate user applications with `/applications/generate/run`
   - score applications with `/applications/score/run`
 - legacy job-native flow:
   - queue batch scoring with `/jobs/score/run`
@@ -388,23 +388,23 @@ POST /jobs/classify/run
 }
 ```
 
-2. on classification callback, generate applications per returned `job_posting_id`:
+2. on classification callback, generate applications for the target user across all eligible classified postings:
 
 ```json
-POST /applications/generate
+POST /applications/generate/run
 {
-  "job_posting_id": 123
+  "user_id": 1,
+  "limit": 100
 }
 ```
 
-3. queue application scoring with a callback, ideally narrowed by `job_posting_id`:
+3. queue application scoring with a callback:
 
 ```json
 POST /applications/score/run
 {
   "limit": 100,
   "status": "new",
-  "job_posting_id": 123,
   "force": false,
   "callback_url": "https://<n8n-host>/webhook/application-score-complete"
 }
@@ -461,6 +461,19 @@ Example payload:
 ```json
 {
   "job_posting_id": 123
+}
+```
+
+### `POST /applications/generate/run`
+
+Creates missing `job_applications` for one user across classified postings where that user has at least one active matching resume and no application exists yet for the posting.
+
+Example payload:
+
+```json
+{
+  "user_id": 1,
+  "limit": 100
 }
 ```
 
