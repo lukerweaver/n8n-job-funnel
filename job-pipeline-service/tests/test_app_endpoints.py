@@ -1151,8 +1151,10 @@ def test_run_phase_two_backfill_migrates_legacy_prompt_and_job_data(db_session):
     assert migrated_job.classified_at == migrated_job.scored_at
     assert legacy_user is not None
     assert len(resumes) == 1
+    assert resumes[0].name == "Legacy Resume (Product Manager)"
     assert resumes[0].prompt_key == "default"
-    assert resumes[0].is_default is True
+    assert resumes[0].classification_key == "Product Manager"
+    assert resumes[0].is_default is False
     assert resumes[0].content == "Legacy Resume"
     assert len(applications) == 1
     assert applications[0].job_posting_id == migrated_job.id
@@ -1168,6 +1170,44 @@ def test_run_phase_two_backfill_migrates_legacy_prompt_and_job_data(db_session):
     assert db_session.query(User).count() == 1
     assert db_session.query(Resume).count() == 1
     assert db_session.query(JobApplication).count() == 1
+
+
+def test_run_phase_two_backfill_creates_default_legacy_resume_without_classification(db_session):
+    create_prompt_library(
+        PromptLibraryCreate(
+            prompt_key="default",
+            prompt_type="scoring",
+            prompt_version=1,
+            system_prompt="System",
+            user_prompt_template="User {{resume}} {{description}}",
+            context="Legacy Default Resume Content",
+            is_active=True,
+        ),
+        db_session,
+    )
+
+    migrated_job = seed_job(db_session, job_id="job-legacy-default", status="scored")
+    migrated_job.prompt_key = "default"
+    migrated_job.prompt_version = 1
+    migrated_job.score = 10
+    migrated_job.scored_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    run_phase_two_backfill(db_session)
+
+    legacy_user = db_session.scalar(select(User).where(User.email == app_module.LEGACY_MIGRATION_USER_EMAIL))
+    resumes = db_session.scalars(select(Resume).order_by(Resume.id.asc())).all()
+    applications = db_session.scalars(select(JobApplication).order_by(JobApplication.id.asc())).all()
+
+    assert legacy_user is not None
+    assert len(resumes) == 1
+    assert resumes[0].name == "Legacy Default Resume"
+    assert resumes[0].prompt_key == "default"
+    assert resumes[0].classification_key is None
+    assert resumes[0].is_default is True
+    assert resumes[0].content == "Legacy Default Resume Content"
+    assert len(applications) == 1
+    assert applications[0].resume_id == resumes[0].id
 
 
 def test_run_phase_two_backfill_maps_error_jobs_to_new_applications(db_session):

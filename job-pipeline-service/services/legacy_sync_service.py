@@ -28,6 +28,13 @@ def _effective_legacy_prompt_key(job: JobPosting) -> str:
     return "legacy-unspecified"
 
 
+def _effective_legacy_classification_key(job: JobPosting) -> str | None:
+    for candidate in (job.classification_key, job.role_type):
+        if candidate and str(candidate).strip():
+            return str(candidate).strip()
+    return None
+
+
 def _legacy_resume_content(session: Session, prompt_key: str) -> str:
     prompt = session.scalar(
         select(PromptLibrary)
@@ -39,15 +46,23 @@ def _legacy_resume_content(session: Session, prompt_key: str) -> str:
     return f"Legacy resume content unavailable for prompt_key '{prompt_key}'."
 
 
-def _get_or_create_legacy_resume(session: Session, user: User, prompt_key: str) -> Resume:
-    resume_name = f"Legacy Resume ({prompt_key})"
-    resume = session.scalar(
-        select(Resume).where(
-            Resume.user_id == user.id,
-            Resume.classification_key == prompt_key,
-            Resume.name == resume_name,
-        )
+def _get_or_create_legacy_resume(
+    session: Session,
+    user: User,
+    *,
+    classification_key: str | None,
+    prompt_key: str,
+) -> Resume:
+    resume_name = "Legacy Default Resume" if classification_key is None else f"Legacy Resume ({classification_key})"
+    query = select(Resume).where(
+        Resume.user_id == user.id,
+        Resume.name == resume_name,
     )
+    if classification_key is None:
+        query = query.where(Resume.is_default.is_(True))
+    else:
+        query = query.where(Resume.classification_key == classification_key)
+    resume = session.scalar(query)
     if resume is not None:
         return resume
 
@@ -55,9 +70,10 @@ def _get_or_create_legacy_resume(session: Session, user: User, prompt_key: str) 
         user_id=user.id,
         name=resume_name,
         prompt_key=prompt_key,
-        classification_key=prompt_key,
+        classification_key=classification_key,
         content=_legacy_resume_content(session, prompt_key),
         is_active=True,
+        is_default=classification_key is None,
     )
     session.add(resume)
     session.flush()
@@ -82,7 +98,13 @@ def _get_or_create_applications_for_job(session: Session, job: JobPosting) -> li
 
     legacy_user = _get_or_create_legacy_user(session)
     prompt_key = _effective_legacy_prompt_key(job)
-    resume = _get_or_create_legacy_resume(session, legacy_user, prompt_key)
+    classification_key = _effective_legacy_classification_key(job)
+    resume = _get_or_create_legacy_resume(
+        session,
+        legacy_user,
+        classification_key=classification_key,
+        prompt_key=prompt_key,
+    )
     application = JobApplication(
         user_id=legacy_user.id,
         job_posting_id=job.id,
