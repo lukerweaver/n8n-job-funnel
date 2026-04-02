@@ -11,7 +11,7 @@ from database import SessionLocal
 from models import JobApplication, JobPosting, PromptLibrary, Run, RunItem
 from services.classification_service import classify_job
 from services.llm_client import build_llm_client
-from services.prompt_service import resolve_active_prompt
+from services.prompt_service import resolve_active_prompt, resolve_prompt_selector
 from services.scoring_service import JobScoringSkipped, _commit_scoring_progress, score_application, score_job
 
 
@@ -39,6 +39,7 @@ def enqueue_run(
     limit: int,
     status: str = "",
     source: str | None = None,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
     callback_url: str | None = None,
@@ -55,12 +56,13 @@ def enqueue_run(
         query = query.where(JobPosting.classification_key.is_(None))
 
     jobs = list(session.scalars(query).all())
+    effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
     run = Run(
         type=run_type,
         status="queued",
         requested_status=status,
         requested_source=source,
-        prompt_key=prompt_key,
+        prompt_key=effective_prompt_key,
         force=force,
         callback_url=callback_url,
         selected_count=len(jobs),
@@ -89,6 +91,7 @@ def enqueue_application_score_run(
     user_id: int | None = None,
     resume_id: int | None = None,
     job_posting_id: int | None = None,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
     callback_url: str | None = None,
@@ -105,12 +108,13 @@ def enqueue_application_score_run(
         query = query.where(JobApplication.job_posting_id == job_posting_id)
 
     applications = list(session.scalars(query).all())
+    effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
     run = Run(
         type="application_scoring",
         status="queued",
         requested_status=status,
         requested_source=None,
-        prompt_key=prompt_key,
+        prompt_key=effective_prompt_key,
         force=force,
         callback_url=callback_url,
         selected_count=len(applications),
@@ -138,6 +142,7 @@ def enqueue_score_run(
     limit: int,
     status: str,
     source: str | None = None,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
     callback_url: str | None = None,
@@ -148,6 +153,7 @@ def enqueue_score_run(
         limit=limit,
         status=status,
         source=source,
+        classification_key=classification_key,
         prompt_key=prompt_key,
         force=force,
         callback_url=callback_url,
@@ -159,6 +165,7 @@ def enqueue_classification_run(
     *,
     limit: int,
     source: str | None = None,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
     callback_url: str | None = None,
@@ -168,6 +175,7 @@ def enqueue_classification_run(
         run_type="classification",
         limit=limit,
         source=source,
+        classification_key=classification_key,
         prompt_key=prompt_key,
         force=force,
         callback_url=callback_url,
@@ -360,6 +368,7 @@ def process_next_run() -> bool:
                         result = score_application(
                             session,
                             application,
+                            classification_key=application.job_posting.classification_key,
                             prompt_key=run.prompt_key,
                             force=run.force,
                             client=client,
@@ -380,6 +389,7 @@ def process_next_run() -> bool:
                     result = classify_job(
                         session,
                         job,
+                        classification_key=job.classification_key,
                         prompt_key=run.prompt_key,
                         force=run.force,
                         client=client,
@@ -391,6 +401,7 @@ def process_next_run() -> bool:
                     result = score_job(
                         session,
                         job,
+                        classification_key=job.classification_key,
                         prompt_key=run.prompt_key,
                         force=run.force,
                         client=client,

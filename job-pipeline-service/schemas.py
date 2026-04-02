@@ -134,6 +134,7 @@ class JobErrorResponse(BaseModel):
 
 
 class JobScoreRunRequest(BaseModel):
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
 
@@ -142,6 +143,7 @@ class JobsScoreRunRequest(BaseModel):
     limit: int = 25
     status: str = "new"
     source: str | None = None
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
     callback_url: str | None = None
@@ -429,6 +431,7 @@ class JobApplicationScoreResponse(BaseModel):
 
 
 class JobClassificationRunRequest(BaseModel):
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
 
@@ -436,6 +439,7 @@ class JobClassificationRunRequest(BaseModel):
 class JobsClassificationRunRequest(BaseModel):
     limit: int = 25
     source: str | None = None
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
     callback_url: str | None = None
@@ -474,6 +478,7 @@ class ApplicationsScoreRunRequest(BaseModel):
     user_id: int | None = None
     resume_id: int | None = None
     job_posting_id: int | None = None
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
     callback_url: str | None = None

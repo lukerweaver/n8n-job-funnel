@@ -8,7 +8,7 @@ from services.classification_parser import ClassificationParseError, parse_class
 from services.job_selection import select_jobs_for_scoring
 from services.llm_client import LlmClient, LlmRequestError, build_llm_client
 from services.prompt_rendering import render_user_prompt
-from services.prompt_service import resolve_active_prompt
+from services.prompt_service import resolve_active_prompt, resolve_prompt_selector
 from services.scoring_service import JobScoringSkipped
 
 
@@ -51,6 +51,7 @@ def classify_job(
     session: Session,
     job: JobPosting,
     *,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
     client: LlmClient | None = None,
@@ -61,7 +62,8 @@ def classify_job(
     if not (job.description and job.description.strip()):
         raise JobScoringSkipped(f"Job '{job.id}' has no description to classify")
 
-    resolved_prompt = prompt or resolve_active_prompt(session, prompt_key, prompt_type="classification")
+    effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
+    resolved_prompt = prompt or resolve_active_prompt(session, effective_prompt_key, prompt_type="classification")
     llm_client = client or build_llm_client()
     rendered_prompt = render_user_prompt(job, resolved_prompt)
 
@@ -82,6 +84,7 @@ def classify_jobs(
     *,
     limit: int,
     source: str | None = None,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
 ) -> BatchClassificationResult:
@@ -89,7 +92,8 @@ def classify_jobs(
     if not jobs:
         return BatchClassificationResult(selected=0, classified=0, errored=0, skipped=0, job_ids=[])
 
-    prompt = resolve_active_prompt(session, prompt_key, prompt_type="classification")
+    effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
+    prompt = resolve_active_prompt(session, effective_prompt_key, prompt_type="classification")
     client = build_llm_client()
 
     classified = 0
@@ -102,6 +106,7 @@ def classify_jobs(
             result = classify_job(
                 session,
                 job,
+                classification_key=classification_key,
                 prompt_key=prompt_key,
                 force=force,
                 client=client,

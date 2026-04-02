@@ -9,6 +9,18 @@ class PromptResolutionError(Exception):
     pass
 
 
+def resolve_prompt_selector(
+    *,
+    prompt_key: str | None = None,
+    classification_key: str | None = None,
+    fallback_key: str | None = None,
+) -> str | None:
+    for candidate in (prompt_key, classification_key, fallback_key):
+        if candidate is not None and str(candidate).strip():
+            return str(candidate).strip()
+    return None
+
+
 def resolve_active_prompt(
     session: Session,
     prompt_key: str | None = None,

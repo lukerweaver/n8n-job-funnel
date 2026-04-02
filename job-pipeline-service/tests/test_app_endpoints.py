@@ -182,16 +182,23 @@ def test_get_job_by_id(db_session):
 
 def test_run_job_classification_success_and_conflict(db_session, monkeypatch):
     job = seed_job(db_session)
+    captured = {}
 
-    def _fake_classify_job(session, target_job, **_kwargs):
+    def _fake_classify_job(session, target_job, **kwargs):
+        captured.update(kwargs)
         target_job.classification_key = "Product Manager"
         target_job.classification_prompt_version = 1
         target_job.classified_at = datetime.now(timezone.utc)
         return SimpleNamespace(job=target_job)
 
     monkeypatch.setattr(app_module, "classify_job", _fake_classify_job)
-    ok = run_job_classification(job.id, JobClassificationRunRequest(force=False), db_session)
+    ok = run_job_classification(
+        job.id,
+        JobClassificationRunRequest(classification_key="product", force=False),
+        db_session,
+    )
     assert ok.classification_key == "Product Manager"
+    assert captured["classification_key"] == "product"
 
     def _fake_skip(*_args, **_kwargs):
         raise JobScoringSkipped("skipped")
@@ -252,8 +259,12 @@ def test_run_jobs_classification_batch(db_session, monkeypatch):
         "last_error": run.last_error,
     })
 
-    response = run_jobs_classification(JobsClassificationRunRequest(limit=2, force=False), db_session)
+    response = run_jobs_classification(
+        JobsClassificationRunRequest(limit=2, classification_key="product", force=False),
+        db_session,
+    )
     assert captured["force"] is False
+    assert captured["classification_key"] == "product"
     assert response.selected == 2
     assert response.run_id == 11
     assert response.type == "classification"
@@ -291,15 +302,18 @@ def test_store_job_score(db_session):
 
 def test_run_job_score_success_and_conflict(db_session, monkeypatch):
     job = seed_job(db_session)
+    captured = {}
 
-    def _fake_score_job(session, target_job, **_kwargs):
+    def _fake_score_job(session, target_job, **kwargs):
+        captured.update(kwargs)
         target_job.status = "scored"
         target_job.score = 88
         return JobScoringResult(job=target_job, outcome="scored")
 
     monkeypatch.setattr(app_module, "score_job", _fake_score_job)
-    ok = run_job_score(job.id, JobScoreRunRequest(force=False), db_session)
+    ok = run_job_score(job.id, JobScoreRunRequest(classification_key="product", force=False), db_session)
     assert ok.score == 88
+    assert captured["classification_key"] == "product"
 
     def _fake_skip(*_args, **_kwargs):
         raise JobScoringSkipped("skipped")
@@ -733,7 +747,7 @@ def test_run_applications_score_batch(db_session, monkeypatch):
             status="new",
             limit=10,
             user_id=user.id,
-            prompt_key="default",
+            classification_key="product",
             force=False,
             callback_url="https://example.com/callback",
         ),
@@ -741,6 +755,8 @@ def test_run_applications_score_batch(db_session, monkeypatch):
     )
 
     assert captured["status"] == "new"
+    assert captured["classification_key"] == "product"
+    assert captured["prompt_key"] == "product"
     assert captured["callback_url"] == "https://example.com/callback"
     assert result.run_id == 21
     assert result.type == "application_scoring"
@@ -801,15 +817,23 @@ def test_application_scoring_and_interview_rounds(db_session, monkeypatch):
     application.status = "new"
     db_session.commit()
 
-    def _fake_score_application(session, target_application, **_kwargs):
+    captured = {}
+
+    def _fake_score_application(session, target_application, **kwargs):
+        captured.update(kwargs)
         target_application.status = "scored"
         target_application.score = 91
         target_application.scored_at = datetime.now(timezone.utc)
         return SimpleNamespace(application=target_application)
 
     monkeypatch.setattr(app_module, "score_application", _fake_score_application)
-    scored = run_application_score(application.id, JobScoreRunRequest(force=False), db_session)
+    scored = run_application_score(
+        application.id,
+        JobScoreRunRequest(classification_key="product", force=False),
+        db_session,
+    )
     assert scored.score == 91
+    assert captured["classification_key"] == "product"
 
     round_one = create_interview_round(
         application.id,

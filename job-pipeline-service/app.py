@@ -871,7 +871,13 @@ def run_job_classification(job_id: int, payload: JobClassificationRunRequest, se
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
 
     try:
-        result = classify_job(session, job, prompt_key=payload.prompt_key, force=payload.force)
+        result = classify_job(
+            session,
+            job,
+            classification_key=payload.classification_key,
+            prompt_key=payload.prompt_key,
+            force=payload.force,
+        )
     except JobScoringSkipped as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -885,6 +891,7 @@ def run_jobs_classification(payload: JobsClassificationRunRequest, session: Sess
         session,
         limit=payload.limit,
         source=payload.source,
+        classification_key=payload.classification_key,
         prompt_key=payload.prompt_key,
         force=payload.force,
         callback_url=payload.callback_url,
@@ -928,7 +935,13 @@ def run_job_score(job_id: int, payload: JobScoreRunRequest, session: Session = D
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
 
     try:
-        result = score_job(session, job, prompt_key=payload.prompt_key, force=payload.force)
+        result = score_job(
+            session,
+            job,
+            classification_key=payload.classification_key,
+            prompt_key=payload.prompt_key,
+            force=payload.force,
+        )
     except JobScoringSkipped as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -958,6 +971,7 @@ def run_jobs_score(payload: JobsScoreRunRequest, session: Session = Depends(get_
         limit=payload.limit,
         status=payload.status,
         source=payload.source,
+        classification_key=payload.classification_key,
         prompt_key=payload.prompt_key,
         force=payload.force,
         callback_url=payload.callback_url,
@@ -1467,7 +1481,13 @@ def run_application_score(
     if application is None:
         raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
     try:
-        result = score_application(session, application, prompt_key=payload.prompt_key, force=payload.force)
+        result = score_application(
+            session,
+            application,
+            classification_key=payload.classification_key,
+            prompt_key=payload.prompt_key,
+            force=payload.force,
+        )
     except JobScoringSkipped as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     _commit_or_fail(session)
@@ -1483,6 +1503,7 @@ def run_applications_score(payload: ApplicationsScoreRunRequest, session: Sessio
         user_id=payload.user_id,
         resume_id=payload.resume_id,
         job_posting_id=payload.job_posting_id,
+        classification_key=payload.classification_key,
         prompt_key=payload.prompt_key,
         force=payload.force,
         callback_url=payload.callback_url,

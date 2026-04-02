@@ -10,7 +10,7 @@ from services.job_selection import select_jobs_for_scoring
 from services.legacy_sync_service import sync_job_to_applications
 from services.llm_client import LlmClient, LlmRequestError, build_llm_client
 from services.prompt_rendering import render_application_prompt, render_user_prompt
-from services.prompt_service import resolve_active_prompt
+from services.prompt_service import resolve_active_prompt, resolve_prompt_selector
 from services.scoring_parser import ParsedScore, ScoringParseError, parse_scoring_response
 
 
@@ -147,6 +147,7 @@ def score_job(
     session: Session,
     job: JobPosting,
     *,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
     client: LlmClient | None = None,
@@ -158,7 +159,12 @@ def score_job(
     if not (job.description and job.description.strip()):
         raise JobScoringSkipped(f"Job '{job.id}' has no description to score")
 
-    resolved_prompt = prompt or resolve_active_prompt(session, prompt_key)
+    effective_prompt_key = resolve_prompt_selector(
+        prompt_key=prompt_key,
+        classification_key=classification_key,
+        fallback_key=job.classification_key,
+    )
+    resolved_prompt = prompt or resolve_active_prompt(session, effective_prompt_key)
     llm_client = client or build_llm_client()
     rendered_prompt = render_user_prompt(job, resolved_prompt)
 
@@ -180,6 +186,7 @@ def score_application(
     session: Session,
     application: JobApplication,
     *,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     force: bool = False,
     client: LlmClient | None = None,
@@ -196,7 +203,12 @@ def score_application(
     if not (application.resume.content and application.resume.content.strip()):
         raise JobScoringSkipped(f"Application '{application.id}' has no resume content to score")
 
-    resolved_prompt = prompt or resolve_active_prompt(session, prompt_key, prompt_type="scoring")
+    effective_prompt_key = resolve_prompt_selector(
+        prompt_key=prompt_key,
+        classification_key=classification_key,
+        fallback_key=application.job_posting.classification_key,
+    )
+    resolved_prompt = prompt or resolve_active_prompt(session, effective_prompt_key, prompt_type="scoring")
     llm_client = client or build_llm_client()
     rendered_prompt = render_application_prompt(application, resolved_prompt)
 
@@ -218,6 +230,7 @@ def score_jobs(
     limit: int,
     status: str,
     source: str | None = None,
+    classification_key: str | None = None,
     prompt_key: str | None = None,
     dry_run: bool = False,
     force: bool = False,
@@ -235,7 +248,8 @@ def score_jobs(
             job_ids=[job.id for job in jobs],
         )
 
-    prompt = resolve_active_prompt(session, prompt_key)
+    effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
+    prompt = resolve_active_prompt(session, effective_prompt_key)
     client = build_llm_client()
 
     scored = 0
@@ -248,6 +262,7 @@ def score_jobs(
             result = score_job(
                 session,
                 job,
+                classification_key=classification_key,
                 prompt_key=prompt_key,
                 force=force,
                 client=client,
