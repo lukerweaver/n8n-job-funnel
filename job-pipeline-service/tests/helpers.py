@@ -66,14 +66,24 @@ def seed_user(session, *, name="User", email="user@example.com") -> User:
     return user
 
 
-def seed_resume(session, *, user: User, name="Resume", prompt_key="default", content="Resume Content") -> Resume:
+def seed_resume(
+    session,
+    *,
+    user: User,
+    name="Resume",
+    prompt_key="default",
+    classification_key=None,
+    content="Resume Content",
+    is_default=False,
+) -> Resume:
     resume = Resume(
         user_id=user.id,
         name=name,
         prompt_key=prompt_key,
-        classification_key=prompt_key,
+        classification_key=prompt_key if classification_key is None else classification_key,
         content=content,
         is_active=True,
+        is_default=is_default,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )

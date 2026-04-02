@@ -97,6 +97,7 @@ class Resume(Base):
     classification_key: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )

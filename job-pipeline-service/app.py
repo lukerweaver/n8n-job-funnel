@@ -194,6 +194,29 @@ def _get_application_by_id(session: Session, application_id: int) -> JobApplicat
     return session.get(JobApplication, application_id)
 
 
+def _normalize_user_default_resume(
+    session: Session,
+    user_id: int,
+    *,
+    selected_resume: Resume | None = None,
+) -> None:
+    resumes = session.scalars(select(Resume).where(Resume.user_id == user_id).order_by(Resume.id.asc())).all()
+    if not resumes:
+        return
+
+    default_resume_id = selected_resume.id if selected_resume is not None else None
+    if default_resume_id is None:
+        existing_default = next((resume for resume in resumes if resume.is_default), None)
+        default_resume_id = existing_default.id if existing_default is not None else None
+
+    if default_resume_id is None:
+        fallback = next((resume for resume in resumes if resume.is_active), resumes[0])
+        default_resume_id = fallback.id
+
+    for resume in resumes:
+        resume.is_default = resume.id == default_resume_id
+
+
 def _serialize_application(application: JobApplication) -> JobApplicationRead:
     job = application.job_posting
     resume = application.resume
@@ -444,20 +467,30 @@ def ensure_resumes_schema() -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("resumes")}
 
-    if "classification_key" in columns:
+    statements: list[str] = []
+    if "classification_key" not in columns:
+        statements.append("ALTER TABLE resumes ADD COLUMN classification_key VARCHAR(100)")
+    if "is_default" not in columns:
+        statements.append("ALTER TABLE resumes ADD COLUMN is_default BOOLEAN DEFAULT FALSE")
+
+    if not statements:
         return
 
     with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE resumes ADD COLUMN classification_key VARCHAR(100)"))
-        connection.execute(
-            text(
-                """
-                UPDATE resumes
-                SET classification_key = prompt_key
-                WHERE classification_key IS NULL AND prompt_key IS NOT NULL
-                """
+        for statement in statements:
+            connection.execute(text(statement))
+        if "classification_key" not in columns:
+            connection.execute(
+                text(
+                    """
+                    UPDATE resumes
+                    SET classification_key = prompt_key
+                    WHERE classification_key IS NULL AND prompt_key IS NOT NULL
+                    """
+                )
             )
-        )
+        if "is_default" not in columns:
+            connection.execute(text("UPDATE resumes SET is_default = FALSE WHERE is_default IS NULL"))
 
 
 def ensure_run_schema() -> None:
@@ -531,6 +564,12 @@ def _backfill_resume_classification_keys(session: Session) -> None:
     ).all()
     for resume in resumes:
         resume.classification_key = resume.prompt_key
+
+
+def _backfill_resume_defaults(session: Session) -> None:
+    user_ids = session.scalars(select(Resume.user_id).distinct()).all()
+    for user_id in user_ids:
+        _normalize_user_default_resume(session, user_id)
 
 
 def _get_or_create_legacy_user(session: Session) -> User:
@@ -677,6 +716,7 @@ def run_phase_two_backfill(session: Session) -> None:
     _backfill_prompt_context_from_legacy_column(session)
     _backfill_job_posting_classification(session)
     _backfill_resume_classification_keys(session)
+    _backfill_resume_defaults(session)
     _backfill_job_applications(session)
     session.commit()
 
@@ -1119,15 +1159,30 @@ def create_resume(payload: ResumeCreate, session: Session = Depends(get_session)
     user = _get_user_by_id(session, payload.user_id)
     if user is None:
         raise HTTPException(status_code=404, detail=f"User '{payload.user_id}' was not found")
+    prompt_key = payload.prompt_key if payload.prompt_key is not None else payload.classification_key
+    if prompt_key is None:
+        raise HTTPException(status_code=422, detail="Resume prompt_key is required when classification_key is omitted")
     resume = Resume(
         user_id=payload.user_id,
         name=payload.name,
-        prompt_key=payload.classification_key,
+        prompt_key=prompt_key,
         classification_key=payload.classification_key,
         content=payload.content,
         is_active=payload.is_active,
+        is_default=payload.is_default,
     )
     session.add(resume)
+    session.flush()
+    if resume.is_default:
+        _normalize_user_default_resume(session, resume.user_id, selected_resume=resume)
+    else:
+        has_other_default = session.scalar(
+            select(Resume.id)
+            .where(Resume.user_id == resume.user_id, Resume.is_default.is_(True), Resume.id != resume.id)
+            .limit(1)
+        )
+        if has_other_default is None:
+            _normalize_user_default_resume(session, resume.user_id, selected_resume=resume)
     _commit_or_fail(session)
     return ResumeRead.model_validate(resume)
 
@@ -1139,13 +1194,20 @@ def update_resume(resume_id: int, payload: ResumeUpdate, session: Session = Depe
         raise HTTPException(status_code=404, detail=f"Resume '{resume_id}' was not found")
     if payload.name is not None:
         resume.name = payload.name
+    if payload.prompt_key is not None:
+        resume.prompt_key = payload.prompt_key
     if payload.classification_key is not None:
         resume.classification_key = payload.classification_key
-        resume.prompt_key = payload.classification_key
     if payload.content is not None:
         resume.content = payload.content
     if payload.is_active is not None:
         resume.is_active = payload.is_active
+    if payload.is_default is not None:
+        resume.is_default = payload.is_default
+    if resume.is_default:
+        _normalize_user_default_resume(session, resume.user_id, selected_resume=resume)
+    else:
+        _normalize_user_default_resume(session, resume.user_id)
     _commit_or_fail(session)
     return ResumeRead.model_validate(resume)
 

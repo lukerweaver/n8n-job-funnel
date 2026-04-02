@@ -413,9 +413,11 @@ def test_user_and_resume_crud(db_session):
         ResumeCreate(
             user_id=user.id,
             name="PM Resume",
+            prompt_key="product-scoring",
             classification_key="Product Manager",
             content="Resume body",
             is_active=True,
+            is_default=False,
         ),
         db_session,
     )
@@ -430,21 +432,25 @@ def test_user_and_resume_crud(db_session):
     )
     updated_resume = update_resume(
         resume.id,
-        ResumeUpdate(content="Updated resume body", is_active=False),
+        ResumeUpdate(prompt_key="pm-custom", content="Updated resume body", is_active=False),
         db_session,
     )
 
     assert listed_users.total == 1
     assert listed_resumes.total == 1
+    assert listed_resumes.items[0].prompt_key == "product-scoring"
     assert listed_resumes.items[0].classification_key == "Product Manager"
+    assert listed_resumes.items[0].is_default is True
     assert updated_resume.content == "Updated resume body"
     assert updated_resume.is_active is False
+    assert updated_resume.prompt_key == "pm-custom"
 
     with pytest.raises(HTTPException):
         create_resume(
             ResumeCreate(
                 user_id=9999,
                 name="Missing",
+                prompt_key="default",
                 classification_key="default",
                 content="nope",
                 is_active=True,
@@ -498,6 +504,54 @@ def test_application_crud_generate_and_status_flow(db_session):
     assert notified.notified_at is not None
     assert errored.status == "new"
     assert errored.last_error_at is not None
+
+
+def test_resume_defaults_and_independent_prompt_key(db_session):
+    user = seed_user(db_session, name="Resume Owner", email="resume-owner@example.com")
+
+    first = create_resume(
+        ResumeCreate(
+            user_id=user.id,
+            name="Default Resume",
+            prompt_key="default-scoring",
+            classification_key=None,
+            content="Generic resume",
+            is_active=True,
+            is_default=False,
+        ),
+        db_session,
+    )
+    second = create_resume(
+        ResumeCreate(
+            user_id=user.id,
+            name="PM Resume",
+            prompt_key="pm-scoring",
+            classification_key="Product Manager",
+            content="PM resume",
+            is_active=True,
+            is_default=True,
+        ),
+        db_session,
+    )
+
+    first_db = db_session.get(Resume, first.id)
+    second_db = db_session.get(Resume, second.id)
+
+    assert first_db is not None and first_db.is_default is False
+    assert second_db is not None and second_db.is_default is True
+
+    updated = update_resume(
+        second.id,
+        ResumeUpdate(classification_key="Product", prompt_key="pm-v2", is_default=False),
+        db_session,
+    )
+
+    db_session.refresh(first_db)
+    db_session.refresh(second_db)
+    assert updated.classification_key == "Product"
+    assert updated.prompt_key == "pm-v2"
+    assert first_db.is_default is True
+    assert second_db.is_default is False
 
 
 def test_run_applications_generate_for_user(db_session):
@@ -984,6 +1038,7 @@ def test_run_phase_two_backfill_migrates_legacy_prompt_and_job_data(db_session):
     assert legacy_user is not None
     assert len(resumes) == 1
     assert resumes[0].prompt_key == "default"
+    assert resumes[0].is_default is True
     assert resumes[0].content == "Legacy Resume"
     assert len(applications) == 1
     assert applications[0].job_posting_id == migrated_job.id
@@ -1395,7 +1450,7 @@ def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
     monkeypatch.setattr(
         app_module,
         "inspect",
-        lambda _engine: SimpleNamespace(get_columns=lambda _table: [{"name": "classification_key"}]),
+        lambda _engine: SimpleNamespace(get_columns=lambda _table: [{"name": "classification_key"}, {"name": "is_default"}]),
     )
     begin_calls = []
     monkeypatch.setattr(fake_engine, "begin", lambda: begin_calls.append(True), raising=False)
@@ -1415,3 +1470,4 @@ def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
 
     assert any("ALTER TABLE resumes ADD COLUMN classification_key VARCHAR(100)" in statement for statement in resume_executed)
     assert any("UPDATE resumes" in statement for statement in resume_executed)
+    assert any("ALTER TABLE resumes ADD COLUMN is_default BOOLEAN DEFAULT FALSE" in statement for statement in resume_executed)

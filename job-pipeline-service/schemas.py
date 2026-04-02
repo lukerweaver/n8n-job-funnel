@@ -286,16 +286,20 @@ class UserListResponse(BaseModel):
 class ResumeCreate(BaseModel):
     user_id: int
     name: str
-    classification_key: str
+    prompt_key: str | None = None
+    classification_key: str | None = None
     content: str
     is_active: bool = True
+    is_default: bool = False
 
 
 class ResumeUpdate(BaseModel):
     name: str | None = None
+    prompt_key: str | None = None
     classification_key: str | None = None
     content: str | None = None
     is_active: bool | None = None
+    is_default: bool | None = None
 
 
 class ResumeRead(BaseModel):
@@ -304,9 +308,11 @@ class ResumeRead(BaseModel):
     id: int
     user_id: int
     name: str
+    prompt_key: str
     classification_key: str | None = None
     content: str
     is_active: bool
+    is_default: bool
     created_at: datetime
     updated_at: datetime
 
