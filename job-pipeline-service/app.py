@@ -529,6 +529,8 @@ def ensure_run_schema() -> None:
     run_statements = []
     if "type" not in run_columns:
         run_statements.append(f"ALTER TABLE score_runs ADD COLUMN type {run_type}")
+    if "classification_key" not in run_columns:
+        run_statements.append("ALTER TABLE score_runs ADD COLUMN classification_key VARCHAR(255)")
 
     item_columns = {column["name"] for column in inspector.get_columns("score_run_items")}
     item_statements = []
@@ -547,6 +549,16 @@ def ensure_run_schema() -> None:
             connection.execute(text(statement))
         if "type" not in run_columns:
             connection.execute(text("UPDATE score_runs SET type = 'scoring' WHERE type IS NULL"))
+        if "classification_key" not in run_columns:
+            connection.execute(
+                text(
+                    """
+                    UPDATE score_runs
+                    SET classification_key = prompt_key
+                    WHERE classification_key IS NULL AND prompt_key IS NOT NULL
+                    """
+                )
+            )
         if "type" not in item_columns:
             connection.execute(text("UPDATE score_run_items SET type = 'scoring' WHERE type IS NULL"))
 

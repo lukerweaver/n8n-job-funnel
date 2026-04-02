@@ -179,6 +179,7 @@ class RunRead(BaseModel):
     last_error: str | None = None
     requested_status: str
     requested_source: str | None = None
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
     callback_status: str | None = None
@@ -211,6 +212,7 @@ class JobsScoreRunResponse(BaseModel):
 class ScoreRunRead(JobsScoreRunResponse):
     requested_status: str
     requested_source: str | None = None
+    classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
     callback_status: str | None = None

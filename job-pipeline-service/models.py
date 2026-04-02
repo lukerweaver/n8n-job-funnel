@@ -228,6 +228,7 @@ class Run(Base):
     status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False, index=True)
     requested_status: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     requested_source: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    classification_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     prompt_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     force: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     callback_url: Mapped[str | None] = mapped_column(Text, nullable=True)

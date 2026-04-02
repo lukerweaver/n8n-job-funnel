@@ -41,6 +41,7 @@ def seed_score_run(session, *, job: JobPosting, status="queued") -> ScoreRun:
         status=status,
         requested_status="new",
         requested_source=None,
+        classification_key=None,
         prompt_key=None,
         force=False,
         selected_count=1,

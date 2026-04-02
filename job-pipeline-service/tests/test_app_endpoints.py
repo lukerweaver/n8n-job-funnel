@@ -349,8 +349,10 @@ def test_get_score_run_and_items(db_session):
 
     assert generic_run_response.run_id == run.id
     assert generic_run_response.type == "scoring"
+    assert generic_run_response.classification_key is None
     assert generic_items_response.total == 1
     assert run_response.run_id == run.id
+    assert run_response.classification_key is None
     assert items_response.total == 1
 
     with pytest.raises(HTTPException):
@@ -1557,14 +1559,26 @@ def test_legacy_resume_helpers_cover_fallbacks(db_session):
     same_user = app_module._get_or_create_legacy_user(db_session)
     assert user_from_helper.id == same_user.id
 
-    resume = app_module._get_or_create_legacy_resume(db_session, user, "missing-key")
-    same_resume = app_module._get_or_create_legacy_resume(db_session, user, "missing-key")
+    resume = app_module._get_or_create_legacy_resume(
+        db_session,
+        user,
+        classification_key=None,
+        prompt_key="missing-key",
+    )
+    same_resume = app_module._get_or_create_legacy_resume(
+        db_session,
+        user,
+        classification_key=None,
+        prompt_key="missing-key",
+    )
     assert resume.id == same_resume.id
+    assert resume.is_default is True
 
 
 def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
     prompt_executed = []
     resume_executed = []
+    run_executed = []
 
     class FakeConnection:
         def __init__(self, executed):
@@ -1625,3 +1639,20 @@ def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
     assert any("ALTER TABLE resumes ADD COLUMN classification_key VARCHAR(100)" in statement for statement in resume_executed)
     assert any("UPDATE resumes" in statement for statement in resume_executed)
     assert any("ALTER TABLE resumes ADD COLUMN is_default BOOLEAN DEFAULT FALSE" in statement for statement in resume_executed)
+
+    monkeypatch.setattr(
+        app_module,
+        "inspect",
+        lambda _engine: SimpleNamespace(
+            get_columns=lambda table: [{"name": "requested_status"}] if table == "score_runs" else [{"name": "score_run_id"}]
+        ),
+    )
+    monkeypatch.setattr(fake_engine, "begin", lambda: FakeBegin(run_executed), raising=False)
+
+    app_module.ensure_run_schema()
+
+    assert any("ALTER TABLE score_runs ADD COLUMN type VARCHAR(50)" in statement for statement in run_executed)
+    assert any("ALTER TABLE score_runs ADD COLUMN classification_key VARCHAR(255)" in statement for statement in run_executed)
+    assert any("UPDATE score_runs SET classification_key = prompt_key" in statement for statement in run_executed)
+    assert any("ALTER TABLE score_run_items ADD COLUMN type VARCHAR(50)" in statement for statement in run_executed)
+    assert any("ALTER TABLE score_run_items ADD COLUMN job_application_id INTEGER" in statement for statement in run_executed)
