@@ -73,7 +73,6 @@ from schemas import (
 from services.classification_service import classify_job
 from services.legacy_sync_service import (
     LEGACY_MIGRATION_USER_EMAIL,
-    LEGACY_MIGRATION_USER_NAME,
     _get_or_create_legacy_resume,
     _get_or_create_legacy_user,
     _legacy_resume_content,
