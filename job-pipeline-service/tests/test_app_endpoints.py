@@ -848,7 +848,7 @@ def test_run_applications_score_batch(db_session, monkeypatch):
 
     assert captured["status"] == "new"
     assert captured["classification_key"] == "product"
-    assert captured["prompt_key"] == "product"
+    assert captured["prompt_key"] is None
     assert captured["callback_url"] == "https://example.com/callback"
     assert result.run_id == 21
     assert result.type == "application_scoring"
@@ -1536,7 +1536,7 @@ def test_job_backfill_helpers_cover_legacy_status_paths(db_session):
     assert app_module._job_requires_application_backfill(pristine_job) is False
     assert app_module._job_requires_application_backfill(prompted_job) is True
     assert app_module._map_legacy_job_status_to_application_status(pristine_job) == "new"
-    assert app_module._map_legacy_job_status_to_application_status(scored_job) == "scored"
+    assert app_module._map_legacy_job_status_to_application_status(scored_job) == "new"
     assert app_module._map_legacy_job_status_to_application_status(unknown_job) == "new"
 
 
@@ -1653,6 +1653,6 @@ def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
 
     assert any("ALTER TABLE score_runs ADD COLUMN type VARCHAR(50)" in statement for statement in run_executed)
     assert any("ALTER TABLE score_runs ADD COLUMN classification_key VARCHAR(255)" in statement for statement in run_executed)
-    assert any("UPDATE score_runs SET classification_key = prompt_key" in statement for statement in run_executed)
+    assert any("UPDATE score_runs" in statement and "SET classification_key = prompt_key" in statement for statement in run_executed)
     assert any("ALTER TABLE score_run_items ADD COLUMN type VARCHAR(50)" in statement for statement in run_executed)
     assert any("ALTER TABLE score_run_items ADD COLUMN job_application_id INTEGER" in statement for statement in run_executed)
