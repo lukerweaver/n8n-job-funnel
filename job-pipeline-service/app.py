@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, selectinload
@@ -20,9 +20,13 @@ from models import InterviewRound, JobApplication, JobPosting, PromptLibrary, Re
 from schemas import (
     ApplicationCreate,
     ApplicationGenerateRequest,
+    ApplicationErrorWrite,
     ApplicationsGenerateRunRequest,
     ApplicationsGenerateRunResponse,
     ApplicationGenerateResponse,
+    ApplicationNotificationWrite,
+    ApplicationScoreRunRequest,
+    ApplicationScoreWrite,
     ApplicationsScoreRunRequest,
     ApplicationsScoreRunResponse,
     ApplicationStatusWrite,
@@ -36,19 +40,8 @@ from schemas import (
     JobApplicationScoreResponse,
     JobClassificationResponse,
     JobClassificationRunRequest,
-    JobErrorResponse,
-    JobErrorWrite,
     JobListResponse,
-    JobNotifyBatchItem,
-    JobNotifyResponse,
-    JobNotifyWrite,
     JobRead,
-    JobScoreRunRequest,
-    JobScoreBatchItem,
-    JobScoreResponse,
-    JobScoreWrite,
-    JobsScoreRunRequest,
-    JobsScoreRunResponse,
     PromptLibraryCreate,
     PromptLibraryListResponse,
     PromptLibraryRead,
@@ -63,35 +56,21 @@ from schemas import (
     UserCreate,
     UserListResponse,
     UserRead,
-    JobsBatchNotifyResponse,
-    JobsBatchScoreResponse,
     JobsClassificationRunRequest,
     JobsClassificationRunResponse,
-    ScoreRunRead,
-    ScoreRunItemsResponse,
 )
 from services.classification_service import classify_job
-from services.legacy_sync_service import (
-    LEGACY_MIGRATION_USER_EMAIL,
-    _get_or_create_legacy_resume,
-    _get_or_create_legacy_user,
-    _legacy_resume_content,
-    _map_legacy_job_status_to_application_status,
-    sync_job_to_applications,
-)
 from services.llm_client import LlmRequestError
 from services.prompt_service import PromptResolutionError
-from services.score_run_service import (
-    ScoreRunWorker,
+from services.run_service import (
+    RunWorker,
     enqueue_application_score_run,
     enqueue_classification_run,
-    enqueue_score_run,
     serialize_application_score_run,
     serialize_classification_run,
     serialize_run,
-    serialize_score_run,
 )
-from services.scoring_service import JobScoringSkipped, score_application, score_job
+from services.scoring_service import JobScoringSkipped, score_application
 
 
 def merge_responses(existing, incoming):
@@ -114,7 +93,7 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-score_run_worker = ScoreRunWorker()
+run_worker = RunWorker()
 ALLOWED_APPLICATION_STATUSES = {
     "new",
     "scored",
@@ -130,9 +109,9 @@ ALLOWED_APPLICATION_STATUSES = {
 
 OPENAPI_TAGS = [
     {"name": "system", "description": "Health and operational utility endpoints."},
-    {"name": "jobs", "description": "Job ingest, listing, classification, scoring, notification, and legacy compatibility routes."},
+    {"name": "jobs", "description": "Job ingest, listing, and classification routes."},
     {"name": "applications", "description": "Application generation, scoring, notification, status, and interview lifecycle routes."},
-    {"name": "runs", "description": "Async run inspection for classification, application scoring, and legacy job scoring."},
+    {"name": "runs", "description": "Async run inspection for classification and application scoring."},
     {"name": "users", "description": "User records that own resumes and applications."},
     {"name": "resumes", "description": "Resume inventory keyed to classification domains."},
     {"name": "prompt-library", "description": "Versioned prompt templates resolved by prompt key and prompt type."},
@@ -148,37 +127,6 @@ def apply_job_updates(job: JobPosting, payload: JobIngestItem) -> None:
     job.apply_url = payload.apply_url
     job.description = payload.description
     job.raw_payload = payload.raw_payload
-    job.status = "new"
-
-
-def apply_score(job: JobPosting, score_payload: JobScoreWrite) -> None:
-    job.score = score_payload.score
-    job.recommendation = score_payload.recommendation
-    job.justification = score_payload.justification
-    job.role_type = score_payload.role_type
-    job.screening_likelihood = score_payload.screening_likelihood
-    job.dimension_scores = score_payload.dimension_scores
-    job.gating_flags = score_payload.gating_flags
-    job.strengths = score_payload.strengths
-    job.gaps = score_payload.gaps
-    job.missing_from_jd = score_payload.missing_from_jd
-    job.prompt_key = score_payload.prompt_key
-    job.prompt_version = score_payload.prompt_version
-    job.scored_at = score_payload.scored_at or utcnow()
-    job.score_error = None
-    job.error_at = None
-    job.status = score_payload.status
-
-
-def apply_notification(job: JobPosting, notify_payload: JobNotifyWrite) -> None:
-    job.notified_at = notify_payload.notified_at or utcnow()
-    job.status = notify_payload.status
-
-
-def apply_error(job: JobPosting, error_payload: JobErrorWrite) -> None:
-    job.error_at = error_payload.error_at or utcnow()
-    job.score_error = None
-    job.status = error_payload.status
 
 
 def _get_job_by_id(session: Session, job_pk: int) -> JobPosting | None:
@@ -263,7 +211,7 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         yearly_min_compensation=job.yearly_min_compensation if job is not None else None,
         yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
         apply_url=job.apply_url if job is not None else None,
-        role_type=job.role_type if job is not None else None,
+        classification_key=job.classification_key if job is not None else None,
         resume_name=resume.name if resume is not None else None,
         status=application.status,
         score=application.score,
@@ -348,7 +296,7 @@ def _validate_application_entities(
     return user, resume, job_posting
 
 
-def apply_application_score(application: JobApplication, score_payload: JobScoreWrite) -> None:
+def apply_application_score(application: JobApplication, score_payload: ApplicationScoreWrite) -> None:
     application.score = score_payload.score
     application.recommendation = score_payload.recommendation
     application.justification = score_payload.justification
@@ -366,12 +314,14 @@ def apply_application_score(application: JobApplication, score_payload: JobScore
     application.status = score_payload.status
 
 
-def apply_application_notification(application: JobApplication, notify_payload: JobNotifyWrite) -> None:
+def apply_application_notification(
+    application: JobApplication, notify_payload: ApplicationNotificationWrite
+) -> None:
     application.notified_at = notify_payload.notified_at or utcnow()
     application.status = notify_payload.status
 
 
-def apply_application_error(application: JobApplication, error_payload: JobErrorWrite) -> None:
+def apply_application_error(application: JobApplication, error_payload: ApplicationErrorWrite) -> None:
     application.last_error_at = error_payload.error_at or utcnow()
     application.status = "new" if error_payload.status == "error" else error_payload.status
 
@@ -390,10 +340,6 @@ def apply_application_status(application: JobApplication, payload: ApplicationSt
 
 def _get_run_by_id(session: Session, run_id: int) -> Run | None:
     return session.get(Run, run_id)
-
-
-def _get_score_run_by_id(session: Session, run_id: int) -> Run | None:
-    return _get_run_by_id(session, run_id)
 
 
 def _commit_or_fail(session: Session) -> None:
@@ -416,19 +362,7 @@ def ensure_job_postings_schema() -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("job_postings")}
 
-    json_type = "JSONB" if engine.dialect.name == "postgresql" else "JSON"
-    float_type = "DOUBLE PRECISION" if engine.dialect.name == "postgresql" else "REAL"
     type_map = {
-        "error_at": "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME",
-        "role_type": "VARCHAR(100)",
-        "screening_likelihood": float_type,
-        "dimension_scores": json_type,
-        "gating_flags": json_type,
-        "score_provider": "VARCHAR(100)",
-        "score_model": "VARCHAR(255)",
-        "score_error": "TEXT",
-        "score_raw_response": "TEXT",
-        "score_attempts": "INTEGER",
         "classification_key": "VARCHAR(100)",
         "classification_prompt_version": "INTEGER",
         "classification_provider": "VARCHAR(100)",
@@ -527,20 +461,36 @@ def ensure_resumes_schema() -> None:
 def ensure_run_schema() -> None:
     inspector = inspect(engine)
 
-    run_columns = {column["name"] for column in inspector.get_columns("score_runs")}
+    run_table = "runs"
+    item_table = "run_items"
+    try:
+        run_columns = {column["name"] for column in inspector.get_columns(run_table)}
+    except Exception:
+        legacy_run_columns = {column["name"] for column in inspector.get_columns("score_runs")}
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE score_runs RENAME TO runs"))
+        run_columns = legacy_run_columns
     run_type = "VARCHAR(50)"
     run_statements = []
     if "type" not in run_columns:
-        run_statements.append(f"ALTER TABLE score_runs ADD COLUMN type {run_type}")
+        run_statements.append(f"ALTER TABLE {run_table} ADD COLUMN type {run_type}")
     if "classification_key" not in run_columns:
-        run_statements.append("ALTER TABLE score_runs ADD COLUMN classification_key VARCHAR(255)")
+        run_statements.append(f"ALTER TABLE {run_table} ADD COLUMN classification_key VARCHAR(255)")
 
-    item_columns = {column["name"] for column in inspector.get_columns("score_run_items")}
+    try:
+        item_columns = {column["name"] for column in inspector.get_columns(item_table)}
+    except Exception:
+        legacy_item_columns = {column["name"] for column in inspector.get_columns("score_run_items")}
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE score_run_items RENAME TO run_items"))
+        item_columns = legacy_item_columns
     item_statements = []
     if "type" not in item_columns:
-        item_statements.append(f"ALTER TABLE score_run_items ADD COLUMN type {run_type}")
+        item_statements.append(f"ALTER TABLE {item_table} ADD COLUMN type {run_type}")
+    if "run_id" not in item_columns:
+        item_statements.append(f"ALTER TABLE {item_table} ADD COLUMN run_id INTEGER")
     if "job_application_id" not in item_columns:
-        item_statements.append("ALTER TABLE score_run_items ADD COLUMN job_application_id INTEGER")
+        item_statements.append(f"ALTER TABLE {item_table} ADD COLUMN job_application_id INTEGER")
 
     if not run_statements and not item_statements:
         return
@@ -551,54 +501,21 @@ def ensure_run_schema() -> None:
         for statement in item_statements:
             connection.execute(text(statement))
         if "type" not in run_columns:
-            connection.execute(text("UPDATE score_runs SET type = 'scoring' WHERE type IS NULL"))
+            connection.execute(text(f"UPDATE {run_table} SET type = 'scoring' WHERE type IS NULL"))
         if "classification_key" not in run_columns:
             connection.execute(
                 text(
                     """
-                    UPDATE score_runs
+                    UPDATE runs
                     SET classification_key = prompt_key
                     WHERE classification_key IS NULL AND prompt_key IS NOT NULL
                     """
                 )
             )
+        if "run_id" not in item_columns:
+            connection.execute(text(f"UPDATE {item_table} SET run_id = score_run_id WHERE run_id IS NULL"))
         if "type" not in item_columns:
-            connection.execute(text("UPDATE score_run_items SET type = 'scoring' WHERE type IS NULL"))
-
-
-def _backfill_prompt_context_from_legacy_column(session: Session) -> None:
-    inspector = inspect(engine)
-    columns = {column["name"] for column in inspector.get_columns("prompt_library")}
-    if "base_resume_template" not in columns:
-        return
-
-    session.execute(
-        text(
-            """
-            UPDATE prompt_library
-            SET context = base_resume_template
-            WHERE (context IS NULL OR TRIM(context) = '')
-              AND base_resume_template IS NOT NULL
-              AND TRIM(base_resume_template) <> ''
-            """
-        )
-    )
-
-
-def _backfill_job_posting_classification(session: Session) -> None:
-    jobs = session.scalars(
-        select(JobPosting).where(
-            JobPosting.classification_key.is_(None),
-            JobPosting.role_type.is_not(None),
-        )
-    ).all()
-    for job in jobs:
-        role_type = (job.role_type or "").strip()
-        if not role_type:
-            continue
-        job.classification_key = role_type
-        if job.classified_at is None:
-            job.classified_at = job.scored_at or job.updated_at or job.created_at
+            connection.execute(text(f"UPDATE {item_table} SET type = 'scoring' WHERE type IS NULL"))
 
 
 def _backfill_resume_classification_keys(session: Session) -> None:
@@ -613,50 +530,9 @@ def _backfill_resume_defaults(session: Session) -> None:
     user_ids = session.scalars(select(Resume.user_id).distinct()).all()
     for user_id in user_ids:
         _normalize_user_default_resume(session, user_id)
-
-
-def _job_requires_application_backfill(job: JobPosting) -> bool:
-    if job.status and job.status != "new":
-        return True
-    return any(
-        value is not None
-        for value in (
-            job.score,
-            job.recommendation,
-            job.justification,
-            job.screening_likelihood,
-            job.dimension_scores,
-            job.gating_flags,
-            job.strengths,
-            job.gaps,
-            job.missing_from_jd,
-            job.prompt_key,
-            job.prompt_version,
-            job.score_provider,
-            job.score_model,
-            job.score_error,
-            job.score_raw_response,
-            job.scored_at,
-            job.notified_at,
-            job.error_at,
-        )
-    ) or (job.score_attempts or 0) > 0
-
-
-def _backfill_job_applications(session: Session) -> None:
-    jobs = session.scalars(select(JobPosting).order_by(JobPosting.id.asc())).all()
-    for job in jobs:
-        if not _job_requires_application_backfill(job):
-            continue
-        sync_job_to_applications(session, job)
-
-
-def run_phase_two_backfill(session: Session) -> None:
-    _backfill_prompt_context_from_legacy_column(session)
-    _backfill_job_posting_classification(session)
+def run_startup_backfill(session: Session) -> None:
     _backfill_resume_classification_keys(session)
     _backfill_resume_defaults(session)
-    _backfill_job_applications(session)
     session.commit()
 
 
@@ -668,10 +544,10 @@ async def lifespan(_app: FastAPI):
     ensure_resumes_schema()
     ensure_run_schema()
     with Session(engine) as session:
-        run_phase_two_backfill(session)
-    score_run_worker.start()
+        run_startup_backfill(session)
+    run_worker.start()
     yield
-    score_run_worker.stop()
+    run_worker.stop()
 
 
 app = FastAPI(title="Job Pipeline Service", lifespan=lifespan, openapi_tags=OPENAPI_TAGS)
@@ -745,48 +621,26 @@ def ingest_jobs(
 @app.get("/jobs", response_model=JobListResponse, tags=["jobs"])
 def list_jobs(
     session: Session = Depends(get_session),
-    status: str | None = Query(default=None),
     source: str | None = Query(default=None),
-    score: float | None = Query(default=None),
-    role_type: str | None = Query(default=None),
-    screening_likelihood: float | None = Query(default=None),
-    scored_since: datetime | None = Query(default=None),
+    classification_key: str | None = Query(default=None),
+    classified_since: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     query = select(JobPosting).order_by(JobPosting.created_at.desc())
     count_query = select(JobPosting)
 
-    if status:
-        normalized_status = status.strip().lower()
-        query = query.where(func.lower(func.trim(JobPosting.status)) == normalized_status)
-        count_query = count_query.where(func.lower(func.trim(JobPosting.status)) == normalized_status)
-
     if source:
         query = query.where(JobPosting.source == source)
         count_query = count_query.where(JobPosting.source == source)
 
-    if score is not None:
-        query = query.where(JobPosting.score.is_not(None), JobPosting.score >= score)
-        count_query = count_query.where(JobPosting.score.is_not(None), JobPosting.score >= score)
+    if classification_key:
+        query = query.where(JobPosting.classification_key == classification_key)
+        count_query = count_query.where(JobPosting.classification_key == classification_key)
 
-    if role_type:
-        query = query.where(JobPosting.role_type == role_type)
-        count_query = count_query.where(JobPosting.role_type == role_type)
-
-    if screening_likelihood is not None:
-        query = query.where(
-            JobPosting.screening_likelihood.is_not(None),
-            JobPosting.screening_likelihood >= screening_likelihood,
-        )
-        count_query = count_query.where(
-            JobPosting.screening_likelihood.is_not(None),
-            JobPosting.screening_likelihood >= screening_likelihood,
-        )
-
-    if scored_since is not None:
-        query = query.where(JobPosting.scored_at.is_not(None), JobPosting.scored_at > scored_since)
-        count_query = count_query.where(JobPosting.scored_at.is_not(None), JobPosting.scored_at > scored_since)
+    if classified_since is not None:
+        query = query.where(JobPosting.classified_at.is_not(None), JobPosting.classified_at > classified_since)
+        count_query = count_query.where(JobPosting.classified_at.is_not(None), JobPosting.classified_at > classified_since)
 
     items = session.scalars(query.offset(offset).limit(limit)).all()
     total = len(session.scalars(count_query).all())
@@ -840,85 +694,6 @@ def run_jobs_classification(payload: JobsClassificationRunRequest, session: Sess
     return JobsClassificationRunResponse(**serialize_classification_run(session, run))
 
 
-@app.post("/jobs/{job_id}/score", response_model=JobScoreResponse, tags=["jobs"])
-def store_job_score(job_id: int, score_payload: JobScoreWrite, session: Session = Depends(get_session)):
-    job = _get_job_by_id(session, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
-
-    apply_score(job, score_payload)
-    sync_job_to_applications(session, job)
-    _commit_or_fail(session)
-
-    return JobScoreResponse(
-        id=job.id,
-        job_id=job.job_id,
-        status=job.status,
-        score=job.score,
-        recommendation=job.recommendation,
-        role_type=job.role_type,
-        screening_likelihood=job.screening_likelihood,
-        dimension_scores=job.dimension_scores,
-        gating_flags=job.gating_flags,
-        scored_at=job.scored_at,
-        notified_at=job.notified_at,
-        error_at=job.error_at,
-        score_error=job.score_error,
-    )
-
-
-@app.post("/jobs/{job_id}/score/run", response_model=JobScoreResponse, tags=["jobs"])
-def run_job_score(job_id: int, payload: JobScoreRunRequest, session: Session = Depends(get_session)):
-    job = _get_job_by_id(session, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
-
-    try:
-        result = score_job(
-            session,
-            job,
-            classification_key=payload.classification_key,
-            prompt_key=payload.prompt_key,
-            force=payload.force,
-        )
-    except JobScoringSkipped as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    _commit_or_fail(session)
-
-    return JobScoreResponse(
-        id=result.job.id,
-        job_id=result.job.job_id,
-        status=result.job.status,
-        score=result.job.score,
-        recommendation=result.job.recommendation,
-        role_type=result.job.role_type,
-        screening_likelihood=result.job.screening_likelihood,
-        dimension_scores=result.job.dimension_scores,
-        gating_flags=result.job.gating_flags,
-        scored_at=result.job.scored_at,
-        notified_at=result.job.notified_at,
-        error_at=result.job.error_at,
-        score_error=result.job.score_error,
-    )
-
-
-@app.post("/jobs/score/run", response_model=JobsScoreRunResponse, status_code=202, tags=["jobs"])
-def run_jobs_score(payload: JobsScoreRunRequest, session: Session = Depends(get_session)):
-    run = enqueue_score_run(
-        session,
-        limit=payload.limit,
-        status=payload.status,
-        source=payload.source,
-        classification_key=payload.classification_key,
-        prompt_key=payload.prompt_key,
-        force=payload.force,
-        callback_url=payload.callback_url,
-    )
-    _commit_or_fail(session)
-    session.refresh(run)
-    return JobsScoreRunResponse(**serialize_score_run(session, run))
-
 @app.get("/runs/{run_id}", response_model=RunRead, tags=["runs"])
 def get_run(run_id: int, session: Session = Depends(get_session)):
     run = _get_run_by_id(session, run_id)
@@ -936,7 +711,7 @@ def list_run_items(run_id: int, session: Session = Depends(get_session)):
 
     items = session.scalars(
         select(RunItem)
-        .where(RunItem.score_run_id == run_id)
+        .where(RunItem.run_id == run_id)
         .order_by(RunItem.id.asc())
     ).all()
     return RunItemsResponse(
@@ -955,108 +730,6 @@ def list_run_items(run_id: int, session: Session = Depends(get_session)):
             for item in items
         ],
     )
-
-
-@app.get("/score-runs/{run_id}", response_model=ScoreRunRead, tags=["runs"])
-def get_score_run(run_id: int, session: Session = Depends(get_session)):
-    run = _get_score_run_by_id(session, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
-    if run.type != "scoring":
-        raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
-
-    return ScoreRunRead(**serialize_score_run(session, run))
-
-
-@app.get("/score-runs/{run_id}/items", response_model=ScoreRunItemsResponse, tags=["runs"])
-def list_score_run_items(run_id: int, session: Session = Depends(get_session)):
-    run = _get_score_run_by_id(session, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
-    if run.type != "scoring":
-        raise HTTPException(status_code=404, detail=f"Score run '{run_id}' was not found")
-
-    items = list_run_items(run_id, session)
-    return ScoreRunItemsResponse(total=items.total, items=items.items)
-
-
-@app.post("/jobs/scores", response_model=JobsBatchScoreResponse, tags=["jobs"])
-def store_job_scores(score_payloads: list[JobScoreBatchItem], session: Session = Depends(get_session)):
-    updated_job_ids: list[int] = []
-
-    for score_payload in score_payloads:
-        job = _get_job_by_id(session, score_payload.id)
-        if job is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Job '{score_payload.id}' was not found",
-            )
-
-        apply_score(job, score_payload)
-        sync_job_to_applications(session, job)
-        updated_job_ids.append(job.id)
-
-    _commit_or_fail(session)
-
-    return JobsBatchScoreResponse(updated=len(updated_job_ids), jobs=updated_job_ids)
-
-
-@app.post("/jobs/{job_id}/notify", response_model=JobNotifyResponse, tags=["jobs"])
-def mark_job_notified(job_id: int, notify_payload: JobNotifyWrite, session: Session = Depends(get_session)):
-    job = _get_job_by_id(session, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
-
-    apply_notification(job, notify_payload)
-    sync_job_to_applications(session, job)
-    _commit_or_fail(session)
-
-    return JobNotifyResponse(
-        id=job.id,
-        job_id=job.job_id,
-        status=job.status,
-        notified_at=job.notified_at,
-    )
-
-
-@app.post("/jobs/{job_id}/error", response_model=JobErrorResponse, tags=["jobs"])
-def mark_job_error(job_id: int, error_payload: JobErrorWrite, session: Session = Depends(get_session)):
-    job = _get_job_by_id(session, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found")
-
-    apply_error(job, error_payload)
-    sync_job_to_applications(session, job)
-    _commit_or_fail(session)
-
-    return JobErrorResponse(
-        id=job.id,
-        job_id=job.job_id,
-        status=job.status,
-        error_at=job.error_at,
-        score_error=job.score_error,
-    )
-
-
-@app.post("/jobs/notify", response_model=JobsBatchNotifyResponse, tags=["jobs"])
-def mark_jobs_notified(notify_payloads: list[JobNotifyBatchItem], session: Session = Depends(get_session)):
-    updated_job_ids: list[int] = []
-
-    for notify_payload in notify_payloads:
-        job = _get_job_by_id(session, notify_payload.id)
-        if job is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Job '{notify_payload.id}' was not found",
-            )
-
-        apply_notification(job, notify_payload)
-        sync_job_to_applications(session, job)
-        updated_job_ids.append(job.id)
-
-    _commit_or_fail(session)
-
-    return JobsBatchNotifyResponse(updated=len(updated_job_ids), jobs=updated_job_ids)
 
 
 @app.get("/users", response_model=UserListResponse, tags=["users"])
@@ -1406,7 +1079,7 @@ def run_applications_generate(payload: ApplicationsGenerateRunRequest, session: 
 @app.post("/applications/{application_id}/score", response_model=JobApplicationScoreResponse, tags=["applications"])
 def store_application_score(
     application_id: int,
-    score_payload: JobScoreWrite,
+    score_payload: ApplicationScoreWrite,
     session: Session = Depends(get_session),
 ):
     application = _get_application_by_id(session, application_id)
@@ -1420,7 +1093,7 @@ def store_application_score(
 @app.post("/applications/{application_id}/score/run", response_model=JobApplicationScoreResponse, tags=["applications"])
 def run_application_score(
     application_id: int,
-    payload: JobScoreRunRequest,
+    payload: ApplicationScoreRunRequest,
     session: Session = Depends(get_session),
 ):
     application = _get_application_by_id(session, application_id)
@@ -1462,7 +1135,7 @@ def run_applications_score(payload: ApplicationsScoreRunRequest, session: Sessio
 @app.post("/applications/{application_id}/notify", response_model=JobApplicationRead, tags=["applications"])
 def mark_application_notified(
     application_id: int,
-    notify_payload: JobNotifyWrite,
+    notify_payload: ApplicationNotificationWrite,
     session: Session = Depends(get_session),
 ):
     application = _get_application_by_id(session, application_id)
@@ -1476,7 +1149,7 @@ def mark_application_notified(
 @app.post("/applications/{application_id}/error", response_model=JobApplicationRead, tags=["applications"])
 def mark_application_error(
     application_id: int,
-    error_payload: JobErrorWrite,
+    error_payload: ApplicationErrorWrite,
     session: Session = Depends(get_session),
 ):
     application = _get_application_by_id(session, application_id)

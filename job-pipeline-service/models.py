@@ -51,30 +51,6 @@ class JobPosting(Base):
     classification_raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     classified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Legacy workflow/scoring fields retained temporarily until the service
-    # cutover moves scoring and application lifecycle onto JobApplication.
-    status: Mapped[str] = mapped_column(String(50), default="new", index=True)
-    score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    recommendation: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    justification: Mapped[str | None] = mapped_column(Text, nullable=True)
-    role_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    screening_likelihood: Mapped[float | None] = mapped_column(Float, nullable=True)
-    dimension_scores: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
-    gating_flags: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    strengths: Mapped[list | dict | None] = mapped_column(JSON, nullable=True)
-    gaps: Mapped[list | dict | None] = mapped_column(JSON, nullable=True)
-    missing_from_jd: Mapped[list | dict | None] = mapped_column(JSON, nullable=True)
-    prompt_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    prompt_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    score_provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    score_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    score_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    score_raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
-    score_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
-    scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
@@ -221,7 +197,7 @@ class InterviewRound(Base):
 
 
 class Run(Base):
-    __tablename__ = "score_runs"
+    __tablename__ = "runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     type: Mapped[str] = mapped_column(String(50), default="scoring", nullable=False, index=True)
@@ -247,10 +223,10 @@ class Run(Base):
 
 
 class RunItem(Base):
-    __tablename__ = "score_run_items"
+    __tablename__ = "run_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    score_run_id: Mapped[int] = mapped_column(ForeignKey("score_runs.id"), nullable=False, index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), nullable=False, index=True)
     type: Mapped[str] = mapped_column(String(50), default="scoring", nullable=False, index=True)
     job_posting_id: Mapped[int | None] = mapped_column(ForeignKey("job_postings.id"), nullable=True, index=True)
     job_application_id: Mapped[int | None] = mapped_column(ForeignKey("job_applications.id"), nullable=True, index=True)
@@ -264,7 +240,3 @@ class RunItem(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
-
-
-ScoreRun = Run
-ScoreRunItem = RunItem

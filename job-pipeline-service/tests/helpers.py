@@ -1,13 +1,12 @@
 from datetime import datetime, timezone
 
-from models import JobApplication, JobPosting, PromptLibrary, Resume, ScoreRun, ScoreRunItem, User
+from models import JobApplication, JobPosting, PromptLibrary, Resume, Run, RunItem, User
 
 
-def seed_job(session, *, job_id="job-1", status="new", description="Role details", source="linkedin") -> JobPosting:
+def seed_job(session, *, job_id="job-1", description="Role details", source="linkedin") -> JobPosting:
     job = JobPosting(
         job_id=job_id,
         source=source,
-        status=status,
         company_name="Acme",
         title="PM",
         description=description,
@@ -36,8 +35,8 @@ def seed_prompt(session, *, key="default", version=1, active=True) -> PromptLibr
     return prompt
 
 
-def seed_score_run(session, *, job: JobPosting, status="queued") -> ScoreRun:
-    run = ScoreRun(
+def seed_score_run(session, *, job: JobPosting, status="queued") -> Run:
+    run = Run(
         status=status,
         requested_status="new",
         requested_source=None,
@@ -48,7 +47,7 @@ def seed_score_run(session, *, job: JobPosting, status="queued") -> ScoreRun:
     )
     session.add(run)
     session.flush()
-    session.add(ScoreRunItem(score_run_id=run.id, job_posting_id=job.id, status="queued"))
+    session.add(RunItem(run_id=run.id, job_posting_id=job.id, status="queued"))
     session.commit()
     session.refresh(run)
     return run

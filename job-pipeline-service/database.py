@@ -5,13 +5,14 @@ from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+DEFAULT_SQLITE_PATH = Path("./data/jobs.db")
+
 
 def _default_database_url() -> str:
     if override := os.getenv("DATABASE_URL"):
         return override
 
-    data_db = Path("./data/jobs.db")
-    return f"sqlite:///{data_db.resolve()}" if data_db.exists() else "sqlite:///./jobs.db"
+    return f"sqlite:///{DEFAULT_SQLITE_PATH.resolve()}"
 
 
 DATABASE_URL = _default_database_url()
@@ -19,8 +20,8 @@ DATABASE_URL = _default_database_url()
 if DATABASE_URL.startswith("sqlite"):
     db_path = DATABASE_URL.replace("sqlite:///", "", 1)
     # For absolute Windows-style or POSIX paths (e.g. sqlite:////app/data/jobs.db),
-    # preserve leading slash. For relative paths (e.g. sqlite:///./jobs.db), remove
-    # the optional leading ./ component to keep Path behavior consistent.
+    # preserve leading slash. For relative paths, remove the optional leading
+    # ./ component to keep Path behavior consistent.
     if db_path.startswith("./"):
         db_path = db_path.removeprefix("./")
     parent_dir = Path(db_path).expanduser().parent

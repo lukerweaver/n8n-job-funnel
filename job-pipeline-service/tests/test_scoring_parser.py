@@ -3,7 +3,7 @@ import pytest
 from services.scoring_parser import ScoringParseError, parse_scoring_response
 
 
-def test_parse_legacy_scoring_response():
+def test_parse_scoring_response_with_minimal_fields():
     payload = """
         {
           "total_score": 18,
@@ -17,7 +17,6 @@ def test_parse_legacy_scoring_response():
     parsed = parse_scoring_response(payload)
 
     assert parsed.total_score == 18.0
-    assert parsed.role_type is None
     assert parsed.screening_likelihood is None
     assert parsed.dimension_scores is None
     assert parsed.gating_flags is None
@@ -26,7 +25,6 @@ def test_parse_legacy_scoring_response():
 def test_parse_new_scoring_response_with_all_fields():
     payload = """
         {
-          "role_type": "Product Manager",
           "total_score": 21,
           "screening_likelihood": 20,
           "dimension_scores": {
@@ -46,7 +44,6 @@ def test_parse_new_scoring_response_with_all_fields():
     """
     parsed = parse_scoring_response(payload)
 
-    assert parsed.role_type == "Product Manager"
     assert parsed.screening_likelihood == 20.0
     assert parsed.dimension_scores["domain_fit"] == 4.0
     assert parsed.gating_flags == ["No"]
@@ -84,7 +81,6 @@ def test_parse_scoring_response_rejects_invalid_gating_flags():
         ('{"total_score": "high"}', "Field 'total_score' must be a number"),
         ('{"total_score": 17, "recommendation": 5}', "Field 'recommendation' must be a string or null"),
         ('{"total_score": 17, "justification": 5}', "Field 'justification' must be a string or null"),
-        ('{"total_score": 17, "role_type": 5}', "Field 'role_type' must be a string or null"),
         ('{"total_score": 17, "screening_likelihood": "likely"}', "Field 'screening_likelihood' must be a number or null"),
         ('{"total_score": 17, "strengths": "strong"}', "Field 'strengths' must be a list, object, or null"),
         ('{"total_score": 17, "gaps": "missing"}', "Field 'gaps' must be a list, object, or null"),
