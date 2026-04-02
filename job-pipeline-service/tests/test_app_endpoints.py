@@ -520,6 +520,57 @@ def test_application_crud_generate_and_status_flow(db_session):
     assert errored.last_error_at is not None
 
 
+def test_generate_applications_supports_default_resume_strategies(db_session):
+    user = seed_user(db_session, name="Default User", email="default-user@example.com")
+    job = seed_job(db_session, job_id="job-default-strategy")
+    job.classification_key = "Designer"
+    db_session.commit()
+
+    default_resume = seed_resume(
+        db_session,
+        user=user,
+        name="Default Resume",
+        prompt_key="default",
+        classification_key=None,
+        content="Generic resume",
+        is_default=True,
+    )
+    classified_resume = seed_resume(
+        db_session,
+        user=user,
+        name="Designer Resume",
+        prompt_key="designer",
+        classification_key="Designer",
+        content="Designer resume",
+        is_default=False,
+    )
+
+    default_only = app_module.generate_applications(
+        ApplicationGenerateRequest(job_posting_id=job.id, user_id=user.id, resume_strategy="default_only"),
+        db_session,
+    )
+
+    assert default_only.created == 1
+    created_default = db_session.scalars(
+        select(JobApplication).where(JobApplication.job_posting_id == job.id).order_by(JobApplication.id.asc())
+    ).all()
+    assert [application.resume_id for application in created_default] == [default_resume.id]
+
+    db_session.query(JobApplication).delete()
+    db_session.commit()
+
+    default_fallback = app_module.generate_applications(
+        ApplicationGenerateRequest(job_posting_id=job.id, user_id=user.id, resume_strategy="default_fallback"),
+        db_session,
+    )
+
+    assert default_fallback.created == 1
+    created_fallback = db_session.scalars(
+        select(JobApplication).where(JobApplication.job_posting_id == job.id).order_by(JobApplication.id.asc())
+    ).all()
+    assert [application.resume_id for application in created_fallback] == [classified_resume.id]
+
+
 def test_resume_defaults_and_independent_prompt_key(db_session):
     user = seed_user(db_session, name="Resume Owner", email="resume-owner@example.com")
 
@@ -600,6 +651,45 @@ def test_run_applications_generate_for_user(db_session):
     ).all()
     assert result.applications == [created_applications[0].id]
     assert len(created_applications) == 1
+
+
+def test_run_applications_generate_uses_default_resume_strategy(db_session):
+    user = seed_user(db_session, name="Default Batch User", email="default-batch@example.com")
+    default_resume = seed_resume(
+        db_session,
+        user=user,
+        name="Default Resume",
+        prompt_key="default",
+        classification_key=None,
+        content="Resume",
+        is_default=True,
+    )
+    seed_resume(
+        db_session,
+        user=user,
+        name="PM Resume",
+        prompt_key="product",
+        classification_key="Product Manager",
+        content="Resume",
+        is_default=False,
+    )
+
+    eligible = seed_job(db_session, job_id="job-default-eligible")
+    eligible.classification_key = "Designer"
+    db_session.commit()
+
+    result = run_applications_generate(
+        ApplicationsGenerateRunRequest(user_id=user.id, limit=10, resume_strategy="default_only"),
+        db_session,
+    )
+
+    assert result.selected == 1
+    assert result.created == 1
+    application = db_session.scalar(
+        select(JobApplication).where(JobApplication.job_posting_id == eligible.id, JobApplication.user_id == user.id)
+    )
+    assert application is not None
+    assert application.resume_id == default_resume.id
 
 
 def test_run_applications_generate_empty_selection_and_missing_user(db_session):

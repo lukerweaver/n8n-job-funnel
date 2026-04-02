@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -334,6 +335,7 @@ class ApplicationCreate(BaseModel):
 class ApplicationGenerateRequest(BaseModel):
     job_posting_id: int
     user_id: int | None = None
+    resume_strategy: Literal["classification_first", "default_only", "default_fallback"] = "classification_first"
 
 
 class ApplicationGenerateResponse(BaseModel):
@@ -345,6 +347,7 @@ class ApplicationGenerateResponse(BaseModel):
 class ApplicationsGenerateRunRequest(BaseModel):
     user_id: int
     limit: int = 100
+    resume_strategy: Literal["classification_first", "default_only", "default_fallback"] = "classification_first"
 
 
 class ApplicationsGenerateRunResponse(BaseModel):

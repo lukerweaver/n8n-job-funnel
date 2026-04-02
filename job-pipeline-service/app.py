@@ -217,6 +217,34 @@ def _normalize_user_default_resume(
         resume.is_default = resume.id == default_resume_id
 
 
+def _select_resumes_for_job_generation(
+    session: Session,
+    *,
+    job: JobPosting,
+    user_id: int | None,
+    resume_strategy: str,
+) -> list[Resume]:
+    if not job.classification_key:
+        return []
+
+    base_query = select(Resume).where(Resume.is_active.is_(True))
+    if user_id is not None:
+        base_query = base_query.where(Resume.user_id == user_id)
+
+    classification_resumes = session.scalars(
+        base_query.where(Resume.classification_key == job.classification_key).order_by(Resume.id.asc())
+    ).all()
+    default_resumes = session.scalars(
+        base_query.where(Resume.is_default.is_(True)).order_by(Resume.id.asc())
+    ).all()
+
+    if resume_strategy == "default_only":
+        return default_resumes
+    if resume_strategy == "default_fallback":
+        return classification_resumes or default_resumes
+    return classification_resumes
+
+
 def _serialize_application(application: JobApplication) -> JobApplicationRead:
     job = application.job_posting
     resume = application.resume
@@ -1350,12 +1378,12 @@ def generate_applications(payload: ApplicationGenerateRequest, session: Session 
         raise HTTPException(status_code=404, detail=f"Job '{payload.job_posting_id}' was not found")
     if not job.classification_key:
         raise HTTPException(status_code=409, detail="Job posting is missing classification_key")
-
-    query = select(Resume).where(Resume.is_active.is_(True), Resume.classification_key == job.classification_key)
-    if payload.user_id is not None:
-        query = query.where(Resume.user_id == payload.user_id)
-
-    resumes = session.scalars(query.order_by(Resume.id.asc())).all()
+    resumes = _select_resumes_for_job_generation(
+        session,
+        job=job,
+        user_id=payload.user_id,
+        resume_strategy=payload.resume_strategy,
+    )
     created = 0
     skipped = 0
     application_ids: list[int] = []
@@ -1393,34 +1421,37 @@ def run_applications_generate(payload: ApplicationsGenerateRunRequest, session: 
     if user is None:
         raise HTTPException(status_code=404, detail=f"User '{payload.user_id}' was not found")
 
-    matching_resume_exists = (
-        select(Resume.id)
-        .where(
-            Resume.user_id == payload.user_id,
-            Resume.is_active.is_(True),
-            Resume.classification_key == JobPosting.classification_key,
-        )
-        .exists()
-    )
-    existing_application_exists = (
-        select(JobApplication.id)
-        .where(
-            JobApplication.user_id == payload.user_id,
-            JobApplication.job_posting_id == JobPosting.id,
-        )
-        .exists()
-    )
-
-    jobs = session.scalars(
+    candidate_jobs = session.scalars(
         select(JobPosting)
-        .where(
-            JobPosting.classification_key.is_not(None),
-            matching_resume_exists,
-            ~existing_application_exists,
-        )
+        .where(JobPosting.classification_key.is_not(None))
         .order_by(JobPosting.created_at.asc())
-        .limit(payload.limit)
     ).all()
+
+    jobs: list[JobPosting] = []
+    for job in candidate_jobs:
+        existing_application_exists = session.scalar(
+            select(JobApplication.id)
+            .where(
+                JobApplication.user_id == payload.user_id,
+                JobApplication.job_posting_id == job.id,
+            )
+            .limit(1)
+        )
+        if existing_application_exists is not None:
+            continue
+
+        resumes = _select_resumes_for_job_generation(
+            session,
+            job=job,
+            user_id=payload.user_id,
+            resume_strategy=payload.resume_strategy,
+        )
+        if not resumes:
+            continue
+
+        jobs.append(job)
+        if len(jobs) >= payload.limit:
+            break
 
     if not jobs:
         return ApplicationsGenerateRunResponse(
@@ -1439,7 +1470,11 @@ def run_applications_generate(payload: ApplicationsGenerateRunRequest, session: 
 
     for job in jobs:
         result = generate_applications(
-            ApplicationGenerateRequest(job_posting_id=job.id, user_id=payload.user_id),
+            ApplicationGenerateRequest(
+                job_posting_id=job.id,
+                user_id=payload.user_id,
+                resume_strategy=payload.resume_strategy,
+            ),
             session,
         )
         processed_jobs.append(job.id)
