@@ -1,282 +1,81 @@
 # Automated Job Funnel
 
-This repository combines a Chrome extension, a FastAPI service, and exported n8n workflows for collecting, classifying, scoring, and tracking job postings and derived job applications.
+This repository combines:
 
-The current operational source of truth is `job-pipeline-service`, which stores postings, users, resumes, applications, interview rounds, and prompt templates in a relational database. The Chrome extension is the primary ingestion path. The exported n8n workflows are sanitized templates that need environment-specific credentials and endpoints filled back in after import.
+- `job-pipeline-service/`: the FastAPI backend and current source of truth
+- `job-funnel-ui/`: the internal operator UI for applications and runs
+- `job-scraper-chrome/`: the Chrome extension used to ingest jobs
+- `exports/`: sanitized n8n workflow exports and prompt seed data
+- `docs/`: lightweight architecture artifacts
 
-## Repo layout
+The active flow is:
 
-- `job-pipeline-service/` - FastAPI API for job ingest, job classification, application generation, scoring, lifecycle tracking, prompt library CRUD, and legacy job-native compatibility routes.
-- `job-scraper-chrome/` - Chrome extension that scrapes LinkedIn job pages and captures Hiring Cafe search responses, then posts normalized jobs to the API.
-- `exports/workflows/` - n8n workflow exports for the callback-driven orchestration flow.
-- `exports/data/` - example prompt-library seed data.
-- `docs/` - architecture diagram and supporting docs.
+1. scrape jobs in the browser
+2. ingest them into `job_postings`
+3. classify postings
+4. generate user-owned `job_applications` from matching resumes
+5. score applications
+6. track notifications, lifecycle status, and interview rounds
 
-## Current architecture
+## Repo Layout
+
+- `job-pipeline-service/` - FastAPI app, SQLAlchemy models, async run worker, tests, Docker assets
+- `job-funnel-ui/` - Vite/React internal UI for scored applications, runs, and run results
+- `job-scraper-chrome/` - unpacked Chrome extension for LinkedIn and Hiring Cafe capture
+- `exports/workflows/` - sanitized n8n workflow exports for callback-driven orchestration
+- `exports/data/` - example prompt library seed data
+- `docs/architecture.mmd` - simple architecture diagram source
+
+## Current Architecture
 
 ```text
-LinkedIn job page or Hiring Cafe search page
+LinkedIn / Hiring Cafe
     -> job-scraper-chrome
         -> POST /jobs/ingest
             -> job-pipeline-service
-                -> SQLite by default, Postgres when DATABASE_URL is set
-                    -> service-side classification
-                        -> active classification prompt from prompt_library
-                        -> classification_key on job_postings
-                    -> application generation
-                        -> users + resumes matched by classification_key
-                        -> job_applications rows
-                    -> service-side application scoring
-                        -> active scoring prompt from prompt_library
-                        -> configured LLM provider
-                        -> score/error persistence on job_applications
-                    -> callback-driven n8n orchestration
-                        -> Pipeline Orchestrator.json
-                        -> Classification Callback.json
-                        -> Application Score Callback.json
-                    -> legacy job-native scoring compatibility
-                        -> POST /jobs/score/run
-                        -> shared run queue + sync into job_applications for migrated flows
-                    -> n8n notification workflow
-                        -> tracker + email + notify writeback to API
+                -> job_postings
+                -> classify postings
+                -> generate applications from resumes
+                -> score applications with LLM prompts
+                -> persist lifecycle + notification state
+                -> expose run status to n8n callbacks
 ```
 
-## API overview
+## Backend Overview
 
-### Jobs
+The backend lives in [job-pipeline-service/README.md](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/README.md).
 
-- `POST /jobs/ingest` - insert new jobs by external `job_id`; duplicate `job_id` values are skipped
-- `GET /jobs` - list jobs with optional `status`, `source`, `score`, `scored_since`, `limit`, and `offset`
-- `GET /jobs/{id}` - fetch a single job by internal numeric database ID
-- `POST /jobs/{id}/classify/run` - classify one job and persist `classification_key`
-- `POST /jobs/classify/run` - batch classify jobs
-- `POST /jobs/{id}/score/run` - trigger service-side scoring for a single job
-- `POST /jobs/score/run` - enqueue a batch service-side scoring run
-- `GET /score-runs/{run_id}` - inspect async batch scoring progress
-- `GET /score-runs/{run_id}/items` - inspect per-job scoring status for a run
-- `POST /jobs/{id}/score` - write score fields by internal numeric database ID
-- `POST /jobs/{id}/error` - mark a job as error and set `error_at`
-- `POST /jobs/scores` - batch score writeback; each item must include numeric `id`
-- `POST /jobs/{id}/notify` - mark a job as notified by internal numeric database ID
-- `POST /jobs/notify` - batch notification writeback; each item must include numeric `id`
-- `GET /jobs/hiringcafe` - legacy Playwright capture route for Hiring Cafe search responses
+The current backend centers on these tables:
 
-Job-level scoring accepts both legacy and expanded JSON output shapes from the LLM. Old prompt fields continue to work unchanged, while optional new fields (`role_type`, `screening_likelihood`, `dimension_scores`, `gating_flags`) are persisted when present.
+- `job_postings`
+- `users`
+- `resumes`
+- `job_applications`
+- `interview_rounds`
+- `prompt_library`
+- `runs`
+- `run_items`
 
-### Applications
+Two identifier types matter:
 
-- `GET /applications` - list generated application rows with filters such as `user_id`, `resume_id`, `job_posting_id`, `status`, and `score`
-- `GET /applications/{id}` - fetch one application
-- `POST /applications` - create or upsert a specific posting/resume application pair
-- `POST /applications/generate` - create applications for resumes whose `classification_key` matches one posting
-- `POST /applications/generate/run` - create missing applications for one user across eligible classified postings
-- `POST /applications/{id}/score` - manual score writeback for a single application
-- `POST /applications/{id}/score/run` - score one application through the service
-- `POST /applications/score/run` - enqueue a batch application scoring run
-- `POST /applications/{id}/notify` - mark one application notified
-- `POST /applications/{id}/error` - mark one application errored
-- `POST /applications/{id}/status` - advance the lifecycle, for example `applied`, `screening`, `interview`, `offer`, `rejected`, or `withdrawn`
-- `GET /applications/{id}/interview-rounds` - list interview rounds for an application
-- `POST /applications/{id}/interview-rounds` - add an interview round
+- `job_id`: external string ID used for ingest dedupe
+- `id`: internal integer primary key used by most read/write routes
 
-### Users and resumes
+## Main API Surface
 
-- `GET /users`
-- `POST /users`
-- `GET /resumes`
-- `POST /resumes`
-- `PUT /resumes/{id}`
+High-value route groups:
 
-### Prompt library
+- Jobs: `/jobs/ingest`, `/jobs`, `/jobs/{id}`, `/jobs/{id}/classify/run`, `/jobs/classify/run`
+- Runs: `/runs`, `/runs/{run_id}`, `/runs/{run_id}/items`, `/runs/{run_id}/applications`
+- Users and resumes: `/users`, `/resumes`, `/resumes/{id}`
+- Applications: `/applications`, `/applications/generate`, `/applications/generate/run`, `/applications/{id}/score/run`, `/applications/score/run`
+- Prompt library: `/prompt-library`, `/prompt-library/{prompt_id}`
 
-- `GET /prompt-library`
-- `GET /prompt-library/{prompt_id}`
-- `POST /prompt-library`
-- `PUT /prompt-library/{prompt_id}`
-- `DELETE /prompt-library/{prompt_id}`
+The root README intentionally stays high-level. Route payload details and examples live in the service README.
 
-Prompts now live in the service database and are resolved by `prompt_key` plus `prompt_type`, with `DEFAULT_PROMPT_KEY` used when a classify or score request does not pass one.
+## Local Setup
 
-### Runs
-
-- `GET /runs/{run_id}`
-- `GET /runs/{run_id}/items`
-- `GET /score-runs/{run_id}`
-- `GET /score-runs/{run_id}/items`
-
-Async runs are backed by shared `score_runs` and `score_run_items` tables for classification, application scoring, and legacy job scoring. The service worker updates those records as items move through `queued`, `running`, `scored`, `classified`, `error`, or `skipped`.
-
-## Data model
-
-### `job_postings`
-
-- `id` - internal integer primary key
-- `job_id` - external unique identifier used for ingest dedupe
-- `source`
-- `status`
-- `company_name`
-- `title`
-- `yearly_min_compensation`
-- `yearly_max_compensation`
-- `apply_url`
-- `description`
-- `raw_payload`
-- `classification_key`
-- `classification_prompt_version`
-- `classification_provider`
-- `classification_model`
-- `classification_error`
-- `classification_raw_response`
-- `classified_at`
-- `score`
-- `recommendation`
-- `justification`
-- `strengths`
-- `gaps`
-- `missing_from_jd`
-- `role_type`
-- `screening_likelihood`
-- `dimension_scores`
-- `gating_flags`
-- `prompt_key`
-- `prompt_version`
-- `score_provider`
-- `score_model`
-- `score_error`
-- `score_raw_response`
-- `score_attempts`
-- `scored_at`
-- `notified_at`
-- `error_at`
-- `created_at`
-- `updated_at`
-
-`job_postings` now carries source-ingest data plus classification results. Legacy job-level scoring fields remain temporarily for backward compatibility and migration.
-
-### `users`
-
-- `id` - internal integer primary key
-- `name`
-- `email`
-- `created_at`
-- `updated_at`
-
-### `resumes`
-
-- `id` - internal integer primary key
-- `user_id` - foreign key to `users`
-- `name`
-- `prompt_key`
-- `classification_key`
-- `content`
-- `is_active`
-- `created_at`
-- `updated_at`
-
-### `job_applications`
-
-- `id` - internal integer primary key
-- `user_id` - foreign key to `users`
-- `job_posting_id` - foreign key to `job_postings`
-- `resume_id` - foreign key to `resumes`
-- `status`
-- `score`
-- `recommendation`
-- `justification`
-- `screening_likelihood`
-- `dimension_scores`
-- `gating_flags`
-- `strengths`
-- `gaps`
-- `missing_from_jd`
-- `scoring_prompt_key`
-- `scoring_prompt_version`
-- `score_provider`
-- `score_model`
-- `score_raw_response`
-- `score_error`
-- `score_attempts`
-- `scored_at`
-- `tailored_resume_content`
-- `tailoring_prompt_key`
-- `tailoring_prompt_version`
-- `tailoring_provider`
-- `tailoring_model`
-- `tailoring_raw_response`
-- `tailoring_error`
-- `tailored_at`
-- `notified_at`
-- `applied_at`
-- `offer_at`
-- `rejected_at`
-- `withdrawn_at`
-- `last_error_at`
-- `created_at`
-- `updated_at`
-
-The unique key is `(job_posting_id, resume_id)`, so each resume can own one application row per posting.
-
-### `interview_rounds`
-
-- `id` - internal integer primary key
-- `job_application_id` - foreign key to `job_applications`
-- `round_number`
-- `stage_name`
-- `status`
-- `notes`
-- `scheduled_at`
-- `completed_at`
-- `created_at`
-- `updated_at`
-
-### `prompt_library`
-
-- `id` - integer primary key
-- `prompt_key`
-- `prompt_type`
-- `prompt_version`
-- `system_prompt`
-- `user_prompt_template`
-- `context`
-- `max_tokens`
-- `temperature`
-- `is_active`
-
-`prompt_key` + `prompt_version` + `prompt_type` is unique.
-
-### `score_runs`
-
-- `id` - internal integer primary key
-- `status` - overall run state such as `queued`, `running`, `completed`, or `failed`
-- `requested_status` - job status filter used when the run was queued
-- `requested_source` - optional source filter used when the run was queued
-- `prompt_key` - prompt resolved for the run
-- `force` - whether already-scored jobs should be rescored
-- `callback_url`
-- `selected_count`
-- `last_error`
-- `callback_status`
-- `callback_error`
-- `started_at`
-- `finished_at`
-- `created_at`
-- `updated_at`
-
-### `score_run_items`
-
-- `id` - internal integer primary key
-- `score_run_id` - foreign key to `score_runs`
-- `job_posting_id` - foreign key to `job_postings`
-- `status` - per-job state such as `queued`, `running`, `scored`, `error`, or `skipped`
-- `error_message`
-- `started_at`
-- `finished_at`
-- `created_at`
-- `updated_at`
-
-## Local setup
-
-### Option 1: Run the API directly
+### Run the API directly
 
 From `job-pipeline-service/`:
 
@@ -288,29 +87,14 @@ playwright install chromium
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-By default the service uses SQLite:
+Database behavior:
 
-- `sqlite:///./jobs.db` if no `./data/jobs.db` exists
-- `sqlite:///./data/jobs.db` if `job-pipeline-service/data/jobs.db` already exists
+- default: SQLite at `job-pipeline-service/data/jobs.db`
+- override: set `DATABASE_URL` to use Postgres or another SQLAlchemy-supported database
 
-Set `DATABASE_URL` to use Postgres or another supported SQLAlchemy database.
+### Run the Full Stack with Docker Compose
 
-Service-side scoring is configured with environment variables such as:
-
-- `SCORING_PROVIDER` default `ollama`
-- `SCORING_MODEL`
-- `OLLAMA_BASE_URL`
-- `OLLAMA_NUM_CTX`
-- `LLM_TIMEOUT_SECONDS`
-- `DEFAULT_PROMPT_KEY`
-
-The preferred flow is callback-driven orchestration through n8n with async classification and async application scoring. Legacy job-native score runs are still processed asynchronously in the background worker. Use `POST /jobs/score/run` to queue that legacy work, then inspect `GET /score-runs/{run_id}` and `GET /score-runs/{run_id}/items` when needed.
-
-### Option 2: Run the API with the included compose example
-
-There is no root `docker-compose.yml` in this repository. The included compose file lives at `job-pipeline-service/docker-compose-example.yml`.
-
-From `job-pipeline-service/`:
+From the repository root:
 
 ```bash
 docker compose -f docker-compose-example.yml up --build -d
@@ -318,105 +102,91 @@ docker compose -f docker-compose-example.yml up --build -d
 
 This starts:
 
-- `job-pipeline-service` on `http://localhost:8000`
-- `postgres` on `localhost:5432`
+- the internal UI on `http://localhost:8080`
+- the API on `http://localhost:8000`
+- Postgres on `localhost:5432`
 
-The compose file sets `DATABASE_URL` to Postgres, so this path uses Postgres instead of SQLite.
-
-### Verify the API
+Verify:
 
 ```bash
 curl http://localhost:8000/health
+curl http://localhost:8080/healthz
 ```
 
-## Chrome extension setup
+## Chrome Extension
 
-The Chrome extension lives in `job-scraper-chrome/`.
+The extension lives in `job-scraper-chrome/`.
 
-1. Edit `POST_ENDPOINT` in `job-scraper-chrome/background.js` if your API is not `http://localhost:8000/jobs/ingest`.
-2. Open `chrome://extensions`.
-3. Enable Developer mode.
-4. Load the `job-scraper-chrome/` folder as an unpacked extension.
+Setup:
 
-Current behavior:
+1. start the API
+2. update `POST_ENDPOINT` in `job-scraper-chrome/background.js` if needed
+3. open `chrome://extensions`
+4. enable Developer mode
+5. load `job-scraper-chrome/` as an unpacked extension
 
-- On LinkedIn job pages, the extension auto-detects job detail pages, observes route and DOM changes, and posts normalized payloads in the background. The popup still supports a manual scrape/send trigger.
-- On Hiring Cafe search pages, `page-hook.js` intercepts search API responses in the page context and `content.js` normalizes them into one or more ingest payloads, including company names from `v5_processed_job_data.company_name` when present.
-- `background.js` always posts an array payload to `POST /jobs/ingest`.
+Details are in [job-scraper-chrome/README.md](/home/lrw5016/projects/n8n-job-funnel/job-scraper-chrome/README.md).
 
-## n8n workflow status
+## Internal UI
 
-The repo includes these exports:
+The internal operator UI lives in `job-funnel-ui/`.
 
-- `exports/workflows/Pipeline Orchestrator.json`
-- `exports/workflows/Classification Callback.json`
-- `exports/workflows/Application Score Callback.json`
-
-These exports target the current callback-driven API flow, but they are checked in with placeholder hosts, webhook URLs, credential IDs, recipient addresses, and external document IDs. Reconfigure those values in n8n after import.
-
-If you import the workflows, review them before use and align their read/write steps with the current API behavior, especially the distinction between external `job_id`, internal numeric `job_posting_id`, and internal numeric `application_id`.
-
-- `Pipeline Orchestrator.json` starts the pipeline on a schedule and queues `POST /jobs/classify/run` with a callback URL.
-- `Classification Callback.json` receives classification completion, calls `POST /applications/generate/run` for the target user, and then queues `POST /applications/score/run` with a callback URL.
-- `Application Score Callback.json` receives application scoring completion, fetches run items, selects scored applications, and performs notify/tracker/email steps.
-
-## Prompt setup
-
-Prompt templates are stored in the `prompt_library` table. Prompts are resolved by `prompt_key` plus `prompt_type`. The service uses the active prompt version for the requested `prompt_key`, or `DEFAULT_PROMPT_KEY` if a classify/score call does not pass one.
-
-The example seed file is `exports/data/prompt_library.seed.mock.json`. It is intentionally sanitized to show the prompt structure and customization points without exposing a production prompt.
-
-### Load a prompt with the API
-
-`POST /prompt-library` accepts one prompt object at a time, not an array.
-
-To load the example seed file from the repo root in PowerShell:
-
-```powershell
-$seed = Get-Content .\exports\data\prompt_library.seed.mock.json | ConvertFrom-Json
-foreach ($prompt in $seed) {
-  $prompt | ConvertTo-Json -Depth 10 | curl.exe -X POST http://localhost:8000/prompt-library `
-    -H "Content-Type: application/json" `
-    --data-binary @-
-}
-```
-
-Then verify:
+From `job-funnel-ui/`:
 
 ```bash
-curl http://localhost:8000/prompt-library
+npm install
+npm run dev
 ```
 
-Example single prompt payload:
+By default it targets the backend at `http://localhost:8000`. Details are in [job-funnel-ui/README.md](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui/README.md).
 
-```json
-{
-  "prompt_key": "product",
-  "prompt_type": "scoring",
-  "prompt_version": 1,
-  "system_prompt": "ROLE: ...",
-  "user_prompt_template": "RESUME:\n<<<\n{{resume}}\n>>>\n\nJOB DESCRIPTION:\n<<<\n{{description}}\n>>>\n\nOUTPUT:\nReturn ONLY the JSON object matching the schema.",
-  "context": "Optional shared instructions or legacy fallback resume text.",
-  "max_tokens": 1500,
-  "temperature": 0.2,
-  "is_active": true
-}
+For a full containerized local stack, use [docker-compose-example.yml](/home/lrw5016/projects/n8n-job-funnel/docker-compose-example.yml) from the repository root.
+
+## n8n Workflows
+
+The workflow exports in `exports/workflows/` are sanitized templates. After import, you need to reconfigure:
+
+- API base URLs
+- webhook URLs
+- credential IDs
+- recipient addresses
+- any external document or storage IDs
+
+The current intended sequence is:
+
+1. queue `POST /jobs/classify/run`
+2. on callback, run `POST /applications/generate/run`
+3. queue `POST /applications/score/run`
+4. on callback, fetch `/runs/{run_id}/items`
+5. notify or update downstream systems
+
+## Testing
+
+Backend:
+
+```bash
+cd job-pipeline-service
+.venv/bin/pytest
 ```
 
-### Use the prompt during scoring
+Extension:
 
-- Set `DEFAULT_PROMPT_KEY=product` in the API environment, or
-- pass `"prompt_key": "product"` in `POST /jobs/{id}/classify/run`, `POST /jobs/{id}/score/run`, `POST /applications/{id}/score/run`, or the corresponding batch routes
+```bash
+cd job-scraper-chrome
+npm install
+npm test
+```
 
-If you create a new prompt version for the same `prompt_key`, mark only one version `is_active=true` for predictable scoring behavior.
+Frontend:
+
+```bash
+cd job-funnel-ui
+npm install
+npm run build
+```
 
 ## Notes
 
-- The legacy `GET /jobs/hiringcafe` Playwright route still exists in the service, but the preferred ingest path is the Chrome extension posting to `POST /jobs/ingest`.
-- The current primary flow is `job_postings -> classification -> job_applications -> application scoring/status tracking`. Legacy job-native scoring remains in place for compatibility during migration.
-- Prompt-library seeding is optional. Example seed data is in `exports/data/prompt_library.seed.mock.json`.
-- The Docker image includes Playwright because the legacy Hiring Cafe endpoint is still present.
-
-## License
-
-MIT
+- The backend still exposes `GET /jobs/hiringcafe` for browser-based capture, but the preferred ingest path is the Chrome extension posting to `POST /jobs/ingest`.
+- Prompt templates are stored in the service database and versioned by `prompt_key` plus `prompt_type`.
+- The root README no longer documents every field or payload shape; use the service README for that level of detail.

@@ -1,175 +1,85 @@
 # Job Pipeline Service
 
-FastAPI service for:
+FastAPI backend for:
 
-1. ingesting normalized jobs from the Chrome extension
-2. classifying job postings into reusable role buckets
-3. generating and scoring user-owned job applications from matching resumes
-4. exposing routes that n8n can use to automate classification, scoring, tailoring-adjacent workflow, and notification state
-5. keeping the Hiring Cafe Playwright capture route available when browser-side capture is needed
-
-The primary ingestion path is `POST /jobs/ingest` from `job-scraper-chrome`.
+1. ingesting normalized jobs
+2. classifying job postings
+3. generating resume-specific applications
+4. scoring applications with an LLM
+5. tracking notification, lifecycle, and interview state
+6. exposing async run status for n8n-style orchestration
 
 ## Requirements
 
 - Python 3.11+
-- Docker Desktop or another Docker runtime if you want to use the compose example
+- optional Docker runtime for the compose example
+- optional Ollama endpoint if you want service-side classification or scoring
 
-## Database behavior
+## Database
 
-This service supports both SQLite and Postgres.
+The service supports SQLite and Postgres.
 
 - If `DATABASE_URL` is set, that value is used.
-- Otherwise it uses `sqlite:///./data/jobs.db`.
+- Otherwise the service uses SQLite at `./data/jobs.db`.
 
-Tables are created automatically on startup. The current data model centers on:
+Tables are created on startup. Startup also runs lightweight schema/backfill helpers for the current models.
 
-- `job_postings` for ingested source jobs plus classification state
-- `users` for application ownership
-- `resumes` for user resumes aligned to a `classification_key`
-- `job_applications` for resume-specific scoring and workflow lifecycle
-- `interview_rounds` for variable interview tracking
+Current core tables:
 
-Async classification and application-scoring runs are stored in `runs` and `run_items`.
+- `job_postings`
+- `users`
+- `resumes`
+- `job_applications`
+- `interview_rounds`
+- `prompt_library`
+- `runs`
+- `run_items`
 
-## LLM configuration
-
-The service can classify jobs and score applications directly using a configured LLM provider.
+## Configuration
 
 Supported environment variables:
 
+- `DATABASE_URL`
 - `SCORING_PROVIDER` default `ollama`
 - `SCORING_MODEL` default `qwen2.5:14b-instruct`
 - `OLLAMA_BASE_URL` default `http://localhost:11434`
 - `OLLAMA_NUM_CTX` default `50000`
 - `LLM_TIMEOUT_SECONDS` default `180`
 
-The current implementation supports `ollama` as the provider.
+The current LLM implementation supports `ollama`.
 
-Preferred orchestration flow:
+## Prompt Model
 
-- classify postings with `/jobs/classify/run`
-- generate user applications with `/applications/generate/run`
-- score applications with `/applications/score/run`
+Prompts live in `prompt_library` and are keyed by:
 
-The repository includes callback-driven n8n exports under `../exports/workflows/`:
+- `prompt_key`
+- `prompt_type`
+- `prompt_version`
 
-- `Pipeline Orchestrator.json`
-- `Classification Callback.json`
-- `Application Score Callback.json`
-
-## Workflow
-
-The intended automated workflow is:
-
-1. ingest `JobPosting`
-2. classify `JobPosting`
-3. generate `JobApplication` rows when `JobPosting.classification_key == Resume.classification_key`
-4. score `JobApplication`
-5. tailor and notify from application thresholds
-6. let the user drive `applied`, `screening`, `interview`, `offer`, `rejected`, or `withdrawn`
-
-## Prompt library
-
-Prompt templates are stored in the `prompt_library` table and resolved by `prompt_key` plus `prompt_type`.
-
-Current key contract:
-
-- `classification_key` is the routing key for matching jobs to resumes
-- `prompt_key` is the prompt-family key for prompt lookup and audit metadata
-- in the standard flow, classify/score routes may accept `classification_key`, and the service derives prompt lookup from `(classification_key, prompt_type)`
-- `prompt_key` can still be passed explicitly as an override for low-level or compatibility use
-
-Resume contract:
-
-- resumes can be classification-specific with `classification_key` set
-- resumes can be generic/default with `classification_key = null` and `is_default = true`
-- generation routes can choose between classification-matched resumes and the user's default resume via `resume_strategy`
-
-Supported prompt types:
+Prompt types in current use:
 
 - `classification`
 - `scoring`
 - `tailoring`
 
-Prompt resolution uses:
+Current routing contract:
 
-- the explicit `prompt_key` override passed to a classify or score route, or
-- the provided `classification_key` for that run, or
-- the job's stored `classification_key` for single-item score/application score routes
+- `classification_key` is the business/domain key used to match jobs to resumes
+- `prompt_key` is the prompt-family selector used to load an active prompt
+- classify and score routes may derive the prompt selector from the passed `classification_key`
+- explicit `prompt_key` still overrides derived prompt selection
 
-The repo includes a sanitized example seed at `exports/data/prompt_library.seed.mock.json`. It demonstrates the scoring schema and customization points without exposing a production prompt.
+Resume contract:
 
-### Load prompts
+- targeted resumes use a non-null `classification_key`
+- fallback resumes can use `is_default = true`
+- generation routes choose resumes with `resume_strategy`
 
-`POST /prompt-library` accepts one prompt object at a time, not an array.
-
-If you want to load the example seed file, post each item in the array individually. One simple PowerShell option from the repo root is:
-
-```powershell
-$seed = Get-Content .\exports\data\prompt_library.seed.mock.json | ConvertFrom-Json
-foreach ($prompt in $seed) {
-  $prompt | ConvertTo-Json -Depth 10 | curl.exe -X POST http://localhost:8000/prompt-library `
-    -H "Content-Type: application/json" `
-    --data-binary @-
-}
-```
-
-You can verify loaded prompts with:
-
-```bash
-curl http://localhost:8000/prompt-library
-```
-
-If you create multiple versions for the same `prompt_key` and `prompt_type`, keep only one version active unless you intentionally want callers to target a specific prompt version.
-
-Prompt write payloads now use prompt-only fields. Resume source text belongs on `resumes`, not in `prompt_library`.
-
-Example prompt payload:
-
-```json
-{
-  "prompt_key": "Product Manager",
-  "prompt_type": "scoring",
-  "prompt_version": 1,
-  "system_prompt": "You are a hiring assistant...",
-  "user_prompt_template": "{{resume}}\n\n{{description}}",
-  "context": "Optional shared instructions",
-  "max_tokens": 1500,
-  "temperature": 0.2,
-  "is_active": true
-}
-```
-
-### Scoring payload schema
-
-The scoring parser expects `total_score` and may also accept:
-
-- `recommendation`
-- `justification`
-- `strengths`
-- `gaps`
-- `missing_from_jd`
-- `screening_likelihood`
-- `dimension_scores`
-- `gating_flags`
-
-Application scoring owns the persisted score metadata. Job postings only retain ingest and classification state.
-
-## Local run
+## Local Run
 
 From `job-pipeline-service/`:
 
-### 1. Create and activate a virtual environment
-
-Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-macOS / Linux:
+### 1. Create and activate a virtualenv
 
 ```bash
 python3 -m venv .venv
@@ -189,26 +99,69 @@ playwright install chromium
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-### 4. Verify it is running
+### 4. Verify
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-## Testing and coverage
+## Docker
+
+Build:
+
+```bash
+docker build -t job-pipeline-service:latest .
+```
+
+Run directly:
+
+```bash
+docker run -d --name job-pipeline-service -p 8000:8000 job-pipeline-service:latest
+```
+
+Run service-only with Postgres:
+
+```bash
+docker compose -f docker-compose-example.yml up --build -d
+```
+
+The compose example:
+
+- builds the local image
+- exposes the API on `localhost:8000`
+- starts Postgres on `localhost:5432`
+- sets `DATABASE_URL` for the API container
+
+Stop it:
+
+```bash
+docker compose -f docker-compose-example.yml down
+```
+
+Run the full stack from the repository root:
+
+```bash
+docker compose -f ../docker-compose-example.yml up --build -d
+```
+
+That starts:
+
+- the internal UI on `http://localhost:8080`
+- the API on `http://localhost:8000`
+- Postgres on `localhost:5432`
+
+## Testing
 
 From `job-pipeline-service/`:
 
-Run tests:
-
 ```bash
-pytest
+.venv/bin/pytest
 ```
 
-Run tests with coverage reports:
+Coverage command:
 
 ```bash
-pytest \
+.venv/bin/pytest \
   --cov=app \
   --cov=services.scoring_service \
   --cov=services.scoring_parser \
@@ -218,116 +171,88 @@ pytest \
   --cov-report=json
 ```
 
-Coverage policy target:
-
-- line coverage: at least 80%
-- branch coverage: at least 80%
-
-Current coverage enforcement scope is the core scoring/service modules plus `app.py`. Expand this scope as additional modules gain stable test coverage.
-
-If you generated `coverage.json`, you can enforce the branch threshold locally:
+Optional threshold gate:
 
 ```bash
-python scripts/coverage_gate.py coverage.json 80
+.venv/bin/python scripts/coverage_gate.py coverage.json 80
 ```
 
-## Docker
+## API Summary
 
-Build the image:
-
-```bash
-docker build -t job-pipeline-service:latest .
-```
-
-Run the image directly:
-
-```bash
-docker run -d --name job-pipeline-service -p 8000:8000 \
-  job-pipeline-service:latest
-```
-
-To run with Postgres, use the compose example instead of a standalone container.
-
-## Docker Compose
-
-The included compose file is `docker-compose-example.yml`.
-
-From `job-pipeline-service/`:
-
-```bash
-docker compose -f docker-compose-example.yml up --build -d
-```
-
-Stop it:
-
-```bash
-docker compose -f docker-compose-example.yml down
-```
-
-The compose example:
-
-- builds the local `Dockerfile`
-- exposes the API on `localhost:8000`
-- starts Postgres `17` on `localhost:5432`
-- sets `DATABASE_URL` to the Postgres service
-- waits for Postgres to become healthy before starting the API
-
-## API
+### System
 
 - `GET /health`
+
+### Jobs
+
 - `POST /jobs/ingest`
 - `GET /jobs`
-- `GET /jobs/{id}`
-- `POST /jobs/{id}/classify/run`
+- `GET /jobs/{job_id}`
+- `POST /jobs/{job_id}/classify/run`
 - `POST /jobs/classify/run`
+- `GET /jobs/hiringcafe?search_url=<HIRING_CAFE_URL>`
+
+### Runs
+
+- `GET /runs`
 - `GET /runs/{run_id}`
 - `GET /runs/{run_id}/items`
+- `GET /runs/{run_id}/applications`
+
+### Users and resumes
+
 - `GET /users`
 - `POST /users`
 - `GET /resumes`
 - `POST /resumes`
-- `PUT /resumes/{id}`
+- `PUT /resumes/{resume_id}`
+
+### Applications
+
 - `GET /applications`
-- `GET /applications/{id}`
+- `GET /applications/{application_id}`
 - `POST /applications`
 - `POST /applications/generate`
-- `POST /applications/{id}/score`
-- `POST /applications/{id}/score/run`
+- `POST /applications/generate/run`
+- `POST /applications/{application_id}/score`
+- `POST /applications/{application_id}/score/run`
 - `POST /applications/score/run`
-- `POST /applications/{id}/notify`
-- `POST /applications/{id}/error`
-- `POST /applications/{id}/status`
-- `GET /applications/{id}/interview-rounds`
-- `POST /applications/{id}/interview-rounds`
+- `POST /applications/{application_id}/notify`
+- `POST /applications/{application_id}/error`
+- `POST /applications/{application_id}/status`
+- `GET /applications/{application_id}/interview-rounds`
+- `POST /applications/{application_id}/interview-rounds`
+
+### Prompt library
+
 - `GET /prompt-library`
 - `GET /prompt-library/{prompt_id}`
 - `POST /prompt-library`
 - `PUT /prompt-library/{prompt_id}`
 - `DELETE /prompt-library/{prompt_id}`
-- `GET /jobs/hiringcafe?search_url=<HIRING_CAFE_URL>`
 
-### Primary route groups
+## Important Semantics
 
-- Jobs: ingest and classify source postings
-- Users and resumes: define owners plus resume inventories with independent `classification_key`, `prompt_key`, and `is_default`
-- Applications: create, generate, score, notify, error, and update lifecycle state on `job_applications`
-- Interview rounds: track multi-round interview progress per application
-- Prompt library: manage versioned prompts by `prompt_key` and `prompt_type`
+Two job identifiers exist:
 
-### ID semantics
+- `job_id`: external string identifier used at ingest time
+- `id`: internal integer primary key used by most route paths and relationships
 
-The service uses two job identifiers:
+Preferred automation sequence:
 
-- `job_id` - external string identifier used for ingest dedupe
-- `id` - internal numeric database primary key used by most read/write routes
+1. `POST /jobs/classify/run`
+2. callback fetches `/runs/{run_id}` or `/runs/{run_id}/items`
+3. `POST /applications/generate/run`
+4. `POST /applications/score/run`
+5. downstream notification or tracking writes
 
-That distinction matters for integrations. Ingest works with external `job_id`, while classify, resume, application, and prompt-library routes use internal numeric IDs.
+## Selected Route Notes
 
 ### `POST /jobs/ingest`
 
-Accepts either a single job object or an array of jobs.
+Accepts one job object or an array. Ingest is insert-only by external `job_id`; duplicates are skipped.
 
-Example payload:
+Example:
 
 ```json
 {
@@ -342,19 +267,9 @@ Example payload:
 }
 ```
 
-Each ingest inserts only new jobs. If a row with the same `job_id` already exists, the service skips it and leaves the existing status and timestamps unchanged.
-
-Response fields:
-
-- `received` - number of payload items received
-- `created` - number of new rows inserted
-- `updated` - currently always `0`; retained for compatibility with the earlier upsert response shape
-- `skipped` - number of duplicate `job_id` values ignored
-- `jobs` - the created `job_id` values
-
 ### `GET /jobs`
 
-Supported query parameters:
+Current query filters:
 
 - `source`
 - `classification_key`
@@ -362,101 +277,31 @@ Supported query parameters:
 - `limit`
 - `offset`
 
-Example:
-
-```text
-GET http://localhost:8000/jobs?classification_key=Product%20Manager&limit=25
-```
-
-### Preferred n8n sequence
-
-The preferred automation chain is:
-
-1. queue classification with a callback:
-
-```json
-POST /jobs/classify/run
-{
-  "limit": 100,
-  "force": false,
-  "callback_url": "https://<n8n-host>/webhook/job-classification-complete"
-}
-```
-
-2. on classification callback, generate applications for the target user across all eligible classified postings:
-
-```json
-POST /applications/generate/run
-{
-  "user_id": 1,
-  "limit": 100
-}
-```
-
-3. queue application scoring with a callback:
-
-```json
-POST /applications/score/run
-{
-  "limit": 100,
-  "status": "new",
-  "force": false,
-  "callback_url": "https://<n8n-host>/webhook/application-score-complete"
-}
-```
-
-4. on application-score callback, fetch scored run items and load application details:
-
-```text
-GET /runs/{run_id}/items
-```
-
-5. mark notified applications:
-
-```json
-POST /applications/{id}/notify
-{
-  "status": "notified"
-}
-```
-
-### `POST /jobs/{id}/classify/run`
-
-Classifies a single posting and writes the result to `job_postings.classification_key`.
-
-Example payload:
-
-```json
-{
-  "classification_key": "product",
-  "force": false
-}
-```
-
 ### `POST /jobs/classify/run`
 
-Runs batch classification across postings.
+Queues async classification across postings.
 
-Example payload:
+Example:
 
 ```json
 {
   "limit": 100,
   "source": "linkedin",
-  "classification_key": "product",
-  "force": false
+  "classification_key": "product_classification",
+  "force": false,
+  "callback_url": "https://<n8n-host>/webhook/job-classification-complete"
 }
 ```
 
 ### `POST /applications/generate`
 
-Creates `job_applications` using one of three resume-selection strategies:
+Creates `job_applications` for one posting and user using one of:
 
-- `classification_first`: use active resumes whose `classification_key` matches the posting
-- `default_only`: use the user's active default resume only
-- `default_fallback`: use a matching classified resume when present, otherwise fall back to the user's default resume
+- `classification_first`
+- `default_only`
+- `default_fallback`
 
-Example payload:
+Example:
 
 ```json
 {
@@ -468,9 +313,9 @@ Example payload:
 
 ### `POST /applications/generate/run`
 
-Creates missing `job_applications` for one user across classified postings where the selected `resume_strategy` yields at least one eligible resume and no application exists yet for the posting.
+Creates missing applications for a user across classified postings.
 
-Example payload:
+Example:
 
 ```json
 {
@@ -480,64 +325,44 @@ Example payload:
 }
 ```
 
-### `GET /applications`
-
-Supported query parameters:
-
-- `user_id`
-- `resume_id`
-- `job_posting_id`
-- `status`
-- `score`
-- `limit`
-- `offset`
-
 ### `POST /applications/score/run`
 
-Scores application rows in batch.
+Queues async scoring for application rows.
 
-Example payload:
+Example:
 
 ```json
 {
   "limit": 100,
   "status": "new",
-  "force": false
+  "force": false,
+  "callback_url": "https://<n8n-host>/webhook/application-score-complete"
 }
 ```
 
-### `POST /applications/{id}/status`
+## Prompt Library Seed
 
-Updates the application lifecycle status. Use this for `applied`, `screening`, `interview`, `offer`, `rejected`, and `withdrawn`.
+The repository includes a sanitized example seed at `../exports/data/prompt_library.seed.mock.json`.
 
-Example payload:
+`POST /prompt-library` accepts one prompt object at a time. To load the example seed from the repo root in PowerShell:
 
-```json
-{
-  "status": "applied"
+```powershell
+$seed = Get-Content .\exports\data\prompt_library.seed.mock.json | ConvertFrom-Json
+foreach ($prompt in $seed) {
+  $prompt | ConvertTo-Json -Depth 10 | curl.exe -X POST http://localhost:8000/prompt-library `
+    -H "Content-Type: application/json" `
+    --data-binary @-
 }
 ```
 
-### `POST /applications/{id}/interview-rounds`
+Verify:
 
-Adds a numbered interview round for an application.
-
-Example payload:
-
-```json
-{
-  "round_number": 1,
-  "stage_name": "Hiring Manager",
-  "status": "scheduled"
-}
+```bash
+curl http://localhost:8000/prompt-library
 ```
 
-### Prompt library routes
+## Notes
 
-Use the prompt-library endpoints to manage versioned prompt templates inside the service database rather than n8n Data Tables. The service-side scoring routes resolve active prompts from this table.
-
-### `GET /jobs/hiringcafe`
-
-This is a legacy route that launches Playwright, opens a Hiring Cafe search page, and captures `/api/search-jobs` responses while scrolling.
-
-It is not the preferred ingest path. Browser-side capture through the Chrome extension is the current primary approach.
+- `GET /jobs/hiringcafe` remains available for service-side capture, but the preferred ingest path is still the Chrome extension posting to `POST /jobs/ingest`.
+- Async work is tracked in `runs` and `run_items`, not the older `score_runs` naming.
+- Application scoring is the primary scoring flow. The docs no longer treat job-level scoring as the main path.
