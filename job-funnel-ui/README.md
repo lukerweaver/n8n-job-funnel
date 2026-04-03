@@ -11,7 +11,7 @@ Current MVP pages:
 ## Requirements
 
 - Node 18+
-- running FastAPI backend from `job-pipeline-service/`
+- a running FastAPI backend from [`job-pipeline-service/`](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/)
 
 ## Local Run
 
@@ -32,13 +32,18 @@ Override it with:
 VITE_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
+The value used by the UI must be browser-visible. For example:
+
+- local API: `http://localhost:8000`
+- deployed API: `https://api.example.com`
+
 ## Production Build
 
 ```bash
 npm run build
 ```
 
-## Container Deploy
+## Standalone Container Deploy
 
 Build the image:
 
@@ -52,7 +57,7 @@ Run it:
 docker run -d \
   --name job-funnel-ui \
   -p 8080:80 \
-  -e API_BASE_URL=http://your-api-host:8000 \
+  -e API_BASE_URL=https://api.example.com \
   job-funnel-ui:latest
 ```
 
@@ -67,6 +72,12 @@ If your API is public HTTPS, set:
 
 ```bash
 -e API_BASE_URL=https://api.example.com
+```
+
+If your API is on the same machine for local testing, use:
+
+```bash
+-e API_BASE_URL=http://localhost:8000
 ```
 
 ## Full Stack Compose
@@ -90,6 +101,17 @@ API_BASE_URL=http://localhost:8000
 ```
 
 That is correct for local browser access to the published API port. If you deploy behind a hostname or reverse proxy, change `API_BASE_URL` to the browser-visible API URL.
+
+## What the UX Service Does
+
+The `job-funnel-ui` container:
+
+- serves static frontend assets with Nginx
+- injects runtime config through `/runtime-config.js`
+- supports SPA route fallback to `index.html`
+- exposes `GET /healthz` for container-level health checks
+
+The UX service does not proxy the API. It talks directly to the backend URL configured in `API_BASE_URL`.
 
 ## Notes
 

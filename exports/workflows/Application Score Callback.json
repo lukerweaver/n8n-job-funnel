@@ -5,105 +5,75 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "application-score-complete",
-        "responseMode": "onReceived",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -384,
-        -624
+        -1552,
+        176
       ],
-      "id": "ea663534-b534-49d8-a67d-02f2145be8ba",
+      "id": "fa840583-9128-4d06-8220-3cf502838a45",
       "name": "Application Score Complete",
       "webhookId": "application-score-complete"
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const payload = $input.first().json;\nif (payload?.type !== 'application_scoring' || payload?.status !== 'completed' || !payload?.run_id) {\n  return [];\n}\nreturn [{ json: { run_id: payload.run_id } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -112,
-        -624
-      ],
-      "id": "db683ad0-122e-4c7e-a7de-ae79dd1aa7a7",
-      "name": "Select Completed Run"
-    },
-    {
-      "parameters": {
-        "url": "=http://<job-pipeline-service-host>:8000/runs/{{ $json.run_id }}/items",
+        "url": "=http://<job-pipeline-service-host>:8000/applications",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "1"
+            },
+            {
+              "name": "score_min",
+              "value": "20"
+            },
+            {
+              "name": "status",
+              "value": "scored"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        144,
-        -624
+        -1312,
+        96
       ],
-      "id": "6fef95d4-b932-4af9-afce-0c91ef4fc2d7",
-      "name": "Get Run Items"
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const response = $input.first().json;\nconst items = Array.isArray(response?.items) ? response.items : [];\nreturn items\n  .filter((item) => item.type === 'application_scoring' && item.status === 'scored' && item.job_application_id)\n  .map((item) => ({ json: { application_id: item.job_application_id } }));"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        400,
-        -624
-      ],
-      "id": "60a0d93e-d6d4-45a9-929f-b80aa4d693d5",
-      "name": "Select Scored Applications"
-    },
-    {
-      "parameters": {
-        "url": "=http://<job-pipeline-service-host>:8000/applications/{{ $json.application_id }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        656,
-        -624
-      ],
-      "id": "0ab54df3-83ac-4ea8-b909-bf975ef72435",
+      "id": "68ac6985-b872-4b7b-a6f3-498c339f65eb",
       "name": "Get Application"
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "if ($json.status !== 'scored') {\n  return [];\n}\nif ($json.notified_at) {\n  return [];\n}\nif (($json.score ?? 0) < 18) {\n  return [];\n}\nreturn [{ json: $json }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        912,
-        -624
-      ],
-      "id": "d17251db-c229-4d18-852f-62be70832bbf",
-      "name": "Select Applications To Notify"
     },
     {
       "parameters": {
         "method": "POST",
         "url": "=http://<job-pipeline-service-host>:8000/applications/{{ $json.id }}/notify",
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"notified_at\": $now,\n  \"status\": \"notified\"\n}",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "notified"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1168,
-        -816
+        -480,
+        80
       ],
-      "id": "88cb9f13-1987-4e61-b9e5-9987b2a0fd41",
+      "id": "1830e551-33e6-49a7-8304-3c7fb5375e1f",
       "name": "Mark Application Notified"
     },
     {
@@ -129,14 +99,15 @@
             "Date Submitted": "={{ $now.format('yyyy-MM-dd') }}",
             "Company": "={{ $json.company_name }}",
             "Title": "={{ $json.title }}",
-            "Status": "={{ $json.status }}",
+            "Status": "=Pending",
             "n8n score": "={{ $json.score }}",
             "Job Link": "={{ $json.apply_url }}",
-            "Stage Reached": "={{ $json.status }}",
+            "Stage Reached": "=Pending",
             "Referal?": "n8n",
             "Salary": "={{`$${Math.round($json.yearly_min_compensation/1000)}k-$${Math.round($json.yearly_max_compensation/1000)}k`}}",
             "n8n screening likelihood": "={{ $json.screening_likelihood }}",
-            "Role Type": "={{ $json.role_type }}"
+            "Role Type": "={{ $json.classification_key }}",
+            "Job ID": "={{ $json.job_id }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -148,6 +119,16 @@
               "display": true,
               "type": "string",
               "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job ID",
+              "displayName": "Job ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
             },
             {
               "id": "Company",
@@ -184,6 +165,16 @@
               "display": true,
               "type": "string",
               "canBeUsedToMatch": true
+            },
+            {
+              "id": "Score",
+              "displayName": "Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
             },
             {
               "id": "Status",
@@ -231,6 +222,16 @@
               "canBeUsedToMatch": true
             },
             {
+              "id": "Cover Letter",
+              "displayName": "Cover Letter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
               "id": "Referal?",
               "displayName": "Referal?",
               "required": false,
@@ -238,6 +239,86 @@
               "display": true,
               "type": "string",
               "canBeUsedToMatch": true
+            },
+            {
+              "id": "Rejection Date",
+              "displayName": "Rejection Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Rejection Copy",
+              "displayName": "Rejection Copy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Case Study",
+              "displayName": "Case Study",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Screening Date",
+              "displayName": "Screening Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Round 2 Date",
+              "displayName": "Round 2 Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Round 3 Date",
+              "displayName": "Round 3 Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Round 4 Date",
+              "displayName": "Round 4 Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Offer?",
+              "displayName": "Offer?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
             }
           ],
           "attemptToConvertTypes": false,
@@ -248,10 +329,10 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1168,
-        -624
+        -896,
+        -64
       ],
-      "id": "e1239732-28a6-48dd-8a54-e5bfd4798939",
+      "id": "86e075f7-1069-4e98-9229-81b323ceef6e",
       "name": "Add to Tracker",
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -268,15 +349,15 @@
       "type": "n8n-nodes-base.aggregate",
       "typeVersion": 1,
       "position": [
-        1424,
-        -624
+        -240,
+        80
       ],
-      "id": "4ea385a0-8aea-4fd2-8155-2ddf4a9d9859",
+      "id": "12749e10-e16a-4231-895c-cf5e91164692",
       "name": "Aggregate"
     },
     {
       "parameters": {
-        "sendTo": "replace@example.com",
+        "sendTo": "REPLACE_WITH_NOTIFICATION_EMAIL",
         "subject": "Application matches found",
         "message": "=<table cellpadding=\"8\" cellspacing=\"0\" border=\"1\" style=\"border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px;\">\n  <thead>\n    <tr style=\"font-weight:bold; background:#f2f2f2;\">\n      <th align=\"left\">Company</th>\n      <th align=\"left\">Title</th>\n      <th align=\"left\">Salary</th>\n      <th align=\"left\">n8n Score</th>\n      <th align=\"left\">n8n Screen</th>\n      <th align=\"left\">Role Type</th>\n      <th align=\"left\">Job Link</th>\n    </tr>\n  </thead>\n  <tbody>\n    {{\n      $json.data\n        .map(application => `\n          <tr>\n            <td>${application[\"Company\"] ?? \"\"}</td>\n            <td>${application[\"Title\"] ?? \"\"}</td>\n            <td>${application[\"Salary\"] ?? \"\"}</td>\n            <td>${application[\"n8n score\"] ?? \"\"}</td>\n            <td>${application[\"n8n screening likelihood\"] ?? \"\"}</td>\n            <td>${application[\"Role Type\"] ?? \"\"}</td>\n            <td><a href=\"${application[\"Job Link\"] ?? \"#\"}\">View</a></td>\n          </tr>\n        `)\n        .join(\"\")\n    }}\n  </tbody>\n</table>",
         "options": {}
@@ -284,10 +365,10 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.2,
       "position": [
-        1680,
-        -624
+        64,
+        80
       ],
-      "id": "4a866df2-44e0-425e-86dc-fa032da96caf",
+      "id": "db7df4e0-ce9b-4d34-a689-f24810c15261",
       "name": "Send a message",
       "webhookId": "",
       "credentials": {
@@ -296,44 +377,59 @@
           "name": "RECONNECT_GMAIL_CREDENTIAL"
         }
       }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1552,
+        -16
+      ],
+      "id": "dc0d7bda-9357-43b9-a192-8d1a900e3145",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "Job ID",
+              "field2": "job_id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -704,
+        80
+      ],
+      "id": "ebe8261d-ab1d-48f7-8e94-e0d358c9d7e5",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -1104,
+        96
+      ],
+      "id": "b25e77b0-eb09-4174-80dd-655fe0d1b578",
+      "name": "Split Out"
     }
   ],
   "pinData": {},
   "connections": {
     "Application Score Complete": {
-      "main": [
-        [
-          {
-            "node": "Select Completed Run",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Select Completed Run": {
-      "main": [
-        [
-          {
-            "node": "Get Run Items",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Get Run Items": {
-      "main": [
-        [
-          {
-            "node": "Select Scored Applications",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Select Scored Applications": {
       "main": [
         [
           {
@@ -348,23 +444,7 @@
       "main": [
         [
           {
-            "node": "Select Applications To Notify",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Select Applications To Notify": {
-      "main": [
-        [
-          {
-            "node": "Mark Application Notified",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Add to Tracker",
+            "node": "Split Out",
             "type": "main",
             "index": 0
           }
@@ -375,7 +455,7 @@
       "main": [
         [
           {
-            "node": "Aggregate",
+            "node": "Merge",
             "type": "main",
             "index": 0
           }
@@ -393,9 +473,53 @@
         ]
       ]
     },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get Application",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Mark Application Notified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Mark Application Notified": {
       "main": [
-        []
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Add to Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },

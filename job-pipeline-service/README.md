@@ -119,6 +119,8 @@ Run directly:
 docker run -d --name job-pipeline-service -p 8000:8000 job-pipeline-service:latest
 ```
 
+This is the backend-only container path.
+
 Run service-only with Postgres:
 
 ```bash
@@ -149,6 +151,19 @@ That starts:
 - the internal UI on `http://localhost:8080`
 - the API on `http://localhost:8000`
 - Postgres on `localhost:5432`
+
+Use the repository-root compose file when you want the new UX service included.
+
+Published services in the root compose template:
+
+- `job-funnel-ui`
+- `job-pipeline-service`
+- `postgres`
+
+Browser-facing URLs:
+
+- UX: `http://localhost:8080`
+- API: `http://localhost:8000`
 
 ## Testing
 
@@ -273,6 +288,9 @@ Current query filters:
 
 - `source`
 - `classification_key`
+- `q`
+- `has_classification`
+- `has_applications`
 - `classified_since`
 - `limit`
 - `offset`

@@ -17,6 +17,17 @@ The active flow is:
 5. score applications
 6. track notifications, lifecycle status, and interview rounds
 
+## Deployment Modes
+
+There are now three practical ways to run this project:
+
+1. Backend only
+   Run `job-pipeline-service/` directly or with its local compose file.
+2. Backend + UX + Postgres
+   Run the repository root [`docker-compose-example.yml`](/home/lrw5016/projects/n8n-job-funnel/docker-compose-example.yml).
+3. Separately deployed UX service
+   Build and deploy [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui) as its own container and point it at a browser-visible API URL.
+
 ## Repo Layout
 
 - `job-pipeline-service/` - FastAPI app, SQLAlchemy models, async run worker, tests, Docker assets
@@ -73,9 +84,9 @@ High-value route groups:
 
 The root README intentionally stays high-level. Route payload details and examples live in the service README.
 
-## Local Setup
+## Local Development
 
-### Run the API directly
+### API only
 
 From `job-pipeline-service/`:
 
@@ -92,7 +103,18 @@ Database behavior:
 - default: SQLite at `job-pipeline-service/data/jobs.db`
 - override: set `DATABASE_URL` to use Postgres or another SQLAlchemy-supported database
 
-### Run the Full Stack with Docker Compose
+### UX only
+
+From `job-funnel-ui/`:
+
+```bash
+npm install
+npm run dev
+```
+
+By default the UX targets `http://localhost:8000`.
+
+### Full local stack
 
 From the repository root:
 
@@ -113,6 +135,58 @@ curl http://localhost:8000/health
 curl http://localhost:8080/healthz
 ```
 
+Stop it:
+
+```bash
+docker compose -f docker-compose-example.yml down
+```
+
+## Container Deployment
+
+### Full stack from the repository root
+
+Use the root compose file when you want one template that starts the UX service, backend API, and Postgres together:
+
+```bash
+docker compose -f docker-compose-example.yml up --build -d
+```
+
+Services:
+
+- `job-funnel-ui`
+- `job-pipeline-service`
+- `postgres`
+
+Published ports:
+
+- UX: `8080`
+- API: `8000`
+- Postgres: `5432`
+
+### UX service as a standalone container
+
+Build from [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui):
+
+```bash
+docker build -t job-funnel-ui:latest .
+```
+
+Run it:
+
+```bash
+docker run -d \
+  --name job-funnel-ui \
+  -p 8080:80 \
+  -e API_BASE_URL=https://api.example.com \
+  job-funnel-ui:latest
+```
+
+Important:
+
+- `API_BASE_URL` must be reachable from the browser, not just from inside Docker.
+- For local compose development, `http://localhost:8000` is correct.
+- For deployed environments, set it to your public API hostname or reverse-proxied API URL.
+
 ## Chrome Extension
 
 The extension lives in `job-scraper-chrome/`.
@@ -129,18 +203,13 @@ Details are in [job-scraper-chrome/README.md](/home/lrw5016/projects/n8n-job-fun
 
 ## Internal UI
 
-The internal operator UI lives in `job-funnel-ui/`.
+The internal operator UI lives in [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui). It currently provides:
 
-From `job-funnel-ui/`:
+- scored application review
+- run history
+- run results drill-down
 
-```bash
-npm install
-npm run dev
-```
-
-By default it targets the backend at `http://localhost:8000`. Details are in [job-funnel-ui/README.md](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui/README.md).
-
-For a full containerized local stack, use [docker-compose-example.yml](/home/lrw5016/projects/n8n-job-funnel/docker-compose-example.yml) from the repository root.
+Details are in [job-funnel-ui/README.md](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui/README.md).
 
 ## n8n Workflows
 
