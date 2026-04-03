@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { getApplications } from "../api";
+import { DetailModal } from "../components/DetailModal";
 import { PaginationControls } from "../components/PaginationControls";
 import type { JobApplication } from "../types";
 import { formatDate, moneyRange, renderListish } from "../utils";
@@ -21,9 +22,6 @@ export function ApplicationsPage() {
     const next = new URLSearchParams(searchParams);
     if (!next.get("limit")) {
       next.set("limit", String(DEFAULT_LIMIT));
-    }
-    if (!next.get("status")) {
-      next.set("status", "scored");
     }
     if (!next.get("sort_by")) {
       next.set("sort_by", "score");
@@ -47,7 +45,7 @@ export function ApplicationsPage() {
         setData(response.items);
         setTotal(response.total);
         setSelected((current) =>
-          current ? response.items.find((item) => item.id === current.id) ?? response.items[0] ?? null : response.items[0] ?? null,
+          current ? response.items.find((item) => item.id === current.id) ?? null : null,
         );
       })
       .catch((requestError: Error) => {
@@ -82,7 +80,6 @@ export function ApplicationsPage() {
   function clearFilters() {
     setSearchParams({
       limit: String(DEFAULT_LIMIT),
-      status: "scored",
       sort_by: "score",
       sort_order: "desc",
       offset: "0",
@@ -91,6 +88,28 @@ export function ApplicationsPage() {
 
   const limit = Number(params.get("limit") ?? String(DEFAULT_LIMIT));
   const offset = Number(params.get("offset") ?? "0");
+  const selectedIndex = selected ? data.findIndex((item) => item.id === selected.id) : -1;
+
+  useEffect(() => {
+    if (!selected) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelected(null);
+      }
+      if (event.key === "ArrowLeft" && selectedIndex > 0) {
+        setSelected(data[selectedIndex - 1]);
+      }
+      if (event.key === "ArrowRight" && selectedIndex >= 0 && selectedIndex < data.length - 1) {
+        setSelected(data[selectedIndex + 1]);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [data, selected, selectedIndex]);
 
   return (
     <section className="page-grid">
@@ -210,132 +229,124 @@ export function ApplicationsPage() {
         </div>
       </div>
 
-      <div className="content-grid">
-        <div className="panel table-panel">
-          {loading ? <p className="state-message">Loading applications...</p> : null}
-          {error ? <p className="state-message error-message">{error}</p> : null}
-          {!loading && !error && data.length === 0 ? <p className="state-message">No scored applications match current filters.</p> : null}
+      <div className="panel table-panel">
+        {loading ? <p className="state-message">Loading applications...</p> : null}
+        {error ? <p className="state-message error-message">{error}</p> : null}
+        {!loading && !error && data.length === 0 ? <p className="state-message">No applications match current filters.</p> : null}
 
-          {!loading && !error && data.length > 0 ? (
-            <>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Company</th>
-                    <th>Title</th>
-                    <th>Score</th>
-                    <th>Screening</th>
-                    <th>Recommendation</th>
-                    <th>Classification</th>
-                    <th>Resume</th>
-                    <th>Status</th>
-                    <th>Scored</th>
+        {!loading && !error && data.length > 0 ? (
+          <>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Title</th>
+                  <th>Score</th>
+                  <th>Screening</th>
+                  <th>Recommendation</th>
+                  <th>Classification</th>
+                  <th>Resume</th>
+                  <th>Status</th>
+                  <th>Scored</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((application) => (
+                  <tr key={application.id} onClick={() => setSelected(application)}>
+                    <td>{application.company_name ?? "Unknown"}</td>
+                    <td>{application.title ?? "Untitled role"}</td>
+                    <td>{application.score ?? "N/A"}</td>
+                    <td>{application.screening_likelihood ?? "N/A"}</td>
+                    <td>{application.recommendation ?? "N/A"}</td>
+                    <td>{application.classification_key ?? "N/A"}</td>
+                    <td>{application.resume_name ?? "N/A"}</td>
+                    <td>
+                      <span className={`status-pill status-${application.status}`}>{application.status}</span>
+                    </td>
+                    <td>{formatDate(application.scored_at)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {data.map((application) => (
-                    <tr
-                      key={application.id}
-                      className={selected?.id === application.id ? "is-selected" : ""}
-                      onClick={() => setSelected(application)}
-                    >
-                      <td>{application.company_name ?? "Unknown"}</td>
-                      <td>{application.title ?? "Untitled role"}</td>
-                      <td>{application.score ?? "N/A"}</td>
-                      <td>{application.screening_likelihood ?? "N/A"}</td>
-                      <td>{application.recommendation ?? "N/A"}</td>
-                      <td>{application.classification_key ?? "N/A"}</td>
-                      <td>{application.resume_name ?? "N/A"}</td>
-                      <td>
-                        <span className={`status-pill status-${application.status}`}>{application.status}</span>
-                      </td>
-                      <td>{formatDate(application.scored_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
+            </table>
 
-              <PaginationControls
-                total={total}
-                limit={limit}
-                offset={offset}
-                onPageChange={(nextOffset) => updateParam("offset", String(nextOffset))}
-              />
-            </>
-          ) : null}
-        </div>
-
-        <aside className="panel detail-panel">
-          {selected ? (
-            <>
-              <div className="detail-header">
-                <p className="eyebrow">Application #{selected.id}</p>
-                <h3>{selected.title ?? "Untitled role"}</h3>
-                <p>{selected.company_name ?? "Unknown company"}</p>
-              </div>
-
-              <div className="detail-section">
-                <h4>Summary</h4>
-                <dl className="detail-list">
-                  <div>
-                    <dt>Score</dt>
-                    <dd>{selected.score ?? "N/A"}</dd>
-                  </div>
-                  <div>
-                    <dt>Screening</dt>
-                    <dd>{selected.screening_likelihood ?? "N/A"}</dd>
-                  </div>
-                  <div>
-                    <dt>Recommendation</dt>
-                    <dd>{selected.recommendation ?? "N/A"}</dd>
-                  </div>
-                  <div>
-                    <dt>Compensation</dt>
-                    <dd>{moneyRange(selected.yearly_min_compensation, selected.yearly_max_compensation)}</dd>
-                  </div>
-                </dl>
-              </div>
-
-              <div className="detail-section">
-                <h4>Rationale</h4>
-                <p>{selected.justification ?? "No justification captured."}</p>
-                <p><strong>Gating flags:</strong> {renderListish(selected.gating_flags)}</p>
-                <p><strong>Strengths:</strong> {renderListish(selected.strengths)}</p>
-                <p><strong>Gaps:</strong> {renderListish(selected.gaps)}</p>
-              </div>
-
-              <div className="detail-section">
-                <h4>Metadata</h4>
-                <dl className="detail-list">
-                  <div>
-                    <dt>Job ID</dt>
-                    <dd className="mono">{selected.job_id ?? "N/A"}</dd>
-                  </div>
-                  <div>
-                    <dt>Classification</dt>
-                    <dd>{selected.classification_key ?? "N/A"}</dd>
-                  </div>
-                  <div>
-                    <dt>Resume</dt>
-                    <dd>{selected.resume_name ?? "N/A"}</dd>
-                  </div>
-                  <div>
-                    <dt>Scored At</dt>
-                    <dd>{formatDate(selected.scored_at)}</dd>
-                  </div>
-                </dl>
-                {selected.apply_url ? (
-                  <a className="action-link" href={selected.apply_url} target="_blank" rel="noreferrer">
-                    Open Apply URL
-                  </a>
-                ) : null}
-              </div>
-            </>
-          ) : (
-            <p className="state-message">Select a row to inspect the scoring detail.</p>
-          )}
-        </aside>
+            <PaginationControls
+              total={total}
+              limit={limit}
+              offset={offset}
+              onPageChange={(nextOffset) => updateParam("offset", String(nextOffset))}
+            />
+          </>
+        ) : null}
       </div>
+
+      {selected ? (
+        <DetailModal
+          title={selected.title ?? "Untitled role"}
+          subtitle={`Application #${selected.id} · ${selected.company_name ?? "Unknown company"}`}
+          onClose={() => setSelected(null)}
+          onPrevious={() => setSelected(data[selectedIndex - 1])}
+          onNext={() => setSelected(data[selectedIndex + 1])}
+          previousDisabled={selectedIndex <= 0}
+          nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
+        >
+          <div className="detail-section">
+            <h4>Summary</h4>
+            <dl className="detail-list">
+              <div>
+                <dt>Score</dt>
+                <dd>{selected.score ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Screening</dt>
+                <dd>{selected.screening_likelihood ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Recommendation</dt>
+                <dd>{selected.recommendation ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Compensation</dt>
+                <dd>{moneyRange(selected.yearly_min_compensation, selected.yearly_max_compensation)}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div className="detail-section">
+            <h4>Rationale</h4>
+            <p>{selected.justification ?? "No justification captured."}</p>
+            <p><strong>Gating flags:</strong> {renderListish(selected.gating_flags)}</p>
+            <p><strong>Strengths:</strong> {renderListish(selected.strengths)}</p>
+            <p><strong>Gaps:</strong> {renderListish(selected.gaps)}</p>
+          </div>
+
+          <div className="detail-section">
+            <h4>Metadata</h4>
+            <dl className="detail-list">
+              <div>
+                <dt>Job ID</dt>
+                <dd className="mono">{selected.job_id ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Classification</dt>
+                <dd>{selected.classification_key ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Resume</dt>
+                <dd>{selected.resume_name ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Scored At</dt>
+                <dd>{formatDate(selected.scored_at)}</dd>
+              </div>
+            </dl>
+            {selected.apply_url ? (
+              <a className="action-link" href={selected.apply_url} target="_blank" rel="noreferrer">
+                Open Apply URL
+              </a>
+            ) : null}
+          </div>
+        </DetailModal>
+      ) : null}
     </section>
   );
 }
