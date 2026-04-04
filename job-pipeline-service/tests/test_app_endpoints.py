@@ -641,6 +641,43 @@ def test_list_applications_filters_by_score(db_session):
     assert response.items[0].id == high.id
 
 
+def test_list_applications_filters_by_classification_key(db_session):
+    user = seed_user(db_session, name="Class Filter", email="class-filter@example.com")
+    matched_job = seed_job(db_session, job_id="job-class-match")
+    matched_job.classification_key = "Product Manager"
+    other_job = seed_job(db_session, job_id="job-class-other")
+    other_job.classification_key = "Designer"
+    resume = seed_resume(db_session, user=user, prompt_key="default")
+
+    matched_application = seed_application(db_session, user=user, job=matched_job, resume=resume, status="scored")
+    matched_application.score = 40
+    other_application = seed_application(db_session, user=user, job=other_job, resume=resume, status="scored")
+    other_application.score = 42
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=None,
+        classification_key="Product Manager",
+        status="scored",
+        score_min=None,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="score",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].id == matched_application.id
+    assert response.items[0].classification_key == "Product Manager"
+    assert response.items[0].id != other_application.id
+
+
 def test_run_applications_score_batch(db_session, monkeypatch):
     user = seed_user(db_session, name="Gina", email="gina@example.com")
     job = seed_job(db_session, job_id="job-batch")

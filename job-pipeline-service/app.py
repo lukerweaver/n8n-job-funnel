@@ -71,6 +71,7 @@ from services.run_service import (
     serialize_application_score_run,
     serialize_classification_run,
     serialize_run,
+    serialize_runs,
 )
 from services.scoring_service import JobScoringSkipped, score_application
 
@@ -822,7 +823,7 @@ def list_runs(
 
     items = session.scalars(query.offset(offset).limit(limit)).all()
     total = len(session.scalars(count_query).all())
-    return RunListResponse(total=total, items=[RunRead(**serialize_run(session, item)) for item in items])
+    return RunListResponse(total=total, items=[RunRead(**payload) for payload in serialize_runs(session, items)])
 
 
 @app.get("/runs/{run_id}", response_model=RunRead, tags=["runs"])
@@ -1047,6 +1048,7 @@ def list_applications(
     user_id: int | None = None,
     resume_id: int | None = None,
     job_posting_id: int | None = None,
+    classification_key: str | None = None,
     status: str | None = None,
     score_min: float | None = None,
     score_max: float | None = None,
@@ -1074,6 +1076,13 @@ def list_applications(
     if job_posting_id is not None:
         query = query.where(JobApplication.job_posting_id == job_posting_id)
         count_query = count_query.where(JobApplication.job_posting_id == job_posting_id)
+    if classification_key:
+        query = query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id).where(
+            JobPosting.classification_key == classification_key
+        )
+        count_query = count_query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id).where(
+            JobPosting.classification_key == classification_key
+        )
     if status:
         query = query.where(JobApplication.status == status)
         count_query = count_query.where(JobApplication.status == status)
