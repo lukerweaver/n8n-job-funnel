@@ -1,6 +1,8 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 
 import { ApplicationsPage } from "./pages/ApplicationsPage";
+import { PromptsPage } from "./pages/PromptsPage";
+import { ResumesPage } from "./pages/ResumesPage";
 import { RunResultsPage } from "./pages/RunResultsPage";
 import { RunsPage } from "./pages/RunsPage";
 
@@ -23,6 +25,12 @@ export function App() {
           <NavLink className="nav-link" to="/runs">
             Runs
           </NavLink>
+          <NavLink className="nav-link" to="/resumes">
+            Resumes
+          </NavLink>
+          <NavLink className="nav-link" to="/prompts">
+            Prompts
+          </NavLink>
         </nav>
 
         <div className="sidebar-note">
@@ -36,6 +44,8 @@ export function App() {
           <Route path="/applications" element={<ApplicationsPage />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/runs/:runId" element={<RunResultsPage />} />
+          <Route path="/resumes" element={<ResumesPage />} />
+          <Route path="/prompts" element={<PromptsPage />} />
         </Routes>
       </main>
     </div>

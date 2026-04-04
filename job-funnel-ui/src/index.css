@@ -43,7 +43,8 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -132,6 +133,13 @@ select {
   gap: 1rem;
 }
 
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .stat-chip {
   display: inline-flex;
   align-items: center;
@@ -183,15 +191,29 @@ select {
   align-items: end;
 }
 
+.primary-button,
 .secondary-button,
 .pagination-actions button {
   border: 0;
   border-radius: 14px;
   padding: 0.75rem 1rem;
-  background: rgba(32, 79, 59, 0.12);
-  color: var(--accent);
   font-weight: 700;
   cursor: pointer;
+}
+
+.primary-button {
+  background: var(--accent);
+  color: #f6f8ff;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #1d468a;
+}
+
+.secondary-button,
+.pagination-actions button {
+  background: rgba(32, 79, 59, 0.12);
+  color: var(--accent);
 }
 
 .secondary-button:hover,
@@ -199,8 +221,24 @@ select {
   background: rgba(32, 79, 59, 0.18);
 }
 
+.ghost-button {
+  border: 1px solid rgba(35, 83, 164, 0.24);
+  border-radius: 12px;
+  padding: 0.55rem 0.85rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ghost-button:hover:not(:disabled) {
+  background: rgba(219, 231, 255, 0.75);
+}
+
 .secondary-button:disabled,
-.pagination-actions button:disabled {
+.pagination-actions button:disabled,
+.primary-button:disabled,
+.ghost-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -434,9 +472,110 @@ select {
   gap: 1.25rem;
 }
 
+.split-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  gap: 1.5rem;
+}
+
+.form-panel {
+  padding: 1rem;
+}
+
+.form-header h3 {
+  margin: 0;
+}
+
+.editor-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.inline-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.editor-form label {
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.editor-form input,
+.editor-form select,
+.editor-form textarea {
+  width: 100%;
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid rgba(21, 33, 27, 0.15);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.editor-textarea {
+  min-height: 200px;
+  resize: vertical;
+}
+
+.editor-textarea-compact {
+  min-height: 120px;
+}
+
+.checkbox-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.checkbox-field input {
+  width: auto;
+  margin: 0;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.detail-pre {
+  margin: 0;
+  padding: 1rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 16px;
+  background: rgba(35, 83, 164, 0.06);
+  border: 1px solid rgba(35, 83, 164, 0.12);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.88rem;
+}
+
+.danger-button {
+  color: var(--danger);
+  border-color: rgba(143, 46, 51, 0.22);
+}
+
+.danger-button:hover:not(:disabled) {
+  background: rgba(244, 213, 215, 0.9);
+}
+
 @media (max-width: 1200px) {
   .filter-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .split-layout {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -469,6 +608,10 @@ select {
     align-items: start;
   }
 
+  .page-actions {
+    width: 100%;
+  }
+
   .pagination {
     flex-direction: column;
     align-items: start;
@@ -481,5 +624,9 @@ select {
   .data-table {
     display: block;
     overflow-x: auto;
+  }
+
+  .inline-form-grid {
+    grid-template-columns: 1fr;
   }
 }

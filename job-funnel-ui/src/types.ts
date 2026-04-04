@@ -113,3 +113,39 @@ export interface RunApplicationsResponse {
   total: number;
   items: RunApplication[];
 }
+
+export interface Resume {
+  id: number;
+  user_id: number;
+  name: string;
+  prompt_key: string;
+  classification_key: string | null;
+  content: string;
+  is_active: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResumeListResponse {
+  total: number;
+  items: Resume[];
+}
+
+export interface PromptLibrary {
+  id: number;
+  prompt_key: string;
+  prompt_type: string;
+  prompt_version: number;
+  system_prompt: string;
+  user_prompt_template: string;
+  context: string | null;
+  max_tokens: number | null;
+  temperature: number | null;
+  is_active: boolean;
+}
+
+export interface PromptLibraryListResponse {
+  total: number;
+  items: PromptLibrary[];
+}
