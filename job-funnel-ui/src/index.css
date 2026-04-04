@@ -382,6 +382,31 @@ textarea {
   text-decoration: underline;
 }
 
+.action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.6rem;
+  padding: 0.7rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(35, 83, 164, 0.24);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.action-button:hover:not(:disabled) {
+  background: rgba(219, 231, 255, 0.75);
+  text-decoration: none;
+}
+
+.action-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .detail-actions {
   display: flex;
   align-items: center;

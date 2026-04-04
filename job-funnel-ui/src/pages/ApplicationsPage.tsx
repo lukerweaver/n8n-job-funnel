@@ -372,13 +372,13 @@ export function ApplicationsPage() {
             </dl>
             <div className="detail-actions">
               {selected.apply_url ? (
-                <a className="action-link" href={selected.apply_url} target="_blank" rel="noreferrer">
+                <a className="action-button" href={selected.apply_url} target="_blank" rel="noreferrer">
                   Open Apply URL
                 </a>
               ) : null}
               <button
                 type="button"
-                className="ghost-button"
+                className="action-button"
                 onClick={handleCopyDescription}
                 disabled={!selected.description}
               >

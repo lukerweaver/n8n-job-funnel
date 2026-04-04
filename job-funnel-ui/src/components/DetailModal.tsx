@@ -22,8 +22,8 @@ export function DetailModal({
   children,
 }: DetailModalProps) {
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal-shell">
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal-shell" onClick={(event) => event.stopPropagation()}>
         <div className="modal-toolbar">
           <div className="modal-nav-actions">
             <button type="button" className="icon-button" onClick={onPrevious} disabled={!onPrevious || previousDisabled}>
