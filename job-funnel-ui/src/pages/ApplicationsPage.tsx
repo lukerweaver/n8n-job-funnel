@@ -17,6 +17,7 @@ export function ApplicationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<JobApplication | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
 
   const params = useMemo(() => {
     const next = new URLSearchParams(searchParams);
@@ -110,6 +111,36 @@ export function ApplicationsPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [data, selected, selectedIndex]);
+
+  useEffect(() => {
+    setCopyState("idle");
+  }, [selected]);
+
+  async function handleCopyDescription() {
+    if (!selected?.description) {
+      setCopyState("error");
+      return;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(selected.description);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = selected.description;
+        textArea.setAttribute("readonly", "");
+        textArea.style.position = "absolute";
+        textArea.style.left = "-9999px";
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textArea);
+      }
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+  }
 
   return (
     <section className="page-grid">
@@ -339,11 +370,23 @@ export function ApplicationsPage() {
                 <dd>{formatDate(selected.scored_at)}</dd>
               </div>
             </dl>
-            {selected.apply_url ? (
-              <a className="action-link" href={selected.apply_url} target="_blank" rel="noreferrer">
-                Open Apply URL
-              </a>
-            ) : null}
+            <div className="detail-actions">
+              {selected.apply_url ? (
+                <a className="action-link" href={selected.apply_url} target="_blank" rel="noreferrer">
+                  Open Apply URL
+                </a>
+              ) : null}
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={handleCopyDescription}
+                disabled={!selected.description}
+              >
+                Copy Job Description
+              </button>
+              {copyState === "copied" ? <span className="inline-feedback">Copied.</span> : null}
+              {copyState === "error" ? <span className="inline-feedback error-text">Unable to copy.</span> : null}
+            </div>
           </div>
         </DetailModal>
       ) : null}

@@ -213,6 +213,7 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         yearly_min_compensation=job.yearly_min_compensation if job is not None else None,
         yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
         apply_url=job.apply_url if job is not None else None,
+        description=job.description if job is not None else None,
         classification_key=job.classification_key if job is not None else None,
         resume_name=resume.name if resume is not None else None,
         status=application.status,

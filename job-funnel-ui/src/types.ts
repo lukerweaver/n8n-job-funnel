@@ -22,6 +22,7 @@ export interface JobApplication {
   yearly_min_compensation: number | null;
   yearly_max_compensation: number | null;
   apply_url: string | null;
+  description: string | null;
   classification_key: string | null;
   resume_name: string | null;
   status: ApplicationStatus;
