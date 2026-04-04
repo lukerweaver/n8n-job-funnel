@@ -49,6 +49,7 @@ export function ResumesPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Resume | null>(null);
   const [editing, setEditing] = useState<Resume | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<ResumeFormState>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -98,9 +99,14 @@ export function ResumesPage() {
       setSubmitError(null);
       return;
     }
+    if (isCreating) {
+      setForm(EMPTY_FORM);
+      setSubmitError(null);
+      return;
+    }
     setForm(EMPTY_FORM);
     setSubmitError(null);
-  }, [editing]);
+  }, [editing, isCreating]);
 
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -109,7 +115,9 @@ export function ResumesPage() {
     } else {
       next.delete(key);
     }
-    next.set("offset", "0");
+    if (key !== "offset") {
+      next.set("offset", "0");
+    }
     setSearchParams(next);
   }
 
@@ -121,7 +129,8 @@ export function ResumesPage() {
   }
 
   function startNewResume() {
-    setEditing({} as Resume);
+    setEditing(null);
+    setIsCreating(true);
     setForm(EMPTY_FORM);
   }
 
@@ -141,7 +150,7 @@ export function ResumesPage() {
     };
 
     try {
-      if (editing && "id" in editing) {
+      if (editing) {
         await updateResume(editing.id, {
           name: payload.name,
           prompt_key: payload.prompt_key,
@@ -155,6 +164,7 @@ export function ResumesPage() {
       }
 
       setEditing(null);
+      setIsCreating(false);
       const next = new URLSearchParams(params);
       setSearchParams(next);
     } catch (requestError) {
@@ -357,11 +367,14 @@ export function ResumesPage() {
         </DetailModal>
       ) : null}
 
-      {editing ? (
+      {editing || isCreating ? (
         <DetailModal
-          title={"id" in editing ? `Edit ${editing.name}` : "New Resume"}
-          subtitle={"id" in editing ? `Resume #${editing.id}` : "Create a new resume variant"}
-          onClose={() => setEditing(null)}
+          title={editing ? `Edit ${editing.name}` : "New Resume"}
+          subtitle={editing ? `Resume #${editing.id}` : "Create a new resume variant"}
+          onClose={() => {
+            setEditing(null);
+            setIsCreating(false);
+          }}
         >
           <form className="editor-form" onSubmit={handleSubmit}>
             <div className="inline-form-grid">
@@ -440,9 +453,16 @@ export function ResumesPage() {
 
             <div className="form-actions">
               <button type="submit" className="primary-button" disabled={submitting}>
-                {submitting ? "Saving..." : "id" in editing ? "Update Resume" : "Create Resume"}
+                {submitting ? "Saving..." : editing ? "Update Resume" : "Create Resume"}
               </button>
-              <button type="button" className="secondary-button" onClick={() => setEditing(null)}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setEditing(null);
+                  setIsCreating(false);
+                }}
+              >
                 Cancel
               </button>
             </div>

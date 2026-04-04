@@ -54,6 +54,7 @@ export function PromptsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<PromptLibrary | null>(null);
   const [editing, setEditing] = useState<PromptLibrary | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<PromptFormState>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -103,9 +104,14 @@ export function PromptsPage() {
       setSubmitError(null);
       return;
     }
+    if (isCreating) {
+      setForm(EMPTY_FORM);
+      setSubmitError(null);
+      return;
+    }
     setForm(EMPTY_FORM);
     setSubmitError(null);
-  }, [editing]);
+  }, [editing, isCreating]);
 
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -114,7 +120,9 @@ export function PromptsPage() {
     } else {
       next.delete(key);
     }
-    next.set("offset", "0");
+    if (key !== "offset") {
+      next.set("offset", "0");
+    }
     setSearchParams(next);
   }
 
@@ -126,7 +134,8 @@ export function PromptsPage() {
   }
 
   function startNewPrompt() {
-    setEditing({} as PromptLibrary);
+    setEditing(null);
+    setIsCreating(true);
     setForm(EMPTY_FORM);
   }
 
@@ -148,13 +157,14 @@ export function PromptsPage() {
     };
 
     try {
-      if (editing && "id" in editing) {
+      if (editing) {
         await updatePromptLibrary(editing.id, payload);
       } else {
         await createPromptLibrary(payload);
       }
 
       setEditing(null);
+      setIsCreating(false);
       const next = new URLSearchParams(params);
       setSearchParams(next);
     } catch (requestError) {
@@ -180,6 +190,7 @@ export function PromptsPage() {
       if (editing?.id === promptId) {
         setEditing(null);
       }
+      setIsCreating(false);
       const next = new URLSearchParams(params);
       setSearchParams(next);
     } catch (requestError) {
@@ -392,11 +403,14 @@ export function PromptsPage() {
         </DetailModal>
       ) : null}
 
-      {editing ? (
+      {editing || isCreating ? (
         <DetailModal
-          title={"id" in editing ? `Edit ${editing.prompt_key} v${editing.prompt_version}` : "New Prompt"}
-          subtitle={"id" in editing ? `Prompt #${editing.id}` : "Create a new prompt version"}
-          onClose={() => setEditing(null)}
+          title={editing ? `Edit ${editing.prompt_key} v${editing.prompt_version}` : "New Prompt"}
+          subtitle={editing ? `Prompt #${editing.id}` : "Create a new prompt version"}
+          onClose={() => {
+            setEditing(null);
+            setIsCreating(false);
+          }}
         >
           <form className="editor-form" onSubmit={handleSubmit}>
             <div className="inline-form-grid">
@@ -497,12 +511,19 @@ export function PromptsPage() {
 
             <div className="form-actions">
               <button type="submit" className="primary-button" disabled={submitting}>
-                {submitting ? "Saving..." : "id" in editing ? "Update Prompt" : "Create Prompt"}
+                {submitting ? "Saving..." : editing ? "Update Prompt" : "Create Prompt"}
               </button>
-              <button type="button" className="secondary-button" onClick={() => setEditing(null)}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setEditing(null);
+                  setIsCreating(false);
+                }}
+              >
                 Cancel
               </button>
-              {"id" in editing ? (
+              {editing ? (
                 <button type="button" className="ghost-button danger-button" onClick={() => handleDelete(editing.id)}>
                   Delete
                 </button>

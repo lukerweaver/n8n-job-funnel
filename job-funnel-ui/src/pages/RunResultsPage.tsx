@@ -75,7 +75,9 @@ export function RunResultsPage() {
     } else {
       next.delete(key);
     }
-    next.set("offset", "0");
+    if (key !== "offset") {
+      next.set("offset", "0");
+    }
     setSearchParams(next);
   }
 
