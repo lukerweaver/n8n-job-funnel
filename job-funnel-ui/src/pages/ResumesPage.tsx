@@ -74,7 +74,7 @@ export function ResumesPage() {
         setData(response.items);
         setTotal(response.total);
         setSelected((current) => (current ? response.items.find((item) => item.id === current.id) ?? null : null));
-        setEditing((current) => (current ? response.items.find((item) => item.id === current.id) ?? null : current));
+        setEditing((current) => (current ? response.items.find((item) => item.id === current.id) ?? null : null));
       })
       .catch((requestError: Error) => {
         if (!cancelled) {
@@ -121,7 +121,7 @@ export function ResumesPage() {
   }
 
   function startNewResume() {
-    setEditing(null);
+    setEditing({} as Resume);
     setForm(EMPTY_FORM);
   }
 
@@ -141,7 +141,7 @@ export function ResumesPage() {
     };
 
     try {
-      if (editing) {
+      if (editing && "id" in editing) {
         await updateResume(editing.id, {
           name: payload.name,
           prompt_key: payload.prompt_key,
@@ -154,10 +154,9 @@ export function ResumesPage() {
         await createResume(payload);
       }
 
-      const refreshParams = new URLSearchParams(params);
-      setSearchParams(refreshParams);
       setEditing(null);
-      setForm(EMPTY_FORM);
+      const next = new URLSearchParams(params);
+      setSearchParams(next);
     } catch (requestError) {
       setSubmitError(requestError instanceof Error ? requestError.message : "Unable to save resume.");
     } finally {
@@ -196,7 +195,7 @@ export function ResumesPage() {
         <div>
           <p className="eyebrow">Page 4</p>
           <h2>Resumes</h2>
-          <p className="page-subtitle">Manage active/default resume variants and inspect long-form content.</p>
+          <p className="page-subtitle">Browse active/default resume variants and inspect full resume content on demand.</p>
         </div>
         <div className="page-actions">
           <div className="stat-chip">{total} visible resumes</div>
@@ -254,15 +253,116 @@ export function ResumesPage() {
         </div>
       </div>
 
-      <div className="split-layout">
-        <div className="panel form-panel">
-          <div className="form-header">
-            <div>
-              <p className="eyebrow">{editing ? "Editing" : "Create"}</p>
-              <h3>{editing ? editing.name : "New Resume"}</h3>
-            </div>
+      <div className="panel table-panel">
+        {loading ? <p className="state-message">Loading resumes...</p> : null}
+        {error ? <p className="state-message error-message">{error}</p> : null}
+        {!loading && !error && data.length === 0 ? <p className="state-message">No resumes match current filters.</p> : null}
+
+        {!loading && !error && data.length > 0 ? (
+          <>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>User</th>
+                  <th>Prompt</th>
+                  <th>Classification</th>
+                  <th>Default</th>
+                  <th>State</th>
+                  <th>Updated</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((resume) => (
+                  <tr key={resume.id} onClick={() => setSelected(resume)}>
+                    <td>{resume.name}</td>
+                    <td className="mono">{resume.user_id}</td>
+                    <td>{resume.prompt_key}</td>
+                    <td>{resume.classification_key ?? "N/A"}</td>
+                    <td>{resume.is_default ? "yes" : "no"}</td>
+                    <td>
+                      <span className={`status-pill ${resume.is_active ? "status-completed" : "status-skipped"}`}>
+                        {resume.is_active ? "active" : "inactive"}
+                      </span>
+                    </td>
+                    <td>{formatDate(resume.updated_at)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditing(resume);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <PaginationControls
+              total={total}
+              limit={limit}
+              offset={offset}
+              onPageChange={(nextOffset) => updateParam("offset", String(nextOffset))}
+            />
+          </>
+        ) : null}
+      </div>
+
+      {selected ? (
+        <DetailModal
+          title={selected.name}
+          subtitle={`Resume #${selected.id} · user ${selected.user_id}`}
+          onClose={() => setSelected(null)}
+          onPrevious={() => setSelected(data[selectedIndex - 1])}
+          onNext={() => setSelected(data[selectedIndex + 1])}
+          previousDisabled={selectedIndex <= 0}
+          nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
+        >
+          <div className="detail-section">
+            <h4>Metadata</h4>
+            <dl className="detail-list">
+              <div>
+                <dt>Prompt Key</dt>
+                <dd>{selected.prompt_key}</dd>
+              </div>
+              <div>
+                <dt>Classification</dt>
+                <dd>{selected.classification_key ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Default</dt>
+                <dd>{selected.is_default ? "Yes" : "No"}</dd>
+              </div>
+              <div>
+                <dt>State</dt>
+                <dd>{selected.is_active ? "Active" : "Inactive"}</dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd>{formatDate(selected.updated_at)}</dd>
+              </div>
+            </dl>
           </div>
 
+          <div className="detail-section">
+            <h4>Content</h4>
+            <pre className="detail-pre">{selected.content}</pre>
+          </div>
+        </DetailModal>
+      ) : null}
+
+      {editing ? (
+        <DetailModal
+          title={"id" in editing ? `Edit ${editing.name}` : "New Resume"}
+          subtitle={"id" in editing ? `Resume #${editing.id}` : "Create a new resume variant"}
+          onClose={() => setEditing(null)}
+        >
           <form className="editor-form" onSubmit={handleSubmit}>
             <div className="inline-form-grid">
               <label>
@@ -340,119 +440,13 @@ export function ResumesPage() {
 
             <div className="form-actions">
               <button type="submit" className="primary-button" disabled={submitting}>
-                {submitting ? "Saving..." : editing ? "Update Resume" : "Create Resume"}
+                {submitting ? "Saving..." : "id" in editing ? "Update Resume" : "Create Resume"}
               </button>
-              {editing ? (
-                <button type="button" className="secondary-button" onClick={startNewResume}>
-                  Cancel Edit
-                </button>
-              ) : null}
+              <button type="button" className="secondary-button" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
             </div>
           </form>
-        </div>
-
-        <div className="panel table-panel">
-          {loading ? <p className="state-message">Loading resumes...</p> : null}
-          {error ? <p className="state-message error-message">{error}</p> : null}
-          {!loading && !error && data.length === 0 ? <p className="state-message">No resumes match current filters.</p> : null}
-
-          {!loading && !error && data.length > 0 ? (
-            <>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>User</th>
-                    <th>Prompt</th>
-                    <th>Classification</th>
-                    <th>Default</th>
-                    <th>State</th>
-                    <th>Updated</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((resume) => (
-                    <tr key={resume.id} onClick={() => setSelected(resume)}>
-                      <td>{resume.name}</td>
-                      <td className="mono">{resume.user_id}</td>
-                      <td>{resume.prompt_key}</td>
-                      <td>{resume.classification_key ?? "N/A"}</td>
-                      <td>{resume.is_default ? "yes" : "no"}</td>
-                      <td>
-                        <span className={`status-pill ${resume.is_active ? "status-completed" : "status-skipped"}`}>
-                          {resume.is_active ? "active" : "inactive"}
-                        </span>
-                      </td>
-                      <td>{formatDate(resume.updated_at)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setEditing(resume);
-                          }}
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <PaginationControls
-                total={total}
-                limit={limit}
-                offset={offset}
-                onPageChange={(nextOffset) => updateParam("offset", String(nextOffset))}
-              />
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      {selected ? (
-        <DetailModal
-          title={selected.name}
-          subtitle={`Resume #${selected.id} · user ${selected.user_id}`}
-          onClose={() => setSelected(null)}
-          onPrevious={() => setSelected(data[selectedIndex - 1])}
-          onNext={() => setSelected(data[selectedIndex + 1])}
-          previousDisabled={selectedIndex <= 0}
-          nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
-        >
-          <div className="detail-section">
-            <h4>Metadata</h4>
-            <dl className="detail-list">
-              <div>
-                <dt>Prompt Key</dt>
-                <dd>{selected.prompt_key}</dd>
-              </div>
-              <div>
-                <dt>Classification</dt>
-                <dd>{selected.classification_key ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Default</dt>
-                <dd>{selected.is_default ? "Yes" : "No"}</dd>
-              </div>
-              <div>
-                <dt>State</dt>
-                <dd>{selected.is_active ? "Active" : "Inactive"}</dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{formatDate(selected.updated_at)}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="detail-section">
-            <h4>Content</h4>
-            <pre className="detail-pre">{selected.content}</pre>
-          </div>
         </DetailModal>
       ) : null}
     </section>

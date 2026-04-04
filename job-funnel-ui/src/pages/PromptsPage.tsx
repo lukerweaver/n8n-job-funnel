@@ -79,7 +79,7 @@ export function PromptsPage() {
         setData(response.items);
         setTotal(response.total);
         setSelected((current) => (current ? response.items.find((item) => item.id === current.id) ?? null : null));
-        setEditing((current) => (current ? response.items.find((item) => item.id === current.id) ?? null : current));
+        setEditing((current) => (current ? response.items.find((item) => item.id === current.id) ?? null : null));
       })
       .catch((requestError: Error) => {
         if (!cancelled) {
@@ -126,7 +126,7 @@ export function PromptsPage() {
   }
 
   function startNewPrompt() {
-    setEditing(null);
+    setEditing({} as PromptLibrary);
     setForm(EMPTY_FORM);
   }
 
@@ -148,16 +148,15 @@ export function PromptsPage() {
     };
 
     try {
-      if (editing) {
+      if (editing && "id" in editing) {
         await updatePromptLibrary(editing.id, payload);
       } else {
         await createPromptLibrary(payload);
       }
 
-      const refreshParams = new URLSearchParams(params);
-      setSearchParams(refreshParams);
       setEditing(null);
-      setForm(EMPTY_FORM);
+      const next = new URLSearchParams(params);
+      setSearchParams(next);
     } catch (requestError) {
       setSubmitError(requestError instanceof Error ? requestError.message : "Unable to save prompt.");
     } finally {
@@ -181,8 +180,8 @@ export function PromptsPage() {
       if (editing?.id === promptId) {
         setEditing(null);
       }
-      const refreshParams = new URLSearchParams(params);
-      setSearchParams(refreshParams);
+      const next = new URLSearchParams(params);
+      setSearchParams(next);
     } catch (requestError) {
       setSubmitError(requestError instanceof Error ? requestError.message : "Unable to delete prompt.");
     }
@@ -219,7 +218,7 @@ export function PromptsPage() {
         <div>
           <p className="eyebrow">Page 5</p>
           <h2>Prompt Library</h2>
-          <p className="page-subtitle">Track scoring and classification prompt versions, then edit the active variants in place.</p>
+          <p className="page-subtitle">Browse prompt versions in a dense table, then inspect or edit them in modal workflows.</p>
         </div>
         <div className="page-actions">
           <div className="stat-chip">{total} visible prompts</div>
@@ -287,15 +286,118 @@ export function PromptsPage() {
         </div>
       </div>
 
-      <div className="split-layout">
-        <div className="panel form-panel">
-          <div className="form-header">
-            <div>
-              <p className="eyebrow">{editing ? "Editing" : "Create"}</p>
-              <h3>{editing ? `${editing.prompt_key} v${editing.prompt_version}` : "New Prompt"}</h3>
-            </div>
+      <div className="panel table-panel">
+        {loading ? <p className="state-message">Loading prompts...</p> : null}
+        {error ? <p className="state-message error-message">{error}</p> : null}
+        {!loading && !error && data.length === 0 ? <p className="state-message">No prompts match current filters.</p> : null}
+
+        {!loading && !error && data.length > 0 ? (
+          <>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Version</th>
+                  <th>Active</th>
+                  <th>Max Tokens</th>
+                  <th>Temperature</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((prompt) => (
+                  <tr key={prompt.id} onClick={() => setSelected(prompt)}>
+                    <td>{prompt.prompt_key}</td>
+                    <td>{prompt.prompt_type}</td>
+                    <td className="mono">v{prompt.prompt_version}</td>
+                    <td>
+                      <span className={`status-pill ${prompt.is_active ? "status-completed" : "status-skipped"}`}>
+                        {prompt.is_active ? "active" : "inactive"}
+                      </span>
+                    </td>
+                    <td>{prompt.max_tokens ?? "N/A"}</td>
+                    <td>{prompt.temperature ?? "N/A"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditing(prompt);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <PaginationControls
+              total={total}
+              limit={limit}
+              offset={offset}
+              onPageChange={(nextOffset) => updateParam("offset", String(nextOffset))}
+            />
+          </>
+        ) : null}
+      </div>
+
+      {selected ? (
+        <DetailModal
+          title={`${selected.prompt_key} v${selected.prompt_version}`}
+          subtitle={`${selected.prompt_type} prompt`}
+          onClose={() => setSelected(null)}
+          onPrevious={() => setSelected(data[selectedIndex - 1])}
+          onNext={() => setSelected(data[selectedIndex + 1])}
+          previousDisabled={selectedIndex <= 0}
+          nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
+        >
+          <div className="detail-section">
+            <h4>Metadata</h4>
+            <dl className="detail-list">
+              <div>
+                <dt>Active</dt>
+                <dd>{selected.is_active ? "Yes" : "No"}</dd>
+              </div>
+              <div>
+                <dt>Max Tokens</dt>
+                <dd>{selected.max_tokens ?? "N/A"}</dd>
+              </div>
+              <div>
+                <dt>Temperature</dt>
+                <dd>{selected.temperature ?? "N/A"}</dd>
+              </div>
+            </dl>
           </div>
 
+          <div className="detail-section">
+            <h4>System Prompt</h4>
+            <pre className="detail-pre">{selected.system_prompt}</pre>
+          </div>
+
+          <div className="detail-section">
+            <h4>User Prompt Template</h4>
+            <pre className="detail-pre">{selected.user_prompt_template}</pre>
+          </div>
+
+          {selected.context ? (
+            <div className="detail-section">
+              <h4>Context</h4>
+              <pre className="detail-pre">{selected.context}</pre>
+            </div>
+          ) : null}
+        </DetailModal>
+      ) : null}
+
+      {editing ? (
+        <DetailModal
+          title={"id" in editing ? `Edit ${editing.prompt_key} v${editing.prompt_version}` : "New Prompt"}
+          subtitle={"id" in editing ? `Prompt #${editing.id}` : "Create a new prompt version"}
+          onClose={() => setEditing(null)}
+        >
           <form className="editor-form" onSubmit={handleSubmit}>
             <div className="inline-form-grid">
               <label>
@@ -395,126 +497,18 @@ export function PromptsPage() {
 
             <div className="form-actions">
               <button type="submit" className="primary-button" disabled={submitting}>
-                {submitting ? "Saving..." : editing ? "Update Prompt" : "Create Prompt"}
+                {submitting ? "Saving..." : "id" in editing ? "Update Prompt" : "Create Prompt"}
               </button>
-              {editing ? (
-                <>
-                  <button type="button" className="secondary-button" onClick={startNewPrompt}>
-                    Cancel Edit
-                  </button>
-                  <button type="button" className="ghost-button danger-button" onClick={() => handleDelete(editing.id)}>
-                    Delete
-                  </button>
-                </>
+              <button type="button" className="secondary-button" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+              {"id" in editing ? (
+                <button type="button" className="ghost-button danger-button" onClick={() => handleDelete(editing.id)}>
+                  Delete
+                </button>
               ) : null}
             </div>
           </form>
-        </div>
-
-        <div className="panel table-panel">
-          {loading ? <p className="state-message">Loading prompts...</p> : null}
-          {error ? <p className="state-message error-message">{error}</p> : null}
-          {!loading && !error && data.length === 0 ? <p className="state-message">No prompts match current filters.</p> : null}
-
-          {!loading && !error && data.length > 0 ? (
-            <>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Key</th>
-                    <th>Type</th>
-                    <th>Version</th>
-                    <th>Active</th>
-                    <th>Max Tokens</th>
-                    <th>Temperature</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((prompt) => (
-                    <tr key={prompt.id} onClick={() => setSelected(prompt)}>
-                      <td>{prompt.prompt_key}</td>
-                      <td>{prompt.prompt_type}</td>
-                      <td className="mono">v{prompt.prompt_version}</td>
-                      <td>
-                        <span className={`status-pill ${prompt.is_active ? "status-completed" : "status-skipped"}`}>
-                          {prompt.is_active ? "active" : "inactive"}
-                        </span>
-                      </td>
-                      <td>{prompt.max_tokens ?? "N/A"}</td>
-                      <td>{prompt.temperature ?? "N/A"}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setEditing(prompt);
-                          }}
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <PaginationControls
-                total={total}
-                limit={limit}
-                offset={offset}
-                onPageChange={(nextOffset) => updateParam("offset", String(nextOffset))}
-              />
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      {selected ? (
-        <DetailModal
-          title={`${selected.prompt_key} v${selected.prompt_version}`}
-          subtitle={`${selected.prompt_type} prompt`}
-          onClose={() => setSelected(null)}
-          onPrevious={() => setSelected(data[selectedIndex - 1])}
-          onNext={() => setSelected(data[selectedIndex + 1])}
-          previousDisabled={selectedIndex <= 0}
-          nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
-        >
-          <div className="detail-section">
-            <h4>Metadata</h4>
-            <dl className="detail-list">
-              <div>
-                <dt>Active</dt>
-                <dd>{selected.is_active ? "Yes" : "No"}</dd>
-              </div>
-              <div>
-                <dt>Max Tokens</dt>
-                <dd>{selected.max_tokens ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Temperature</dt>
-                <dd>{selected.temperature ?? "N/A"}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="detail-section">
-            <h4>System Prompt</h4>
-            <pre className="detail-pre">{selected.system_prompt}</pre>
-          </div>
-
-          <div className="detail-section">
-            <h4>User Prompt Template</h4>
-            <pre className="detail-pre">{selected.user_prompt_template}</pre>
-          </div>
-
-          {selected.context ? (
-            <div className="detail-section">
-              <h4>Context</h4>
-              <pre className="detail-pre">{selected.context}</pre>
-            </div>
-          ) : null}
         </DetailModal>
       ) : null}
     </section>
