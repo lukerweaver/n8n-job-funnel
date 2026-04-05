@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: job-funnel-postgres
+    environment:
+      POSTGRES_DB: jobs_db
+      POSTGRES_USER: jobs_user
+      POSTGRES_PASSWORD: jobs_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobs_user -d jobs_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  job-pipeline-service:
+    build:
+      context: ./job-pipeline-service
+      dockerfile: Dockerfile
+    container_name: job-pipeline-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://jobs_user:jobs_pass@postgres:5432/jobs_db
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  job-funnel-ui:
+    build:
+      context: ./job-funnel-ui
+      dockerfile: Dockerfile
+    container_name: job-funnel-ui
+    environment:
+      API_BASE_URL: http://localhost:8000
+    ports:
+      - "8080:80"
+    depends_on:
+      - job-pipeline-service
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

@@ -5,32 +5,17 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "job-classification-complete",
-        "responseMode": "onReceived",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -368,
-        -160
+        2080,
+        144
       ],
-      "id": "b35d3ba0-5616-4683-bd61-4b060f7a829d",
+      "id": "74a68140-9757-40c5-9628-c6db78b9aca0",
       "name": "Classification Complete",
       "webhookId": "job-classification-complete"
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const payload = $input.first().json;\nif (payload?.type !== 'classification' || payload?.status !== 'completed') {\n  return [];\n}\nconst jobs = Array.isArray(payload.jobs) ? payload.jobs : [];\nif (!jobs.length) {\n  return [];\n}\nreturn [{\n  json: {\n    user_id: 1,\n    score_callback_url: 'https://<n8n-host>/webhook/application-score-complete',\n  },\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -96,
-        -160
-      ],
-      "id": "a4f2c2b5-a3ba-4963-9d19-2dad43188c4c",
-      "name": "Select Jobs To Generate"
     },
     {
       "parameters": {
@@ -38,16 +23,16 @@
         "url": "http://<job-pipeline-service-host>:8000/applications/generate/run",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { \"user_id\": $json.user_id, \"limit\": 100 } }}",
+        "jsonBody": "={{ { \"user_id\": 1, \"limit\": 100, \"resume_strategy\": \"default_only\" } }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        176,
-        -160
+        2464,
+        144
       ],
-      "id": "b85c5803-71de-40e8-8e66-3dcf9e6b74ef",
+      "id": "eb73b2dc-6f22-46e9-93c9-e03878d5aa87",
       "name": "Generate Applications"
     },
     {
@@ -56,33 +41,33 @@
         "url": "http://<job-pipeline-service-host>:8000/applications/score/run",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { \"limit\": 100, \"status\": \"new\", \"force\": false, \"callback_url\": $json.score_callback_url } }}",
+        "jsonBody": "={{ { \"limit\": 100, \"status\": \"new\", \"force\": false, \"callback_url\": \"https://<n8n-host>/webhook/application-score-complete\" } }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        448,
-        -160
+        2816,
+        144
       ],
-      "id": "7b0d98e0-bb4f-4067-84d5-ee36a71ea8df",
+      "id": "3d0eb6aa-1df5-4be9-ae21-fd7b0e5febd3",
       "name": "Queue Application Scoring"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        -32
+      ],
+      "id": "b4dce6a9-211d-4580-bd8a-8a40f13f09f5",
+      "name": "When clicking ‘Execute workflow’"
     }
   ],
   "pinData": {},
   "connections": {
     "Classification Complete": {
-      "main": [
-        [
-          {
-            "node": "Select Jobs To Generate",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Select Jobs To Generate": {
       "main": [
         [
           {
@@ -98,6 +83,17 @@
         [
           {
             "node": "Queue Application Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Generate Applications",
             "type": "main",
             "index": 0
           }

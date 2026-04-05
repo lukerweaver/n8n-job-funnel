@@ -25,6 +25,8 @@ from app import (
     ingest_jobs,
     list_applications,
     list_jobs,
+    list_run_applications,
+    list_runs,
     list_prompt_library,
     list_resumes,
     list_run_items,
@@ -114,6 +116,9 @@ def test_jobs_list_with_filters(db_session):
         db_session,
         source=None,
         classification_key="Product Manager",
+        q=None,
+        has_classification=None,
+        has_applications=None,
         classified_since=datetime.now(timezone.utc) - timedelta(hours=1),
         limit=10,
         offset=0,
@@ -137,6 +142,9 @@ def test_jobs_list_filters_by_source_and_paginates(db_session):
         db_session,
         source="greenhouse",
         classification_key=None,
+        q=None,
+        has_classification=None,
+        has_applications=None,
         classified_since=None,
         limit=1,
         offset=1,
@@ -334,6 +342,12 @@ def test_application_crud_generate_and_status_flow(db_session):
         resume_id=resume.id,
         job_posting_id=job.id,
         status="new",
+        score_min=None,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="created_at",
+        sort_order="desc",
         limit=10,
         offset=0,
     )
@@ -613,13 +627,55 @@ def test_list_applications_filters_by_score(db_session):
         resume_id=None,
         job_posting_id=job.id,
         status="scored",
-        score=20,
+        score_min=20,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="created_at",
+        sort_order="desc",
         limit=10,
         offset=0,
     )
 
     assert response.total == 1
     assert response.items[0].id == high.id
+
+
+def test_list_applications_filters_by_classification_key(db_session):
+    user = seed_user(db_session, name="Class Filter", email="class-filter@example.com")
+    matched_job = seed_job(db_session, job_id="job-class-match")
+    matched_job.classification_key = "Product Manager"
+    other_job = seed_job(db_session, job_id="job-class-other")
+    other_job.classification_key = "Designer"
+    resume = seed_resume(db_session, user=user, prompt_key="default")
+
+    matched_application = seed_application(db_session, user=user, job=matched_job, resume=resume, status="scored")
+    matched_application.score = 40
+    other_application = seed_application(db_session, user=user, job=other_job, resume=resume, status="scored")
+    other_application.score = 42
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=None,
+        classification_key="Product Manager",
+        status="scored",
+        score_min=None,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="score",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].id == matched_application.id
+    assert response.items[0].classification_key == "Product Manager"
+    assert response.items[0].id != other_application.id
 
 
 def test_run_applications_score_batch(db_session, monkeypatch):
@@ -805,7 +861,12 @@ def test_application_reads_include_job_context(db_session):
         resume_id=None,
         job_posting_id=None,
         status="scored",
-        score=None,
+        score_min=None,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="created_at",
+        sort_order="desc",
         limit=10,
         offset=0,
     )
@@ -821,6 +882,268 @@ def test_application_reads_include_job_context(db_session):
     assert fetched.job_id == "job-app-read"
     assert fetched.company_name == "Acme Labs"
     assert fetched.resume_name == "PM Resume"
+
+
+def test_jobs_list_supports_text_search_and_application_presence(db_session):
+    matched = seed_job(db_session, job_id="acme-role-1", source="linkedin")
+    matched.company_name = "Acme Labs"
+    matched.title = "Principal Product Manager"
+    matched.classification_key = "Product Manager"
+
+    other = seed_job(db_session, job_id="other-role-1", source="linkedin")
+    other.company_name = "Other Corp"
+    other.title = "Designer"
+    other.classification_key = None
+
+    user = seed_user(db_session, name="Search User", email="search-user@example.com")
+    resume = seed_resume(db_session, user=user, prompt_key="default")
+    seed_application(db_session, user=user, job=matched, resume=resume, status="new")
+    db_session.commit()
+
+    response = list_jobs(
+        db_session,
+        source="linkedin",
+        classification_key=None,
+        q="principal",
+        has_classification=True,
+        has_applications=True,
+        classified_since=None,
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].id == matched.id
+    assert response.items[0].job_id == "acme-role-1"
+    assert other.id != response.items[0].id
+
+
+def test_list_runs_filters_and_paginates(db_session):
+    first_job = seed_job(db_session, job_id="run-job-1")
+    second_job = seed_job(db_session, job_id="run-job-2")
+
+    old_run = seed_score_run(db_session, job=first_job, status="completed")
+    old_run.type = "application_scoring"
+    old_run.requested_status = "new"
+    old_run.prompt_key = "default"
+    old_run.callback_status = "delivered"
+    old_run.created_at = datetime.now(timezone.utc) - timedelta(days=2)
+    old_run.updated_at = old_run.created_at
+    old_item = db_session.scalar(select(app_module.RunItem).where(app_module.RunItem.run_id == old_run.id))
+    old_item.status = "scored"
+
+    new_run = seed_score_run(db_session, job=second_job, status="failed")
+    new_run.type = "classification"
+    new_run.requested_status = ""
+    new_run.requested_source = "linkedin"
+    new_run.classification_key = "Product Manager"
+    new_run.prompt_key = "classifier-v1"
+    new_run.callback_status = "failed"
+    new_run.created_at = datetime.now(timezone.utc)
+    new_run.updated_at = new_run.created_at
+    new_item = db_session.scalar(select(app_module.RunItem).where(app_module.RunItem.run_id == new_run.id))
+    new_item.status = "error"
+    new_item.error_message = "boom"
+    db_session.commit()
+
+    response = list_runs(
+        db_session,
+        type="classification",
+        status="failed",
+        requested_status="",
+        requested_source="linkedin",
+        classification_key="Product Manager",
+        prompt_key="classifier-v1",
+        callback_status="failed",
+        created_since=datetime.now(timezone.utc) - timedelta(hours=1),
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].run_id == new_run.id
+    assert response.items[0].errored == 1
+    assert response.items[0].jobs == [second_job.id]
+
+
+def test_list_run_applications_returns_joined_job_rows(db_session):
+    user = seed_user(db_session, name="Run View User", email="run-view-user@example.com")
+    job = seed_job(db_session, job_id="run-job-view")
+    job.company_name = "Acme Labs"
+    job.title = "Staff Product Manager"
+    job.classification_key = "Product Manager"
+    job.apply_url = "https://example.com/apply/1"
+    job.yearly_min_compensation = 180000
+    job.yearly_max_compensation = 220000
+    resume = seed_resume(db_session, user=user, name="PM Resume", prompt_key="default")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="scored")
+    application.score = 91
+    application.screening_likelihood = 72
+    application.recommendation = "Apply"
+    application.scored_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    run = seed_score_run(db_session, job=job, status="completed")
+    run.type = "application_scoring"
+    run_item = db_session.scalar(select(app_module.RunItem).where(app_module.RunItem.run_id == run.id))
+    run_item.job_application_id = application.id
+    run_item.status = "scored"
+    db_session.commit()
+
+    response = list_run_applications(
+        run.id,
+        db_session,
+        run_item_status=None,
+        score_min=None,
+        score_max=None,
+        sort_by="score",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].run_item_id == run_item.id
+    assert response.items[0].job_application_id == application.id
+    assert response.items[0].job_id == "run-job-view"
+    assert response.items[0].company_name == "Acme Labs"
+    assert response.items[0].title == "Staff Product Manager"
+    assert response.items[0].score == 91
+    assert response.items[0].screening_likelihood == 72
+    assert response.items[0].classification_key == "Product Manager"
+    assert response.items[0].apply_url == "https://example.com/apply/1"
+    assert response.items[0].yearly_min_compensation == 180000
+    assert response.items[0].yearly_max_compensation == 220000
+    assert response.items[0].resume_name == "PM Resume"
+
+
+def test_list_run_applications_supports_filters_and_sorting(db_session):
+    user = seed_user(db_session, name="Run Filter User", email="run-filter-user@example.com")
+    low_job = seed_job(db_session, job_id="run-job-low")
+    high_job = seed_job(db_session, job_id="run-job-high")
+    low_resume = seed_resume(db_session, user=user, name="Resume Low", prompt_key="default")
+    high_resume = seed_resume(db_session, user=user, name="Resume High", prompt_key="default")
+    low_application = seed_application(db_session, user=user, job=low_job, resume=low_resume, status="scored")
+    high_application = seed_application(db_session, user=user, job=high_job, resume=high_resume, status="scored")
+    low_application.score = 15
+    high_application.score = 55
+    db_session.commit()
+
+    run = seed_score_run(db_session, job=low_job, status="completed")
+    run.type = "application_scoring"
+    items = db_session.scalars(
+        select(app_module.RunItem).where(app_module.RunItem.run_id == run.id).order_by(app_module.RunItem.id.asc())
+    ).all()
+    low_item = items[0]
+    low_item.job_application_id = low_application.id
+    low_item.status = "error"
+
+    high_item = app_module.RunItem(
+        run_id=run.id,
+        type="application_scoring",
+        job_posting_id=high_job.id,
+        job_application_id=high_application.id,
+        status="scored",
+    )
+    db_session.add(high_item)
+    db_session.commit()
+
+    response = list_run_applications(
+        run.id,
+        db_session,
+        run_item_status="scored",
+        score_min=20,
+        score_max=None,
+        sort_by="score",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].job_application_id == high_application.id
+    assert response.items[0].score == 55
+
+    with pytest.raises(HTTPException, match="Unsupported run application sort field"):
+        list_run_applications(
+            run.id,
+            db_session,
+            run_item_status=None,
+            score_min=None,
+            score_max=None,
+            sort_by="resume_name",
+            sort_order="desc",
+            limit=10,
+            offset=0,
+        )
+
+    with pytest.raises(HTTPException, match="was not found"):
+        list_run_applications(
+            9999,
+            db_session,
+            run_item_status=None,
+            score_min=None,
+            score_max=None,
+            sort_by="score",
+            sort_order="desc",
+            limit=10,
+            offset=0,
+        )
+
+
+def test_list_applications_supports_dates_and_sorting(db_session):
+    user = seed_user(db_session, name="Sort User", email="sort-user@example.com")
+    job = seed_job(db_session, job_id="job-sort")
+    first_resume = seed_resume(db_session, user=user, name="Resume 1", prompt_key="default")
+    second_resume = seed_resume(db_session, user=user, name="Resume 2", prompt_key="default")
+
+    older = seed_application(db_session, user=user, job=job, resume=first_resume, status="scored")
+    older.score = 12
+    older.created_at = datetime.now(timezone.utc) - timedelta(days=2)
+    older.updated_at = older.created_at
+
+    newer = seed_application(db_session, user=user, job=job, resume=second_resume, status="scored")
+    newer.score = 42
+    newer.created_at = datetime.now(timezone.utc)
+    newer.updated_at = newer.created_at
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=job.id,
+        status="scored",
+        score_min=10,
+        score_max=50,
+        created_since=datetime.now(timezone.utc) - timedelta(days=1),
+        updated_since=datetime.now(timezone.utc) - timedelta(days=1),
+        sort_by="score",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].id == newer.id
+    assert response.items[0].score == 42
+
+    with pytest.raises(HTTPException, match="Unsupported application sort field"):
+        list_applications(
+            db_session,
+            user_id=user.id,
+            resume_id=None,
+            job_posting_id=None,
+            status=None,
+            score_min=None,
+            score_max=None,
+            created_since=None,
+            updated_since=None,
+            sort_by="company_name",
+            sort_order="desc",
+            limit=10,
+            offset=0,
+        )
 
 
 def test_prompt_library_crud(db_session):

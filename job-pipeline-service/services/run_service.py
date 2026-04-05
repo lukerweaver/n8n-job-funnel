@@ -134,40 +134,66 @@ def enqueue_classification_run(
 
 
 def get_run_counts(session, run_id: int) -> RunCounts:
+    return get_run_counts_bulk(session, [run_id])[run_id]
+
+
+def get_run_counts_bulk(session, run_ids: list[int]) -> dict[int, RunCounts]:
+    if not run_ids:
+        return {}
+
+    counts_by_run: dict[int, dict[str, int]] = {run_id: {} for run_id in run_ids}
+    job_ids_by_run: dict[int, list[int]] = {run_id: [] for run_id in run_ids}
+    application_ids_by_run: dict[int, list[int]] = {run_id: [] for run_id in run_ids}
+
     rows = session.execute(
-        select(RunItem.status, func.count())
-        .where(RunItem.run_id == run_id)
-        .group_by(RunItem.status)
+        select(RunItem.run_id, RunItem.status, func.count())
+        .where(RunItem.run_id.in_(run_ids))
+        .group_by(RunItem.run_id, RunItem.status)
     ).all()
-    counts = {status: count for status, count in rows}
-    job_ids = list(
-        session.scalars(
-            select(RunItem.job_posting_id)
-            .where(RunItem.run_id == run_id)
-            .where(RunItem.job_posting_id.is_not(None))
-            .order_by(RunItem.id.asc())
-        ).all()
-    )
-    application_ids = list(
-        session.scalars(
-            select(RunItem.job_application_id)
-            .where(RunItem.run_id == run_id)
-            .where(RunItem.job_application_id.is_not(None))
-            .order_by(RunItem.id.asc())
-        ).all()
-    )
-    return RunCounts(
-        processed=sum(counts.get(key, 0) for key in (*SUCCESS_STATUSES, "error", "skipped")),
-        succeeded=sum(counts.get(key, 0) for key in SUCCESS_STATUSES),
-        errored=counts.get("error", 0),
-        skipped=counts.get("skipped", 0),
-        jobs=job_ids,
-        applications=application_ids,
-    )
+
+    for run_id, status, count in rows:
+        counts_by_run.setdefault(run_id, {})[status] = count
+
+    for run_id, job_posting_id in session.execute(
+        select(RunItem.run_id, RunItem.job_posting_id)
+        .where(RunItem.run_id.in_(run_ids))
+        .where(RunItem.job_posting_id.is_not(None))
+        .order_by(RunItem.id.asc())
+    ).all():
+        job_ids_by_run.setdefault(run_id, []).append(job_posting_id)
+
+    for run_id, job_application_id in session.execute(
+        select(RunItem.run_id, RunItem.job_application_id)
+        .where(RunItem.run_id.in_(run_ids))
+        .where(RunItem.job_application_id.is_not(None))
+        .order_by(RunItem.id.asc())
+    ).all():
+        application_ids_by_run.setdefault(run_id, []).append(job_application_id)
+
+    return {
+        run_id: RunCounts(
+            processed=sum(counts_by_run[run_id].get(key, 0) for key in (*SUCCESS_STATUSES, "error", "skipped")),
+            succeeded=sum(counts_by_run[run_id].get(key, 0) for key in SUCCESS_STATUSES),
+            errored=counts_by_run[run_id].get("error", 0),
+            skipped=counts_by_run[run_id].get("skipped", 0),
+            jobs=job_ids_by_run[run_id],
+            applications=application_ids_by_run[run_id],
+        )
+        for run_id in run_ids
+    }
 
 
 def serialize_run(session, run: Run) -> dict:
-    counts = get_run_counts(session, run.id)
+    counts = get_run_counts_bulk(session, [run.id])[run.id]
+    return _serialize_run_from_counts(run, counts)
+
+
+def serialize_runs(session, runs: list[Run]) -> list[dict]:
+    counts_by_run = get_run_counts_bulk(session, [run.id for run in runs])
+    return [_serialize_run_from_counts(run, counts_by_run[run.id]) for run in runs]
+
+
+def _serialize_run_from_counts(run: Run, counts: RunCounts) -> dict:
     return {
         "run_id": run.id,
         "type": run.type,

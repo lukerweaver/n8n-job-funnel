@@ -9,8 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
-from sqlalchemy import select
-from sqlalchemy import inspect, text
+from sqlalchemy import asc, desc, exists, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, selectinload
 
@@ -50,8 +49,11 @@ from schemas import (
     ResumeListResponse,
     ResumeRead,
     ResumeUpdate,
+    RunApplicationsResponse,
+    RunApplicationRead,
     RunItemsResponse,
     RunItemRead,
+    RunListResponse,
     RunRead,
     UserCreate,
     UserListResponse,
@@ -69,6 +71,7 @@ from services.run_service import (
     serialize_application_score_run,
     serialize_classification_run,
     serialize_run,
+    serialize_runs,
 )
 from services.scoring_service import JobScoringSkipped, score_application
 
@@ -211,6 +214,7 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         yearly_min_compensation=job.yearly_min_compensation if job is not None else None,
         yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
         apply_url=job.apply_url if job is not None else None,
+        description=job.description if job is not None else None,
         classification_key=job.classification_key if job is not None else None,
         resume_name=resume.name if resume is not None else None,
         status=application.status,
@@ -340,6 +344,55 @@ def apply_application_status(application: JobApplication, payload: ApplicationSt
 
 def _get_run_by_id(session: Session, run_id: int) -> Run | None:
     return session.get(Run, run_id)
+
+
+def _normalize_text_search(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _resolve_application_sort(
+    sort_by: str,
+    sort_order: str,
+):
+    normalized_order = sort_order.lower()
+    allowed_fields = {
+        "created_at": JobApplication.created_at,
+        "updated_at": JobApplication.updated_at,
+        "score": JobApplication.score,
+        "status": JobApplication.status,
+        "scored_at": JobApplication.scored_at,
+    }
+    column = allowed_fields.get(sort_by)
+    if column is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported application sort field '{sort_by}'")
+    if normalized_order not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported application sort order '{sort_order}'")
+    return asc(column) if normalized_order == "asc" else desc(column)
+
+
+def _resolve_run_application_sort(
+    sort_by: str,
+    sort_order: str,
+):
+    normalized_order = sort_order.lower()
+    allowed_fields = {
+        "score": JobApplication.score,
+        "screening_likelihood": JobApplication.screening_likelihood,
+        "company_name": JobPosting.company_name,
+        "title": JobPosting.title,
+        "classification_key": JobPosting.classification_key,
+        "scored_at": JobApplication.scored_at,
+        "created_at": RunItem.created_at,
+    }
+    column = allowed_fields.get(sort_by)
+    if column is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported run application sort field '{sort_by}'")
+    if normalized_order not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported run application sort order '{sort_order}'")
+    return asc(column) if normalized_order == "asc" else desc(column)
 
 
 def _commit_or_fail(session: Session) -> None:
@@ -621,14 +674,18 @@ def ingest_jobs(
 @app.get("/jobs", response_model=JobListResponse, tags=["jobs"])
 def list_jobs(
     session: Session = Depends(get_session),
-    source: str | None = Query(default=None),
-    classification_key: str | None = Query(default=None),
-    classified_since: datetime | None = Query(default=None),
+    source: str | None = None,
+    classification_key: str | None = None,
+    q: str | None = None,
+    has_classification: bool | None = None,
+    has_applications: bool | None = None,
+    classified_since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     query = select(JobPosting).order_by(JobPosting.created_at.desc())
     count_query = select(JobPosting)
+    search_term = _normalize_text_search(q)
 
     if source:
         query = query.where(JobPosting.source == source)
@@ -637,6 +694,34 @@ def list_jobs(
     if classification_key:
         query = query.where(JobPosting.classification_key == classification_key)
         count_query = count_query.where(JobPosting.classification_key == classification_key)
+
+    if search_term is not None:
+        pattern = f"%{search_term}%"
+        search_filter = or_(
+            JobPosting.job_id.ilike(pattern),
+            JobPosting.company_name.ilike(pattern),
+            JobPosting.title.ilike(pattern),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    if has_classification is True:
+        query = query.where(JobPosting.classification_key.is_not(None))
+        count_query = count_query.where(JobPosting.classification_key.is_not(None))
+    elif has_classification is False:
+        query = query.where(JobPosting.classification_key.is_(None))
+        count_query = count_query.where(JobPosting.classification_key.is_(None))
+
+    if has_applications is not None:
+        application_exists = exists(
+            select(JobApplication.id).where(JobApplication.job_posting_id == JobPosting.id)
+        )
+        if has_applications:
+            query = query.where(application_exists)
+            count_query = count_query.where(application_exists)
+        else:
+            query = query.where(~application_exists)
+            count_query = count_query.where(~application_exists)
 
     if classified_since is not None:
         query = query.where(JobPosting.classified_at.is_not(None), JobPosting.classified_at > classified_since)
@@ -694,6 +779,53 @@ def run_jobs_classification(payload: JobsClassificationRunRequest, session: Sess
     return JobsClassificationRunResponse(**serialize_classification_run(session, run))
 
 
+@app.get("/runs", response_model=RunListResponse, tags=["runs"])
+def list_runs(
+    session: Session = Depends(get_session),
+    type: str | None = None,
+    status: str | None = None,
+    requested_status: str | None = None,
+    requested_source: str | None = None,
+    classification_key: str | None = None,
+    prompt_key: str | None = None,
+    callback_status: str | None = None,
+    created_since: datetime | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    query = select(Run).order_by(Run.created_at.desc())
+    count_query = select(Run)
+
+    if type:
+        query = query.where(Run.type == type)
+        count_query = count_query.where(Run.type == type)
+    if status:
+        query = query.where(Run.status == status)
+        count_query = count_query.where(Run.status == status)
+    if requested_status is not None:
+        query = query.where(Run.requested_status == requested_status)
+        count_query = count_query.where(Run.requested_status == requested_status)
+    if requested_source:
+        query = query.where(Run.requested_source == requested_source)
+        count_query = count_query.where(Run.requested_source == requested_source)
+    if classification_key:
+        query = query.where(Run.classification_key == classification_key)
+        count_query = count_query.where(Run.classification_key == classification_key)
+    if prompt_key:
+        query = query.where(Run.prompt_key == prompt_key)
+        count_query = count_query.where(Run.prompt_key == prompt_key)
+    if callback_status:
+        query = query.where(Run.callback_status == callback_status)
+        count_query = count_query.where(Run.callback_status == callback_status)
+    if created_since is not None:
+        query = query.where(Run.created_at > created_since)
+        count_query = count_query.where(Run.created_at > created_since)
+
+    items = session.scalars(query.offset(offset).limit(limit)).all()
+    total = len(session.scalars(count_query).all())
+    return RunListResponse(total=total, items=[RunRead(**payload) for payload in serialize_runs(session, items)])
+
+
 @app.get("/runs/{run_id}", response_model=RunRead, tags=["runs"])
 def get_run(run_id: int, session: Session = Depends(get_session)):
     run = _get_run_by_id(session, run_id)
@@ -701,6 +833,78 @@ def get_run(run_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found")
 
     return RunRead(**serialize_run(session, run))
+
+
+@app.get("/runs/{run_id}/applications", response_model=RunApplicationsResponse, tags=["runs"])
+def list_run_applications(
+    run_id: int,
+    session: Session = Depends(get_session),
+    run_item_status: str | None = None,
+    score_min: float | None = None,
+    score_max: float | None = None,
+    sort_by: str = "score",
+    sort_order: str = "desc",
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    run = _get_run_by_id(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' was not found")
+
+    order_by = _resolve_run_application_sort(sort_by, sort_order)
+    secondary_order = asc(RunItem.id) if sort_order.lower() == "asc" else desc(RunItem.id)
+    query = (
+        select(RunItem, JobApplication, JobPosting, Resume)
+        .join(JobApplication, RunItem.job_application_id == JobApplication.id)
+        .join(JobPosting, JobApplication.job_posting_id == JobPosting.id)
+        .join(Resume, JobApplication.resume_id == Resume.id)
+        .where(RunItem.run_id == run_id)
+        .order_by(order_by, secondary_order)
+    )
+    count_query = (
+        select(RunItem.id)
+        .join(JobApplication, RunItem.job_application_id == JobApplication.id)
+        .where(RunItem.run_id == run_id)
+    )
+
+    if run_item_status:
+        query = query.where(RunItem.status == run_item_status)
+        count_query = count_query.where(RunItem.status == run_item_status)
+    if score_min is not None:
+        query = query.where(JobApplication.score.is_not(None), JobApplication.score >= score_min)
+        count_query = count_query.where(JobApplication.score.is_not(None), JobApplication.score >= score_min)
+    if score_max is not None:
+        query = query.where(JobApplication.score.is_not(None), JobApplication.score <= score_max)
+        count_query = count_query.where(JobApplication.score.is_not(None), JobApplication.score <= score_max)
+
+    rows = session.execute(query.offset(offset).limit(limit)).all()
+    total = len(session.scalars(count_query).all())
+    return RunApplicationsResponse(
+        total=total,
+        items=[
+            RunApplicationRead(
+                run_item_id=item.id,
+                run_item_status=item.status,
+                run_item_error_message=item.error_message,
+                job_application_id=application.id,
+                job_posting_id=job.id,
+                resume_id=resume.id,
+                job_id=job.job_id,
+                company_name=job.company_name,
+                title=job.title,
+                score=application.score,
+                screening_likelihood=application.screening_likelihood,
+                classification_key=job.classification_key,
+                apply_url=job.apply_url,
+                yearly_min_compensation=job.yearly_min_compensation,
+                yearly_max_compensation=job.yearly_max_compensation,
+                recommendation=application.recommendation,
+                resume_name=resume.name,
+                scored_at=application.scored_at,
+            )
+            for item, application, job, resume in rows
+        ],
+    )
 
 
 @app.get("/runs/{run_id}/items", response_model=RunItemsResponse, tags=["runs"])
@@ -841,18 +1045,26 @@ def update_resume(resume_id: int, payload: ResumeUpdate, session: Session = Depe
 @app.get("/applications", response_model=JobApplicationListResponse, tags=["applications"])
 def list_applications(
     session: Session = Depends(get_session),
-    user_id: int | None = Query(default=None),
-    resume_id: int | None = Query(default=None),
-    job_posting_id: int | None = Query(default=None),
-    status: str | None = Query(default=None),
-    score: float | None = None,
+    user_id: int | None = None,
+    resume_id: int | None = None,
+    job_posting_id: int | None = None,
+    classification_key: str | None = None,
+    status: str | None = None,
+    score_min: float | None = None,
+    score_max: float | None = None,
+    created_since: datetime | None = None,
+    updated_since: datetime | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
+    order_by = _resolve_application_sort(sort_by, sort_order)
+    secondary_order = asc(JobApplication.id) if sort_order.lower() == "asc" else desc(JobApplication.id)
     query = (
         select(JobApplication)
         .options(selectinload(JobApplication.job_posting), selectinload(JobApplication.resume))
-        .order_by(JobApplication.created_at.desc())
+        .order_by(order_by, secondary_order)
     )
     count_query = select(JobApplication)
     if user_id is not None:
@@ -864,12 +1076,28 @@ def list_applications(
     if job_posting_id is not None:
         query = query.where(JobApplication.job_posting_id == job_posting_id)
         count_query = count_query.where(JobApplication.job_posting_id == job_posting_id)
+    if classification_key:
+        query = query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id).where(
+            JobPosting.classification_key == classification_key
+        )
+        count_query = count_query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id).where(
+            JobPosting.classification_key == classification_key
+        )
     if status:
         query = query.where(JobApplication.status == status)
         count_query = count_query.where(JobApplication.status == status)
-    if score is not None:
-        query = query.where(JobApplication.score.is_not(None), JobApplication.score >= score)
-        count_query = count_query.where(JobApplication.score.is_not(None), JobApplication.score >= score)
+    if score_min is not None:
+        query = query.where(JobApplication.score.is_not(None), JobApplication.score >= score_min)
+        count_query = count_query.where(JobApplication.score.is_not(None), JobApplication.score >= score_min)
+    if score_max is not None:
+        query = query.where(JobApplication.score.is_not(None), JobApplication.score <= score_max)
+        count_query = count_query.where(JobApplication.score.is_not(None), JobApplication.score <= score_max)
+    if created_since is not None:
+        query = query.where(JobApplication.created_at > created_since)
+        count_query = count_query.where(JobApplication.created_at > created_since)
+    if updated_since is not None:
+        query = query.where(JobApplication.updated_at > updated_since)
+        count_query = count_query.where(JobApplication.updated_at > updated_since)
     items = session.scalars(query.offset(offset).limit(limit)).all()
     total = len(session.scalars(count_query).all())
     return JobApplicationListResponse(total=total, items=[_serialize_application(item) for item in items])

@@ -28,6 +28,10 @@ const POST_ENDPOINT = 'http://localhost:8000/jobs/ingest';
 
 By default the extension posts to a local API on port `8000`.
 
+If you run the stack with the repository root `docker-compose-example.yml`, the API remains available at `http://localhost:8000` and the internal UI is available at `http://localhost:8080`.
+
+The extension only talks to the API. It does not depend on the UX service directly.
+
 ## Setup
 
 1. Start the API.
