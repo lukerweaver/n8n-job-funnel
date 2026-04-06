@@ -719,6 +719,42 @@ def test_list_applications_filters_by_recommendation(db_session):
     assert response.items[0].id != other.id
 
 
+def test_list_applications_normalizes_legacy_scoring_json_shapes(db_session):
+    user = seed_user(db_session, name="Legacy JSON", email="legacy-json@example.com")
+    job = seed_job(db_session, job_id="job-legacy-json")
+    resume = seed_resume(db_session, user=user, prompt_key="default")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="scored")
+    application.missing_from_jd = "Direct experience in crypto-driven personalization."
+    application.gaps = "No explicit marketplace ownership."
+    application.gating_flags = "Needs sponsorship"
+    application.dimension_scores = {"domain_fit": 4, "invalid": "high"}
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=None,
+        classification_key=None,
+        recommendation=None,
+        status="scored",
+        score_min=None,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="created_at",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].missing_from_jd == ["Direct experience in crypto-driven personalization."]
+    assert response.items[0].gaps == ["No explicit marketplace ownership."]
+    assert response.items[0].gating_flags == ["Needs sponsorship"]
+    assert response.items[0].dimension_scores == {"domain_fit": 4.0}
+
+
 def test_run_applications_score_batch(db_session, monkeypatch):
     user = seed_user(db_session, name="Gina", email="gina@example.com")
     job = seed_job(db_session, job_id="job-batch")

@@ -199,6 +199,39 @@ def _select_resumes_for_job_generation(
     return classification_resumes
 
 
+def _normalize_list_or_dict_json(value: object) -> list | dict | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, dict)):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else None
+    return None
+
+
+def _normalize_string_list_json(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)] or None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else None
+    return None
+
+
+def _normalize_float_dict_json(value: object) -> dict[str, float] | None:
+    if not isinstance(value, dict):
+        return None
+
+    normalized: dict[str, float] = {}
+    for key, item in value.items():
+        if isinstance(key, str) and isinstance(item, (int, float)):
+            normalized[key] = float(item)
+    return normalized or None
+
+
 def _serialize_application(application: JobApplication) -> JobApplicationRead:
     job = application.job_posting
     resume = application.resume
@@ -222,11 +255,11 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         recommendation=application.recommendation,
         justification=application.justification,
         screening_likelihood=application.screening_likelihood,
-        dimension_scores=application.dimension_scores,
-        gating_flags=application.gating_flags,
-        strengths=application.strengths,
-        gaps=application.gaps,
-        missing_from_jd=application.missing_from_jd,
+        dimension_scores=_normalize_float_dict_json(application.dimension_scores),
+        gating_flags=_normalize_string_list_json(application.gating_flags),
+        strengths=_normalize_list_or_dict_json(application.strengths),
+        gaps=_normalize_list_or_dict_json(application.gaps),
+        missing_from_jd=_normalize_list_or_dict_json(application.missing_from_jd),
         scoring_prompt_key=application.scoring_prompt_key,
         scoring_prompt_version=application.scoring_prompt_version,
         score_error=application.score_error,
