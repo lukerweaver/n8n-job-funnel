@@ -8,6 +8,7 @@ import type { JobApplication } from "../types";
 import { formatDate, moneyRange, renderListish } from "../utils";
 
 const APPLICATION_STATUSES = ["", "scored", "new", "tailored", "notified", "applied", "screening", "interview", "offer", "rejected", "withdrawn"];
+const APPLICATION_RECOMMENDATIONS = ["", "Strong Apply", "Apply", "Selective Apply", "Pass"];
 const DEFAULT_LIMIT = 25;
 
 interface JobDescriptionFormState {
@@ -237,6 +238,20 @@ export function ApplicationsPage() {
               {APPLICATION_STATUSES.map((status) => (
                 <option key={status || "all"} value={status}>
                   {status || "All"}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Recommendation
+            <select
+              value={params.get("recommendation") ?? ""}
+              onChange={(event) => updateParam("recommendation", event.target.value)}
+            >
+              {APPLICATION_RECOMMENDATIONS.map((recommendation) => (
+                <option key={recommendation || "all"} value={recommendation}>
+                  {recommendation || "All"}
                 </option>
               ))}
             </select>

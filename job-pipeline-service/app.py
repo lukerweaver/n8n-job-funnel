@@ -1049,6 +1049,7 @@ def list_applications(
     resume_id: int | None = None,
     job_posting_id: int | None = None,
     classification_key: str | None = None,
+    recommendation: str | None = None,
     status: str | None = None,
     score_min: float | None = None,
     score_max: float | None = None,
@@ -1083,6 +1084,9 @@ def list_applications(
         count_query = count_query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id).where(
             JobPosting.classification_key == classification_key
         )
+    if recommendation:
+        query = query.where(JobApplication.recommendation == recommendation)
+        count_query = count_query.where(JobApplication.recommendation == recommendation)
     if status:
         query = query.where(JobApplication.status == status)
         count_query = count_query.where(JobApplication.status == status)
