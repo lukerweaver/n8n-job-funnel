@@ -1,14 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { getApplications } from "../api";
+import { createJobDescription, getApplications } from "../api";
 import { DetailModal } from "../components/DetailModal";
 import { PaginationControls } from "../components/PaginationControls";
 import type { JobApplication } from "../types";
 import { formatDate, moneyRange, renderListish } from "../utils";
 
 const APPLICATION_STATUSES = ["", "scored", "new", "tailored", "notified", "applied", "screening", "interview", "offer", "rejected", "withdrawn"];
+const APPLICATION_RECOMMENDATIONS = ["", "Strong Apply", "Apply", "Selective Apply", "Pass"];
 const DEFAULT_LIMIT = 25;
+
+interface JobDescriptionFormState {
+  company_name: string;
+  title: string;
+  apply_url: string;
+  description: string;
+}
+
+const EMPTY_JOB_DESCRIPTION_FORM: JobDescriptionFormState = {
+  company_name: "",
+  title: "",
+  apply_url: "",
+  description: "",
+};
+
+function buildManualJobId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `manual-${crypto.randomUUID()}`;
+  }
+
+  return `manual-${Date.now()}`;
+}
 
 export function ApplicationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -18,6 +41,11 @@ export function ApplicationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<JobApplication | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [isCreatingJobDescription, setIsCreatingJobDescription] = useState(false);
+  const [jobDescriptionForm, setJobDescriptionForm] = useState<JobDescriptionFormState>(EMPTY_JOB_DESCRIPTION_FORM);
+  const [jobDescriptionSubmitError, setJobDescriptionSubmitError] = useState<string | null>(null);
+  const [jobDescriptionSuccess, setJobDescriptionSuccess] = useState<string | null>(null);
+  const [submittingJobDescription, setSubmittingJobDescription] = useState(false);
 
   const params = useMemo(() => {
     const next = new URLSearchParams(searchParams);
@@ -116,6 +144,13 @@ export function ApplicationsPage() {
     setCopyState("idle");
   }, [selected]);
 
+  useEffect(() => {
+    if (!isCreatingJobDescription) {
+      setJobDescriptionForm(EMPTY_JOB_DESCRIPTION_FORM);
+      setJobDescriptionSubmitError(null);
+    }
+  }, [isCreatingJobDescription]);
+
   async function handleCopyDescription() {
     if (!selected?.description) {
       setCopyState("error");
@@ -142,6 +177,42 @@ export function ApplicationsPage() {
     }
   }
 
+  function openCreateJobDescriptionModal() {
+    setJobDescriptionSuccess(null);
+    setJobDescriptionSubmitError(null);
+    setJobDescriptionForm(EMPTY_JOB_DESCRIPTION_FORM);
+    setIsCreatingJobDescription(true);
+  }
+
+  async function handleCreateJobDescription(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmittingJobDescription(true);
+    setJobDescriptionSubmitError(null);
+    setJobDescriptionSuccess(null);
+
+    const payload = {
+      job_id: buildManualJobId(),
+      company_name: jobDescriptionForm.company_name.trim() || null,
+      title: jobDescriptionForm.title.trim() || null,
+      apply_url: jobDescriptionForm.apply_url.trim() || null,
+      description: jobDescriptionForm.description.trim(),
+      source: "manual-entry",
+    };
+
+    try {
+      const response = await createJobDescription(payload);
+      setIsCreatingJobDescription(false);
+      setJobDescriptionForm(EMPTY_JOB_DESCRIPTION_FORM);
+      setJobDescriptionSuccess(`Created job description ${response.jobs[0] ?? payload.job_id}.`);
+    } catch (requestError) {
+      setJobDescriptionSubmitError(
+        requestError instanceof Error ? requestError.message : "Unable to create job description.",
+      );
+    } finally {
+      setSubmittingJobDescription(false);
+    }
+  }
+
   return (
     <section className="page-grid">
       <div className="page-header">
@@ -149,8 +220,15 @@ export function ApplicationsPage() {
           <p className="eyebrow">Page 1</p>
           <h2>Scored Applications</h2>
         </div>
-        <div className="stat-chip">{total} matching rows</div>
+        <div className="page-actions">
+          <div className="stat-chip">{total} matching rows</div>
+          <button type="button" className="primary-button" onClick={openCreateJobDescriptionModal}>
+            Add Job Description
+          </button>
+        </div>
       </div>
+
+      {jobDescriptionSuccess ? <p className="success-callout">{jobDescriptionSuccess}</p> : null}
 
       <div className="panel filter-panel">
         <div className="filter-grid">
@@ -160,6 +238,20 @@ export function ApplicationsPage() {
               {APPLICATION_STATUSES.map((status) => (
                 <option key={status || "all"} value={status}>
                   {status || "All"}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Recommendation
+            <select
+              value={params.get("recommendation") ?? ""}
+              onChange={(event) => updateParam("recommendation", event.target.value)}
+            >
+              {APPLICATION_RECOMMENDATIONS.map((recommendation) => (
+                <option key={recommendation || "all"} value={recommendation}>
+                  {recommendation || "All"}
                 </option>
               ))}
             </select>
@@ -388,6 +480,78 @@ export function ApplicationsPage() {
               {copyState === "error" ? <span className="inline-feedback error-text">Unable to copy.</span> : null}
             </div>
           </div>
+        </DetailModal>
+      ) : null}
+
+      {isCreatingJobDescription ? (
+        <DetailModal
+          title="New Job Description"
+          subtitle="Create a manual job posting from the applications page"
+          onClose={() => setIsCreatingJobDescription(false)}
+        >
+          <form className="editor-form" onSubmit={handleCreateJobDescription}>
+            <div className="inline-form-grid">
+              <label>
+                Company Name
+                <input
+                  type="text"
+                  value={jobDescriptionForm.company_name}
+                  onChange={(event) =>
+                    setJobDescriptionForm((current) => ({ ...current, company_name: event.target.value }))
+                  }
+                  placeholder="Acme Corp"
+                />
+              </label>
+
+              <label>
+                Job Title
+                <input
+                  type="text"
+                  value={jobDescriptionForm.title}
+                  onChange={(event) => setJobDescriptionForm((current) => ({ ...current, title: event.target.value }))}
+                  placeholder="Senior Product Manager"
+                />
+              </label>
+            </div>
+
+            <label>
+              Apply URL
+              <input
+                type="url"
+                value={jobDescriptionForm.apply_url}
+                onChange={(event) => setJobDescriptionForm((current) => ({ ...current, apply_url: event.target.value }))}
+                placeholder="https://example.com/jobs/123"
+              />
+            </label>
+
+            <label>
+              Job Description
+              <textarea
+                className="editor-textarea"
+                value={jobDescriptionForm.description}
+                onChange={(event) =>
+                  setJobDescriptionForm((current) => ({ ...current, description: event.target.value }))
+                }
+                required
+              />
+            </label>
+
+            {jobDescriptionSubmitError ? <p className="error-callout">{jobDescriptionSubmitError}</p> : null}
+
+            <div className="form-actions">
+              <button type="submit" className="primary-button" disabled={submittingJobDescription}>
+                {submittingJobDescription ? "Creating..." : "Create Job Description"}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setIsCreatingJobDescription(false)}
+                disabled={submittingJobDescription}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
         </DetailModal>
       ) : null}
     </section>

@@ -453,6 +453,15 @@ textarea {
   color: var(--danger);
 }
 
+.success-callout {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

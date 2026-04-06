@@ -626,6 +626,8 @@ def test_list_applications_filters_by_score(db_session):
         user_id=user.id,
         resume_id=None,
         job_posting_id=job.id,
+        classification_key=None,
+        recommendation=None,
         status="scored",
         score_min=20,
         score_max=None,
@@ -661,6 +663,7 @@ def test_list_applications_filters_by_classification_key(db_session):
         resume_id=None,
         job_posting_id=None,
         classification_key="Product Manager",
+        recommendation=None,
         status="scored",
         score_min=None,
         score_max=None,
@@ -676,6 +679,80 @@ def test_list_applications_filters_by_classification_key(db_session):
     assert response.items[0].id == matched_application.id
     assert response.items[0].classification_key == "Product Manager"
     assert response.items[0].id != other_application.id
+
+
+def test_list_applications_filters_by_recommendation(db_session):
+    user = seed_user(db_session, name="Rec Filter", email="rec-filter@example.com")
+    job = seed_job(db_session, job_id="job-rec-filter")
+    resume = seed_resume(db_session, user=user, name="Resume A", prompt_key="default")
+    matched = seed_application(db_session, user=user, job=job, resume=resume, status="scored")
+    matched.score = 88
+    matched.recommendation = "Strong Apply"
+
+    other_resume = seed_resume(db_session, user=user, name="Resume B", prompt_key="default")
+    other = seed_application(db_session, user=user, job=job, resume=other_resume, status="scored")
+    other.score = 72
+    other.recommendation = "Selective Apply"
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=None,
+        classification_key=None,
+        recommendation="Strong Apply",
+        status="scored",
+        score_min=None,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="score",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].id == matched.id
+    assert response.items[0].recommendation == "Strong Apply"
+    assert response.items[0].id != other.id
+
+
+def test_list_applications_normalizes_legacy_scoring_json_shapes(db_session):
+    user = seed_user(db_session, name="Legacy JSON", email="legacy-json@example.com")
+    job = seed_job(db_session, job_id="job-legacy-json")
+    resume = seed_resume(db_session, user=user, prompt_key="default")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="scored")
+    application.missing_from_jd = "Direct experience in crypto-driven personalization."
+    application.gaps = "No explicit marketplace ownership."
+    application.gating_flags = "Needs sponsorship"
+    application.dimension_scores = {"domain_fit": 4, "invalid": "high"}
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=None,
+        classification_key=None,
+        recommendation=None,
+        status="scored",
+        score_min=None,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="created_at",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].missing_from_jd == ["Direct experience in crypto-driven personalization."]
+    assert response.items[0].gaps == ["No explicit marketplace ownership."]
+    assert response.items[0].gating_flags == ["Needs sponsorship"]
+    assert response.items[0].dimension_scores == {"domain_fit": 4.0}
 
 
 def test_run_applications_score_batch(db_session, monkeypatch):
