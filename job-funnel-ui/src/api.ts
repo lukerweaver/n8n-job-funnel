@@ -1,5 +1,6 @@
 import type {
   JobApplicationListResponse,
+  JobIngestResponse,
   PromptLibrary,
   PromptLibraryListResponse,
   Resume,
@@ -62,6 +63,17 @@ async function sendJson<T>(path: string, method: "POST" | "PUT" | "DELETE", body
 
 export function getApplications(params: URLSearchParams) {
   return fetchJson<JobApplicationListResponse>("/applications", params);
+}
+
+export function createJobDescription(payload: {
+  job_id: string;
+  company_name?: string | null;
+  title?: string | null;
+  apply_url?: string | null;
+  description: string;
+  source?: string;
+}) {
+  return sendJson<JobIngestResponse>("/jobs/ingest", "POST", payload);
 }
 
 export function getRuns(params: URLSearchParams) {

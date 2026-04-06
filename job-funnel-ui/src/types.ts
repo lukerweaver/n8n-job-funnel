@@ -59,6 +59,14 @@ export interface JobApplicationListResponse {
   items: JobApplication[];
 }
 
+export interface JobIngestResponse {
+  received: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  jobs: string[];
+}
+
 export interface Run {
   run_id: number;
   type: string;
