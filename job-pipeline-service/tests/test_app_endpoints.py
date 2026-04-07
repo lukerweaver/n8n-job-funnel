@@ -1668,6 +1668,31 @@ def test_list_applications_filters_active_status_group(db_session):
     assert {item.status for item in response.items} == {"applied", "screening"}
 
 
+def test_list_applications_filters_by_text_search(db_session):
+    user = seed_user(db_session, name="Bea", email="bea@example.com")
+    resume = seed_resume(db_session, user=user, name="Base", prompt_key="default")
+
+    matched_job = seed_job(db_session, job_id="job-search-1")
+    matched_job.company_name = "Acme Robotics"
+    matched_job.title = "Senior Product Manager"
+
+    other_job = seed_job(db_session, job_id="job-search-2")
+    other_job.company_name = "Northwind"
+    other_job.title = "Designer"
+    db_session.commit()
+
+    seed_application(db_session, user=user, job=matched_job, resume=resume, status="applied")
+    seed_application(db_session, user=user, job=other_job, resume=resume, status="applied")
+
+    by_company = list_applications(db_session, user_id=user.id, q="Acme")
+    by_title = list_applications(db_session, user_id=user.id, q="Product Manager")
+
+    assert by_company.total == 1
+    assert by_company.items[0].company_name == "Acme Robotics"
+    assert by_title.total == 1
+    assert by_title.items[0].title == "Senior Product Manager"
+
+
 def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
     prompt_executed = []
     resume_executed = []

@@ -1182,6 +1182,7 @@ def list_applications(
     user_id: int | None = None,
     resume_id: int | None = None,
     job_posting_id: int | None = None,
+    q: str | None = None,
     classification_key: str | None = None,
     recommendation: str | None = None,
     status: str | None = None,
@@ -1197,6 +1198,7 @@ def list_applications(
 ):
     order_by = _resolve_application_sort(sort_by, sort_order)
     secondary_order = asc(JobApplication.id) if sort_order.lower() == "asc" else desc(JobApplication.id)
+    search_term = _normalize_text_search(q)
     query = (
         select(JobApplication)
         .options(
@@ -1207,6 +1209,16 @@ def list_applications(
         .order_by(order_by, secondary_order)
     )
     count_query = select(JobApplication)
+    joined_job_posting = False
+
+    def join_job_posting() -> None:
+        nonlocal query, count_query, joined_job_posting
+        if joined_job_posting:
+            return
+        query = query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id)
+        count_query = count_query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id)
+        joined_job_posting = True
+
     if user_id is not None:
         query = query.where(JobApplication.user_id == user_id)
         count_query = count_query.where(JobApplication.user_id == user_id)
@@ -1216,13 +1228,20 @@ def list_applications(
     if job_posting_id is not None:
         query = query.where(JobApplication.job_posting_id == job_posting_id)
         count_query = count_query.where(JobApplication.job_posting_id == job_posting_id)
+    if search_term is not None:
+        join_job_posting()
+        pattern = f"%{search_term}%"
+        search_filter = or_(
+            JobPosting.company_name.ilike(pattern),
+            JobPosting.title.ilike(pattern),
+            JobPosting.job_id.ilike(pattern),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
     if classification_key:
-        query = query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id).where(
-            JobPosting.classification_key == classification_key
-        )
-        count_query = count_query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id).where(
-            JobPosting.classification_key == classification_key
-        )
+        join_job_posting()
+        query = query.where(JobPosting.classification_key == classification_key)
+        count_query = count_query.where(JobPosting.classification_key == classification_key)
     if recommendation:
         query = query.where(JobApplication.recommendation == recommendation)
         count_query = count_query.where(JobApplication.recommendation == recommendation)

@@ -203,6 +203,16 @@ export function ApplicationsPage() {
       <div className="panel filter-panel">
         <div className="filter-grid">
           <label>
+            Search
+            <input
+              type="text"
+              value={params.get("q") ?? ""}
+              onChange={(event) => updateParam("q", event.target.value)}
+              placeholder="Company, title, or job id"
+            />
+          </label>
+
+          <label>
             Status
             <select value={params.get("status") ?? ""} onChange={(event) => updateParam("status", event.target.value)}>
               {APPLICATION_STATUSES.map((status) => (

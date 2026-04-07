@@ -130,6 +130,16 @@ export function ActiveApplicationsPage() {
       <div className="panel filter-panel">
         <div className="filter-grid">
           <label>
+            Search
+            <input
+              type="text"
+              value={params.get("q") ?? ""}
+              onChange={(event) => updateParam("q", event.target.value)}
+              placeholder="Company, title, or job id"
+            />
+          </label>
+
+          <label>
             User ID
             <input
               type="number"
