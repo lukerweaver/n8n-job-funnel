@@ -44,6 +44,7 @@ from app import (
     run_jobs_classification,
     store_application_score,
     update_application_status,
+    update_application_lifecycle_dates,
     update_interview_round,
     update_resume,
     update_prompt_library,
@@ -53,6 +54,7 @@ from schemas import (
     ApplicationCreate,
     ApplicationErrorWrite,
     ApplicationGenerateRequest,
+    ApplicationLifecycleDatesUpdate,
     ApplicationNotificationWrite,
     ApplicationScoreRunRequest,
     ApplicationScoreWrite,
@@ -1182,6 +1184,50 @@ def test_list_run_applications_supports_filters_and_sorting(db_session):
         )
 
 
+def test_list_run_applications_hides_error_status_rows(db_session):
+    user = seed_user(db_session, name="Run Hidden User", email="run-hidden-user@example.com")
+    visible_job = seed_job(db_session, job_id="run-job-visible")
+    hidden_job = seed_job(db_session, job_id="run-job-hidden")
+    resume = seed_resume(db_session, user=user, name="Resume", prompt_key="default")
+    visible_application = seed_application(db_session, user=user, job=visible_job, resume=resume, status="scored")
+    hidden_application = seed_application(db_session, user=user, job=hidden_job, resume=resume, status="scored")
+    hidden_application.status = "error"
+    db_session.commit()
+
+    run = seed_score_run(db_session, job=visible_job, status="completed")
+    items = db_session.scalars(
+        select(app_module.RunItem).where(app_module.RunItem.run_id == run.id).order_by(app_module.RunItem.id.asc())
+    ).all()
+    visible_item = items[0]
+    visible_item.job_application_id = visible_application.id
+    visible_item.status = "scored"
+
+    hidden_item = app_module.RunItem(
+        run_id=run.id,
+        type="application_scoring",
+        job_posting_id=hidden_job.id,
+        job_application_id=hidden_application.id,
+        status="scored",
+    )
+    db_session.add(hidden_item)
+    db_session.commit()
+
+    response = list_run_applications(
+        run.id,
+        db_session,
+        run_item_status=None,
+        score_min=None,
+        score_max=None,
+        sort_by="score",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert all(item.job_application_id != hidden_application.id for item in response.items)
+
+
 def test_list_applications_supports_dates_and_sorting(db_session):
     user = seed_user(db_session, name="Sort User", email="sort-user@example.com")
     job = seed_job(db_session, job_id="job-sort")
@@ -1602,15 +1648,16 @@ def test_validate_application_entities_error_paths(db_session):
 
 
 @pytest.mark.parametrize(
-    ("status", "timestamp_field"),
+    ("starting_status", "status", "timestamp_field"),
     [
-        ("offer", "offer_at"),
-        ("rejected", "rejected_at"),
-        ("withdrawn", "withdrawn_at"),
+        ("applied", "screening", "screening_at"),
+        ("interview", "offer", "offer_at"),
+        ("interview", "rejected", "rejected_at"),
+        ("interview", "withdrawn", "withdrawn_at"),
     ],
 )
-def test_apply_application_status_sets_terminal_timestamps(status, timestamp_field):
-    application = JobApplication(status="interview")
+def test_apply_application_status_sets_terminal_timestamps(starting_status, status, timestamp_field):
+    application = JobApplication(status=starting_status)
 
     app_module.apply_application_status(application, ApplicationStatusWrite(status=status))
 
@@ -1652,6 +1699,50 @@ def test_apply_application_status_rejects_invalid_transition():
         app_module.apply_application_status(application, ApplicationStatusWrite(status="screening"))
 
 
+def test_apply_application_status_preserves_supplied_timestamp():
+    timestamp = datetime(2026, 2, 24, tzinfo=timezone.utc)
+    application = JobApplication(status="applied")
+
+    app_module.apply_application_status(
+        application,
+        ApplicationStatusWrite(status="screening", screening_at=timestamp),
+    )
+
+    assert application.screening_at == timestamp
+
+
+def test_apply_application_status_sets_milestone_notes():
+    application = JobApplication(status="applied")
+
+    app_module.apply_application_status(
+        application,
+        ApplicationStatusWrite(status="rejected", rejected_notes="Rejected after recruiter screen"),
+    )
+
+    assert application.rejected_notes == "Rejected after recruiter screen"
+
+
+def test_apply_application_lifecycle_dates_updates_existing_milestones():
+    application = JobApplication(status="rejected")
+    applied_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    rejected_at = datetime(2026, 2, 20, tzinfo=timezone.utc)
+
+    app_module.apply_application_lifecycle_dates(
+        application,
+        ApplicationLifecycleDatesUpdate(
+            applied_at=applied_at,
+            applied_notes="Applied with referral",
+            rejected_at=rejected_at,
+            rejected_notes="Rejected after panel",
+        ),
+    )
+
+    assert application.applied_at == applied_at
+    assert application.applied_notes == "Applied with referral"
+    assert application.rejected_at == rejected_at
+    assert application.rejected_notes == "Rejected after panel"
+
+
 def test_list_applications_filters_active_status_group(db_session):
     user = seed_user(db_session, name="Ava", email="ava@example.com")
     resume = seed_resume(db_session, user=user, name="Base", prompt_key="default")
@@ -1691,6 +1782,23 @@ def test_list_applications_filters_by_text_search(db_session):
     assert by_company.items[0].company_name == "Acme Robotics"
     assert by_title.total == 1
     assert by_title.items[0].title == "Senior Product Manager"
+
+
+def test_list_applications_hides_error_status_rows(db_session):
+    user = seed_user(db_session, name="Ivy", email="ivy@example.com")
+    resume = seed_resume(db_session, user=user, name="Base", prompt_key="default")
+    visible_job = seed_job(db_session, job_id="job-visible")
+    hidden_job = seed_job(db_session, job_id="job-hidden")
+
+    seed_application(db_session, user=user, job=visible_job, resume=resume, status="applied")
+    hidden = seed_application(db_session, user=user, job=hidden_job, resume=resume, status="new")
+    hidden.status = "error"
+    db_session.commit()
+
+    response = list_applications(db_session, user_id=user.id)
+
+    assert response.total == 1
+    assert all(item.status != "error" for item in response.items)
 
 
 def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):

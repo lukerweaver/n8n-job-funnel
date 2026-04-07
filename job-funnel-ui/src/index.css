@@ -431,6 +431,61 @@ textarea {
   flex-wrap: wrap;
 }
 
+.lifecycle-action-bar label {
+  display: grid;
+  gap: 0.45rem;
+  max-width: 220px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.lifecycle-action-bar {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.lifecycle-note-field {
+  flex: 1 1 320px;
+  max-width: none;
+}
+
+.lifecycle-action-bar input,
+.lifecycle-milestone-row input {
+  width: 100%;
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid rgba(21, 33, 27, 0.15);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.lifecycle-milestones {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.lifecycle-milestone-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  background: rgba(35, 83, 164, 0.05);
+  border: 1px solid rgba(35, 83, 164, 0.12);
+}
+
+.lifecycle-milestone-row p {
+  margin: 0.25rem 0 0;
+  color: rgba(21, 33, 27, 0.72);
+}
+
+.lifecycle-edit-panel {
+  display: grid;
+  gap: 0.75rem;
+  min-width: min(320px, 100%);
+}
+
 .inline-feedback {
   font-size: 0.85rem;
   font-weight: 700;

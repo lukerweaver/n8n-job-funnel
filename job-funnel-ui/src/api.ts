@@ -77,14 +77,44 @@ export function updateApplicationStatus(
   payload: {
     status: string;
     applied_at?: string | null;
+    applied_notes?: string | null;
+    screening_at?: string | null;
+    screening_notes?: string | null;
     offer_at?: string | null;
+    offer_notes?: string | null;
     rejected_at?: string | null;
+    rejected_notes?: string | null;
     ghosted_at?: string | null;
+    ghosted_notes?: string | null;
     withdrawn_at?: string | null;
+    withdrawn_notes?: string | null;
     passed_at?: string | null;
+    passed_notes?: string | null;
   },
 ) {
   return sendJson<JobApplication>(`/applications/${applicationId}/status`, "POST", payload);
+}
+
+export function updateApplicationLifecycleDates(
+  applicationId: number,
+  payload: {
+    applied_at?: string | null;
+    applied_notes?: string | null;
+    screening_at?: string | null;
+    screening_notes?: string | null;
+    offer_at?: string | null;
+    offer_notes?: string | null;
+    rejected_at?: string | null;
+    rejected_notes?: string | null;
+    ghosted_at?: string | null;
+    ghosted_notes?: string | null;
+    withdrawn_at?: string | null;
+    withdrawn_notes?: string | null;
+    passed_at?: string | null;
+    passed_notes?: string | null;
+  },
+) {
+  return sendJson<JobApplication>(`/applications/${applicationId}/lifecycle-dates`, "PUT", payload);
 }
 
 export function getInterviewRounds(applicationId: number) {

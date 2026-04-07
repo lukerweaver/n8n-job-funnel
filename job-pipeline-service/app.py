@@ -28,6 +28,7 @@ from schemas import (
     ApplicationScoreWrite,
     ApplicationsScoreRunRequest,
     ApplicationsScoreRunResponse,
+    ApplicationLifecycleDatesUpdate,
     ApplicationStatusWrite,
     InterviewRoundCreate,
     InterviewRoundListResponse,
@@ -114,6 +115,7 @@ ALLOWED_APPLICATION_STATUSES = {
 }
 ACTIVE_APPLICATION_STATUSES = {"applied", "screening", "interview"}
 TERMINAL_APPLICATION_STATUSES = {"offer", "rejected", "ghosted", "withdrawn", "pass"}
+HIDDEN_APPLICATION_STATUSES = {"error"}
 APPLICATION_TRANSITIONS = {
     "new": {"applied", "pass"},
     "scored": {"applied", "pass"},
@@ -294,11 +296,19 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         tailored_at=application.tailored_at,
         notified_at=application.notified_at,
         applied_at=application.applied_at,
+        applied_notes=application.applied_notes,
+        screening_at=application.screening_at,
+        screening_notes=application.screening_notes,
         offer_at=application.offer_at,
+        offer_notes=application.offer_notes,
         rejected_at=application.rejected_at,
+        rejected_notes=application.rejected_notes,
         ghosted_at=application.ghosted_at,
+        ghosted_notes=application.ghosted_notes,
         withdrawn_at=application.withdrawn_at,
+        withdrawn_notes=application.withdrawn_notes,
         passed_at=application.passed_at,
+        passed_notes=application.passed_notes,
         last_error_at=application.last_error_at,
         next_interview_at=next_interview.scheduled_at if next_interview is not None else None,
         next_interview_stage=next_interview.stage_name if next_interview is not None else None,
@@ -409,16 +419,56 @@ def apply_application_status(application: JobApplication, payload: ApplicationSt
     application.status = payload.status
     if payload.status == "applied":
         application.applied_at = payload.applied_at or utcnow()
+        application.applied_notes = payload.applied_notes
+    elif payload.status == "screening":
+        application.screening_at = payload.screening_at or utcnow()
+        application.screening_notes = payload.screening_notes
     elif payload.status == "offer":
         application.offer_at = payload.offer_at or utcnow()
+        application.offer_notes = payload.offer_notes
     elif payload.status == "rejected":
         application.rejected_at = payload.rejected_at or utcnow()
+        application.rejected_notes = payload.rejected_notes
     elif payload.status == "ghosted":
         application.ghosted_at = payload.ghosted_at or utcnow()
+        application.ghosted_notes = payload.ghosted_notes
     elif payload.status == "withdrawn":
         application.withdrawn_at = payload.withdrawn_at or utcnow()
+        application.withdrawn_notes = payload.withdrawn_notes
     elif payload.status == "pass":
         application.passed_at = payload.passed_at or utcnow()
+        application.passed_notes = payload.passed_notes
+
+
+def apply_application_lifecycle_dates(application: JobApplication, payload: ApplicationLifecycleDatesUpdate) -> None:
+    if "applied_at" in payload.model_fields_set:
+        application.applied_at = payload.applied_at
+    if "applied_notes" in payload.model_fields_set:
+        application.applied_notes = payload.applied_notes
+    if "screening_at" in payload.model_fields_set:
+        application.screening_at = payload.screening_at
+    if "screening_notes" in payload.model_fields_set:
+        application.screening_notes = payload.screening_notes
+    if "offer_at" in payload.model_fields_set:
+        application.offer_at = payload.offer_at
+    if "offer_notes" in payload.model_fields_set:
+        application.offer_notes = payload.offer_notes
+    if "rejected_at" in payload.model_fields_set:
+        application.rejected_at = payload.rejected_at
+    if "rejected_notes" in payload.model_fields_set:
+        application.rejected_notes = payload.rejected_notes
+    if "ghosted_at" in payload.model_fields_set:
+        application.ghosted_at = payload.ghosted_at
+    if "ghosted_notes" in payload.model_fields_set:
+        application.ghosted_notes = payload.ghosted_notes
+    if "withdrawn_at" in payload.model_fields_set:
+        application.withdrawn_at = payload.withdrawn_at
+    if "withdrawn_notes" in payload.model_fields_set:
+        application.withdrawn_notes = payload.withdrawn_notes
+    if "passed_at" in payload.model_fields_set:
+        application.passed_at = payload.passed_at
+    if "passed_notes" in payload.model_fields_set:
+        application.passed_notes = payload.passed_notes
 
 
 def apply_interview_round_updates(interview_round: InterviewRound, payload: InterviewRoundUpdate) -> None:
@@ -617,6 +667,22 @@ def ensure_application_schema() -> None:
         application_statements.append(f"ALTER TABLE job_applications ADD COLUMN ghosted_at {datetime_type}")
     if "passed_at" not in application_columns:
         application_statements.append(f"ALTER TABLE job_applications ADD COLUMN passed_at {datetime_type}")
+    if "screening_at" not in application_columns:
+        application_statements.append(f"ALTER TABLE job_applications ADD COLUMN screening_at {datetime_type}")
+    if "applied_notes" not in application_columns:
+        application_statements.append("ALTER TABLE job_applications ADD COLUMN applied_notes TEXT")
+    if "screening_notes" not in application_columns:
+        application_statements.append("ALTER TABLE job_applications ADD COLUMN screening_notes TEXT")
+    if "offer_notes" not in application_columns:
+        application_statements.append("ALTER TABLE job_applications ADD COLUMN offer_notes TEXT")
+    if "rejected_notes" not in application_columns:
+        application_statements.append("ALTER TABLE job_applications ADD COLUMN rejected_notes TEXT")
+    if "ghosted_notes" not in application_columns:
+        application_statements.append("ALTER TABLE job_applications ADD COLUMN ghosted_notes TEXT")
+    if "withdrawn_notes" not in application_columns:
+        application_statements.append("ALTER TABLE job_applications ADD COLUMN withdrawn_notes TEXT")
+    if "passed_notes" not in application_columns:
+        application_statements.append("ALTER TABLE job_applications ADD COLUMN passed_notes TEXT")
 
     interview_round_statements: list[str] = []
     if "status" not in interview_round_columns:
@@ -993,12 +1059,14 @@ def list_run_applications(
         .join(JobPosting, JobApplication.job_posting_id == JobPosting.id)
         .join(Resume, JobApplication.resume_id == Resume.id)
         .where(RunItem.run_id == run_id)
+        .where(JobApplication.status.not_in(HIDDEN_APPLICATION_STATUSES))
         .order_by(order_by, secondary_order)
     )
     count_query = (
         select(RunItem.id)
         .join(JobApplication, RunItem.job_application_id == JobApplication.id)
         .where(RunItem.run_id == run_id)
+        .where(JobApplication.status.not_in(HIDDEN_APPLICATION_STATUSES))
     )
 
     if run_item_status:
@@ -1265,6 +1333,8 @@ def list_applications(
     if updated_since is not None:
         query = query.where(JobApplication.updated_at > updated_since)
         count_query = count_query.where(JobApplication.updated_at > updated_since)
+    query = query.where(JobApplication.status.not_in(HIDDEN_APPLICATION_STATUSES))
+    count_query = count_query.where(JobApplication.status.not_in(HIDDEN_APPLICATION_STATUSES))
     items = session.scalars(query.offset(offset).limit(limit)).all()
     total = len(session.scalars(count_query).all())
     return JobApplicationListResponse(total=total, items=[_serialize_application(item) for item in items])
@@ -1344,9 +1414,19 @@ def create_application(payload: ApplicationCreate, session: Session = Depends(ge
         existing.tailored_at = None
         existing.notified_at = None
         existing.applied_at = None
+        existing.applied_notes = None
+        existing.screening_at = None
+        existing.screening_notes = None
         existing.offer_at = None
+        existing.offer_notes = None
         existing.rejected_at = None
+        existing.rejected_notes = None
+        existing.ghosted_at = None
+        existing.ghosted_notes = None
         existing.withdrawn_at = None
+        existing.withdrawn_notes = None
+        existing.passed_at = None
+        existing.passed_notes = None
         existing.last_error_at = None
         existing.resume_id = resume.id
         _commit_or_fail(session)
@@ -1569,6 +1649,20 @@ def update_application_status(
     if application is None:
         raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
     apply_application_status(application, payload)
+    _commit_or_fail(session)
+    return _serialize_application(application)
+
+
+@app.put("/applications/{application_id}/lifecycle-dates", response_model=JobApplicationRead, tags=["applications"])
+def update_application_lifecycle_dates(
+    application_id: int,
+    payload: ApplicationLifecycleDatesUpdate,
+    session: Session = Depends(get_session),
+):
+    application = _get_application_by_id(session, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    apply_application_lifecycle_dates(application, payload)
     _commit_or_fail(session)
     return _serialize_application(application)
 

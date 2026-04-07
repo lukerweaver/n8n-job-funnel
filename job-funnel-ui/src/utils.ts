@@ -25,6 +25,17 @@ export function formatDate(value: string | null) {
   }).format(new Date(value));
 }
 
+export function formatDateOnly(value: string | null) {
+  if (!value) {
+    return "N/A";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
 export function renderListish(value: unknown) {
   if (value == null) {
     return "N/A";

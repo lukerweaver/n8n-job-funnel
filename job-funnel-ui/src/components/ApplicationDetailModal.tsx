@@ -5,11 +5,12 @@ import {
   deleteInterviewRound,
   getApplication,
   getInterviewRounds,
+  updateApplicationLifecycleDates,
   updateApplicationStatus,
   updateInterviewRound,
 } from "../api";
 import type { ApplicationStatus, InterviewRound, InterviewRoundStatus, JobApplication } from "../types";
-import { formatDate, moneyRange, renderListish } from "../utils";
+import { formatDate, formatDateOnly, moneyRange, renderListish } from "../utils";
 import { DetailModal } from "./DetailModal";
 
 const STATUS_LABELS: Record<ApplicationStatus, string> = {
@@ -46,6 +47,31 @@ interface InterviewRoundFormState {
   notes: string;
 }
 
+type LifecycleDateField =
+  | "applied_at"
+  | "screening_at"
+  | "offer_at"
+  | "rejected_at"
+  | "ghosted_at"
+  | "withdrawn_at"
+  | "passed_at";
+
+type LifecycleNoteField =
+  | "applied_notes"
+  | "screening_notes"
+  | "offer_notes"
+  | "rejected_notes"
+  | "ghosted_notes"
+  | "withdrawn_notes"
+  | "passed_notes";
+
+interface LifecycleMilestone {
+  status: ApplicationStatus;
+  label: string;
+  field: LifecycleDateField;
+  noteField: LifecycleNoteField;
+}
+
 const EMPTY_ROUND_FORM: InterviewRoundFormState = {
   round_number: "",
   stage_name: "",
@@ -68,16 +94,24 @@ interface ApplicationDetailModalProps {
 }
 
 function toInputDateTime(value: string | null) {
+  return toInputDate(value);
+}
+
+function toInputDate(value: string | null) {
   if (!value) {
     return "";
   }
   const date = new Date(value);
   const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 }
 
 function toIsoOrNull(value: string) {
-  return value ? new Date(value).toISOString() : null;
+  return value ? `${value}T00:00:00Z` : null;
+}
+
+function todayDateString() {
+  return toInputDate(new Date().toISOString());
 }
 
 function buildRoundForm(round?: InterviewRound): InterviewRoundFormState {
@@ -105,12 +139,28 @@ export function ApplicationDetailModal({
   nextDisabled = false,
   onApplicationUpdated,
 }: ApplicationDetailModalProps) {
+  const lifecycleMilestones: LifecycleMilestone[] = [
+    { status: "applied", label: "Applied", field: "applied_at", noteField: "applied_notes" },
+    { status: "screening", label: "Screening", field: "screening_at", noteField: "screening_notes" },
+    { status: "offer", label: "Offer", field: "offer_at", noteField: "offer_notes" },
+    { status: "rejected", label: "Rejected", field: "rejected_at", noteField: "rejected_notes" },
+    { status: "ghosted", label: "Ghosted", field: "ghosted_at", noteField: "ghosted_notes" },
+    { status: "withdrawn", label: "Withdrawn", field: "withdrawn_at", noteField: "withdrawn_notes" },
+    { status: "pass", label: "Pass", field: "passed_at", noteField: "passed_notes" },
+  ];
+
   const [application, setApplication] = useState<JobApplication | null>(null);
   const [interviewRounds, setInterviewRounds] = useState<InterviewRound[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [statusSubmitting, setStatusSubmitting] = useState<ApplicationStatus | null>(null);
+  const [actionDate, setActionDate] = useState(todayDateString());
+  const [actionNote, setActionNote] = useState("");
+  const [editingLifecycleStatus, setEditingLifecycleStatus] = useState<ApplicationStatus | null>(null);
+  const [lifecycleDate, setLifecycleDate] = useState("");
+  const [lifecycleNote, setLifecycleNote] = useState("");
+  const [lifecycleSubmitting, setLifecycleSubmitting] = useState(false);
   const [editingRoundId, setEditingRoundId] = useState<number | null>(null);
   const [roundForm, setRoundForm] = useState<InterviewRoundFormState>(EMPTY_ROUND_FORM);
   const [roundSubmitError, setRoundSubmitError] = useState<string | null>(null);
@@ -132,6 +182,8 @@ export function ApplicationDetailModal({
         }
         setApplication(applicationResponse);
         setInterviewRounds(roundsResponse.items);
+        setActionDate(todayDateString());
+        setActionNote("");
       })
       .catch((requestError: Error) => {
         if (!cancelled) {
@@ -154,6 +206,22 @@ export function ApplicationDetailModal({
       return [];
     }
     return TRANSITIONS[application.status] ?? [];
+  }, [application]);
+
+  const showInterviewRounds = useMemo(() => {
+    if (!application) {
+      return false;
+    }
+    return ["applied", "screening", "interview", "offer", "rejected", "ghosted", "withdrawn", "pass"].includes(
+      application.status,
+    );
+  }, [application]);
+
+  const visibleLifecycleMilestones = useMemo(() => {
+    if (!application) {
+      return [];
+    }
+    return lifecycleMilestones.filter((milestone) => Boolean(application[milestone.field]));
   }, [application]);
 
   async function refreshApplication() {
@@ -184,13 +252,63 @@ export function ApplicationDetailModal({
     setStatusSubmitting(status);
     setError(null);
     try {
-      const updated = await updateApplicationStatus(applicationId, { status });
+      const lifecyclePayload: {
+        status: ApplicationStatus;
+        applied_at?: string | null;
+        applied_notes?: string | null;
+        screening_at?: string | null;
+        screening_notes?: string | null;
+        offer_at?: string | null;
+        offer_notes?: string | null;
+        rejected_at?: string | null;
+        rejected_notes?: string | null;
+        ghosted_at?: string | null;
+        ghosted_notes?: string | null;
+        withdrawn_at?: string | null;
+        withdrawn_notes?: string | null;
+        passed_at?: string | null;
+        passed_notes?: string | null;
+      } = { status };
+      const milestone = lifecycleMilestones.find((item) => item.status === status);
+      if (milestone && actionDate) {
+        lifecyclePayload[milestone.field] = toIsoOrNull(actionDate);
+        lifecyclePayload[milestone.noteField] = actionNote.trim() || null;
+      }
+      const updated = await updateApplicationStatus(applicationId, lifecyclePayload);
       setApplication(updated);
       onApplicationUpdated?.(updated);
+      setEditingLifecycleStatus(null);
+      setActionNote("");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to update application status.");
     } finally {
       setStatusSubmitting(null);
+    }
+  }
+
+  function startEditLifecycleDate(status: ApplicationStatus, value: string | null, note: string | null) {
+    setEditingLifecycleStatus(status);
+    setLifecycleDate(toInputDate(value));
+    setLifecycleNote(note ?? "");
+  }
+
+  async function handleLifecycleDateSave(field: LifecycleDateField, noteField: LifecycleNoteField) {
+    setLifecycleSubmitting(true);
+    setError(null);
+    try {
+      const updated = await updateApplicationLifecycleDates(applicationId, {
+        [field]: toIsoOrNull(lifecycleDate),
+        [noteField]: lifecycleNote.trim() || null,
+      });
+      setApplication(updated);
+      onApplicationUpdated?.(updated);
+      setEditingLifecycleStatus(null);
+      setLifecycleDate("");
+      setLifecycleNote("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to update lifecycle date.");
+    } finally {
+      setLifecycleSubmitting(false);
     }
   }
 
@@ -306,6 +424,21 @@ export function ApplicationDetailModal({
 
           <div className="detail-section">
             <h4>Lifecycle</h4>
+            <div className="lifecycle-action-bar">
+              <label>
+                Effective Date
+                <input type="date" value={actionDate} onChange={(event) => setActionDate(event.target.value)} />
+              </label>
+              <label className="lifecycle-note-field">
+                Event Note
+                <textarea
+                  className="editor-textarea editor-textarea-compact"
+                  value={actionNote}
+                  onChange={(event) => setActionNote(event.target.value)}
+                  placeholder="Optional note for the selected lifecycle event."
+                />
+              </label>
+            </div>
             <div className="workflow-actions">
               {availableTransitions.length === 0 ? <p className="state-message compact-state-message">No further guided actions.</p> : null}
               {availableTransitions.map((status) => (
@@ -320,120 +453,183 @@ export function ApplicationDetailModal({
                 </button>
               ))}
             </div>
-          </div>
-
-          <div className="detail-section">
-            <h4>Interview Rounds</h4>
-            {roundSubmitError ? <p className="error-callout">{roundSubmitError}</p> : null}
-            <div className="interview-rounds">
-              {interviewRounds.length === 0 ? <p>No interview rounds yet.</p> : null}
-              {interviewRounds.map((round) => (
-                <div key={round.id} className="round-card">
-                  <div className="round-card-header">
+            {visibleLifecycleMilestones.length > 0 ? (
+              <div className="lifecycle-milestones">
+                {visibleLifecycleMilestones.map((milestone) => (
+                  <div key={milestone.status} className="lifecycle-milestone-row">
                     <div>
-                      <strong>Round {round.round_number}</strong>
-                      <p>{round.stage_name ?? "Unnamed stage"}</p>
+                      <strong>{milestone.label}</strong>
+                      <p>{formatDateOnly(application[milestone.field])}</p>
+                      <p>{application[milestone.noteField] ?? "No notes."}</p>
                     </div>
-                    <span className={`status-pill status-${round.status}`}>{round.status}</span>
+                    {editingLifecycleStatus === milestone.status ? (
+                      <div className="lifecycle-edit-panel">
+                        <input
+                          type="date"
+                          value={lifecycleDate}
+                          onChange={(event) => setLifecycleDate(event.target.value)}
+                        />
+                        <textarea
+                          className="editor-textarea editor-textarea-compact"
+                          value={lifecycleNote}
+                          onChange={(event) => setLifecycleNote(event.target.value)}
+                          placeholder="Update lifecycle note"
+                        />
+                        <button
+                          type="button"
+                          className="action-button"
+                          onClick={() => handleLifecycleDateSave(milestone.field, milestone.noteField)}
+                          disabled={lifecycleSubmitting}
+                        >
+                          {lifecycleSubmitting ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => {
+                            setEditingLifecycleStatus(null);
+                            setLifecycleDate("");
+                            setLifecycleNote("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="action-button"
+                        onClick={() =>
+                          startEditLifecycleDate(
+                            milestone.status,
+                            application[milestone.field],
+                            application[milestone.noteField],
+                          )
+                        }
+                      >
+                        Edit
+                      </button>
+                    )}
                   </div>
-                  <p className="round-meta">
-                    Scheduled: {formatDate(round.scheduled_at)} | Completed: {formatDate(round.completed_at)}
-                  </p>
-                  <p>{round.notes ?? "No notes."}</p>
-                  <div className="detail-actions">
-                    <button type="button" className="action-button" onClick={() => startEditRound(round)}>
-                      Edit Round
-                    </button>
-                    <button
-                      type="button"
-                      className="action-button danger-button"
-                      onClick={() => handleRoundDelete(round.id)}
-                      disabled={deletingRoundId === round.id}
-                    >
-                      {deletingRoundId === round.id ? "Deleting..." : "Delete Round"}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <form className="editor-form interview-round-form" onSubmit={handleRoundSubmit}>
-              <div className="round-form-header">
-                <h5>{editingRoundId === null ? "Add Interview Round" : `Edit Round #${roundForm.round_number}`}</h5>
-                {editingRoundId !== null ? (
-                  <button type="button" className="ghost-button" onClick={startCreateRound}>
-                    New Round
-                  </button>
-                ) : null}
+                ))}
               </div>
-
-              <div className="inline-form-grid">
-                <label>
-                  Round Number
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={roundForm.round_number}
-                    onChange={(event) => setRoundForm((current) => ({ ...current, round_number: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Status
-                  <select
-                    value={roundForm.status}
-                    onChange={(event) =>
-                      setRoundForm((current) => ({ ...current, status: event.target.value as InterviewRoundStatus }))
-                    }
-                  >
-                    <option value="scheduled">scheduled</option>
-                    <option value="completed">completed</option>
-                  </select>
-                </label>
-                <label>
-                  Stage Name
-                  <input
-                    type="text"
-                    value={roundForm.stage_name}
-                    onChange={(event) => setRoundForm((current) => ({ ...current, stage_name: event.target.value }))}
-                    placeholder="Hiring Manager"
-                  />
-                </label>
-                <label>
-                  Scheduled At
-                  <input
-                    type="datetime-local"
-                    value={roundForm.scheduled_at}
-                    onChange={(event) => setRoundForm((current) => ({ ...current, scheduled_at: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Completed At
-                  <input
-                    type="datetime-local"
-                    value={roundForm.completed_at}
-                    onChange={(event) => setRoundForm((current) => ({ ...current, completed_at: event.target.value }))}
-                  />
-                </label>
-              </div>
-
-              <label>
-                Notes
-                <textarea
-                  className="editor-textarea editor-textarea-compact"
-                  value={roundForm.notes}
-                  onChange={(event) => setRoundForm((current) => ({ ...current, notes: event.target.value }))}
-                  placeholder="Capture prep, feedback, and takeaways."
-                />
-              </label>
-
-              <div className="form-actions">
-                <button type="submit" className="primary-button" disabled={roundSubmitting}>
-                  {roundSubmitting ? "Saving..." : editingRoundId === null ? "Add Round" : "Save Round"}
-                </button>
-              </div>
-            </form>
+            ) : null}
           </div>
+
+          {showInterviewRounds ? (
+            <div className="detail-section">
+              <h4>Interview Rounds</h4>
+              {roundSubmitError ? <p className="error-callout">{roundSubmitError}</p> : null}
+              <div className="interview-rounds">
+                {interviewRounds.length === 0 ? <p>No interview rounds yet.</p> : null}
+                {interviewRounds.map((round) => (
+                  <div key={round.id} className="round-card">
+                    <div className="round-card-header">
+                      <div>
+                        <strong>Round {round.round_number}</strong>
+                        {round.stage_name ? <p>{round.stage_name}</p> : null}
+                      </div>
+                      <span className={`status-pill status-${round.status}`}>{round.status}</span>
+                    </div>
+                    <p className="round-meta">
+                      Scheduled: {formatDateOnly(round.scheduled_at)} | Completed: {formatDateOnly(round.completed_at)}
+                    </p>
+                    <p>{round.notes ?? "No notes."}</p>
+                    <div className="detail-actions">
+                      <button type="button" className="action-button" onClick={() => startEditRound(round)}>
+                        Edit Round
+                      </button>
+                      <button
+                        type="button"
+                        className="action-button danger-button"
+                        onClick={() => handleRoundDelete(round.id)}
+                        disabled={deletingRoundId === round.id}
+                      >
+                        {deletingRoundId === round.id ? "Deleting..." : "Delete Round"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <form className="editor-form interview-round-form" onSubmit={handleRoundSubmit}>
+                <div className="round-form-header">
+                  <h5>{editingRoundId === null ? "Add Interview Round" : `Edit Round #${roundForm.round_number}`}</h5>
+                  {editingRoundId !== null ? (
+                    <button type="button" className="ghost-button" onClick={startCreateRound}>
+                      New Round
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="inline-form-grid">
+                  <label>
+                    Round Number
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={roundForm.round_number}
+                      onChange={(event) => setRoundForm((current) => ({ ...current, round_number: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Status
+                    <select
+                      value={roundForm.status}
+                      onChange={(event) =>
+                        setRoundForm((current) => ({ ...current, status: event.target.value as InterviewRoundStatus }))
+                      }
+                    >
+                      <option value="scheduled">scheduled</option>
+                      <option value="completed">completed</option>
+                    </select>
+                  </label>
+                  <label>
+                    Stage Name
+                    <input
+                      type="text"
+                      value={roundForm.stage_name}
+                      onChange={(event) => setRoundForm((current) => ({ ...current, stage_name: event.target.value }))}
+                      placeholder="Hiring Manager"
+                    />
+                  </label>
+                  <label>
+                    Scheduled At
+                    <input
+                      type="date"
+                      value={roundForm.scheduled_at}
+                      onChange={(event) => setRoundForm((current) => ({ ...current, scheduled_at: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Completed At
+                    <input
+                      type="date"
+                      value={roundForm.completed_at}
+                      onChange={(event) => setRoundForm((current) => ({ ...current, completed_at: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <label>
+                  Notes
+                  <textarea
+                    className="editor-textarea editor-textarea-compact"
+                    value={roundForm.notes}
+                    onChange={(event) => setRoundForm((current) => ({ ...current, notes: event.target.value }))}
+                    placeholder="Capture prep, feedback, and takeaways."
+                  />
+                </label>
+
+                <div className="form-actions">
+                  <button type="submit" className="primary-button" disabled={roundSubmitting}>
+                    {roundSubmitting ? "Saving..." : editingRoundId === null ? "Add Round" : "Save Round"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : null}
 
           <div className="detail-section">
             <h4>Rationale</h4>
@@ -460,7 +656,7 @@ export function ApplicationDetailModal({
               </div>
               <div>
                 <dt>Applied At</dt>
-                <dd>{formatDate(application.applied_at)}</dd>
+                <dd>{formatDateOnly(application.applied_at)}</dd>
               </div>
             </dl>
             <div className="detail-actions">

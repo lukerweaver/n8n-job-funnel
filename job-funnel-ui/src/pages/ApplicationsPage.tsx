@@ -41,6 +41,7 @@ export function ApplicationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<JobApplication | null>(null);
+  const [searchInput, setSearchInput] = useState(searchParams.get("q") ?? "");
   const [isCreatingJobDescription, setIsCreatingJobDescription] = useState(false);
   const [jobDescriptionForm, setJobDescriptionForm] = useState<JobDescriptionFormState>(EMPTY_JOB_DESCRIPTION_FORM);
   const [jobDescriptionSubmitError, setJobDescriptionSubmitError] = useState<string | null>(null);
@@ -59,6 +60,10 @@ export function ApplicationsPage() {
       next.set("sort_order", "desc");
     }
     return next;
+  }, [searchParams]);
+
+  useEffect(() => {
+    setSearchInput(searchParams.get("q") ?? "");
   }, [searchParams]);
 
   useEffect(() => {
@@ -118,6 +123,19 @@ export function ApplicationsPage() {
   const limit = Number(params.get("limit") ?? String(DEFAULT_LIMIT));
   const offset = Number(params.get("offset") ?? "0");
   const selectedIndex = selected ? data.findIndex((item) => item.id === selected.id) : -1;
+
+  useEffect(() => {
+    const currentQuery = params.get("q") ?? "";
+    if (searchInput === currentQuery) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      updateParam("q", searchInput);
+    }, 1000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [params, searchInput]);
 
   useEffect(() => {
     if (!selected) {
@@ -206,8 +224,8 @@ export function ApplicationsPage() {
             Search
             <input
               type="text"
-              value={params.get("q") ?? ""}
-              onChange={(event) => updateParam("q", event.target.value)}
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Company, title, or job id"
             />
           </label>

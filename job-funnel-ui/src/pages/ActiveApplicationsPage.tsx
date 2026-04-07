@@ -16,6 +16,7 @@ export function ActiveApplicationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<JobApplication | null>(null);
+  const [searchInput, setSearchInput] = useState(searchParams.get("q") ?? "");
 
   const params = useMemo(() => {
     const next = new URLSearchParams(searchParams);
@@ -32,6 +33,10 @@ export function ActiveApplicationsPage() {
       next.set("sort_order", "desc");
     }
     return next;
+  }, [searchParams]);
+
+  useEffect(() => {
+    setSearchInput(searchParams.get("q") ?? "");
   }, [searchParams]);
 
   useEffect(() => {
@@ -93,6 +98,19 @@ export function ActiveApplicationsPage() {
   const upcomingCount = data.filter((item) => item.next_interview_at).length;
 
   useEffect(() => {
+    const currentQuery = params.get("q") ?? "";
+    if (searchInput === currentQuery) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      updateParam("q", searchInput);
+    }, 1000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [params, searchInput]);
+
+  useEffect(() => {
     if (!selected) {
       return;
     }
@@ -133,8 +151,8 @@ export function ActiveApplicationsPage() {
             Search
             <input
               type="text"
-              value={params.get("q") ?? ""}
-              onChange={(event) => updateParam("q", event.target.value)}
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Company, title, or job id"
             />
           </label>
