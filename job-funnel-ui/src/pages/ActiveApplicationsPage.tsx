@@ -1,30 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
-import { getRunApplications } from "../api";
+import { getApplications } from "../api";
 import { ApplicationDetailModal } from "../components/ApplicationDetailModal";
 import { PaginationControls } from "../components/PaginationControls";
-import type { RunApplication } from "../types";
-import { moneyRange } from "../utils";
+import type { JobApplication } from "../types";
+import { formatDate } from "../utils";
 
 const DEFAULT_LIMIT = 25;
 
-export function RunResultsPage() {
-  const { runId } = useParams();
+export function ActiveApplicationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [data, setData] = useState<RunApplication[]>([]);
+  const [data, setData] = useState<JobApplication[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<RunApplication | null>(null);
+  const [selected, setSelected] = useState<JobApplication | null>(null);
 
   const params = useMemo(() => {
     const next = new URLSearchParams(searchParams);
     if (!next.get("limit")) {
       next.set("limit", String(DEFAULT_LIMIT));
     }
+    if (!next.get("status_group")) {
+      next.set("status_group", "active");
+    }
     if (!next.get("sort_by")) {
-      next.set("sort_by", "score");
+      next.set("sort_by", "updated_at");
     }
     if (!next.get("sort_order")) {
       next.set("sort_order", "desc");
@@ -33,24 +35,18 @@ export function RunResultsPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (!runId) {
-      return;
-    }
-
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    getRunApplications(runId, params)
+    getApplications(params)
       .then((response) => {
         if (cancelled) {
           return;
         }
         setData(response.items);
         setTotal(response.total);
-        setSelected((current) =>
-          current ? response.items.find((item) => item.run_item_id === current.run_item_id) ?? null : null,
-        );
+        setSelected((current) => (current ? response.items.find((item) => item.id === current.id) ?? null : null));
       })
       .catch((requestError: Error) => {
         if (!cancelled) {
@@ -66,7 +62,7 @@ export function RunResultsPage() {
     return () => {
       cancelled = true;
     };
-  }, [params, runId]);
+  }, [params]);
 
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -84,7 +80,8 @@ export function RunResultsPage() {
   function clearFilters() {
     setSearchParams({
       limit: String(DEFAULT_LIMIT),
-      sort_by: "score",
+      status_group: "active",
+      sort_by: "updated_at",
       sort_order: "desc",
       offset: "0",
     });
@@ -92,7 +89,8 @@ export function RunResultsPage() {
 
   const limit = Number(params.get("limit") ?? String(DEFAULT_LIMIT));
   const offset = Number(params.get("offset") ?? "0");
-  const selectedIndex = selected ? data.findIndex((item) => item.run_item_id === selected.run_item_id) : -1;
+  const selectedIndex = selected ? data.findIndex((item) => item.id === selected.id) : -1;
+  const upcomingCount = data.filter((item) => item.next_interview_at).length;
 
   useEffect(() => {
     if (!selected) {
@@ -119,74 +117,55 @@ export function RunResultsPage() {
     <section className="page-grid">
       <div className="page-header">
         <div>
-          <p className="eyebrow">Page 3</p>
-          <h2>Run Results</h2>
-          <p className="page-subtitle">
-            <Link className="inline-back-link" to="/runs">
-              Back to runs
-            </Link>
-            {runId ? `Run #${runId}` : ""}
-          </p>
+          <p className="eyebrow">Page 2</p>
+          <h2>Active Applications</h2>
+          <p className="page-subtitle active-page-subtitle">In-flight applications with upcoming interview visibility.</p>
         </div>
-        <div className="stat-chip">{total} application-linked rows</div>
+        <div className="page-actions">
+          <div className="stat-chip">{total} active applications</div>
+          <div className="stat-chip">{upcomingCount} with upcoming interviews</div>
+        </div>
       </div>
 
       <div className="panel filter-panel">
         <div className="filter-grid">
           <label>
-            Run Item Status
-            <select
-              value={params.get("run_item_status") ?? ""}
-              onChange={(event) => updateParam("run_item_status", event.target.value)}
-            >
-              <option value="">All</option>
-              <option value="queued">queued</option>
-              <option value="running">running</option>
-              <option value="scored">scored</option>
-              <option value="classified">classified</option>
-              <option value="skipped">skipped</option>
-              <option value="error">error</option>
-            </select>
-          </label>
-
-          <label>
-            Score Min
+            User ID
             <input
               type="number"
-              value={params.get("score_min") ?? ""}
-              onChange={(event) => updateParam("score_min", event.target.value)}
-              placeholder="30"
+              value={params.get("user_id") ?? ""}
+              onChange={(event) => updateParam("user_id", event.target.value)}
+              placeholder="1"
             />
           </label>
 
           <label>
-            Score Max
+            Resume ID
             <input
               type="number"
-              value={params.get("score_max") ?? ""}
-              onChange={(event) => updateParam("score_max", event.target.value)}
-              placeholder="95"
+              value={params.get("resume_id") ?? ""}
+              onChange={(event) => updateParam("resume_id", event.target.value)}
+              placeholder="4"
             />
           </label>
 
           <label>
-            Sort By
-            <select value={params.get("sort_by") ?? "score"} onChange={(event) => updateParam("sort_by", event.target.value)}>
-              <option value="score">Score</option>
-              <option value="screening_likelihood">Screening Likelihood</option>
-              <option value="company_name">Company</option>
-              <option value="title">Title</option>
-              <option value="classification_key">Classification</option>
-              <option value="scored_at">Scored At</option>
-            </select>
+            Classification
+            <input
+              type="text"
+              value={params.get("classification_key") ?? ""}
+              onChange={(event) => updateParam("classification_key", event.target.value)}
+              placeholder="Product Manager"
+            />
           </label>
 
           <label>
-            Sort Order
-            <select value={params.get("sort_order") ?? "desc"} onChange={(event) => updateParam("sort_order", event.target.value)}>
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
-            </select>
+            Updated Since
+            <input
+              type="datetime-local"
+              value={params.get("updated_since") ?? ""}
+              onChange={(event) => updateParam("updated_since", event.target.value)}
+            />
           </label>
 
           <label>
@@ -195,6 +174,14 @@ export function RunResultsPage() {
               <option value="25">25</option>
               <option value="50">50</option>
               <option value="100">100</option>
+            </select>
+          </label>
+
+          <label>
+            Sort Order
+            <select value={params.get("sort_order") ?? "desc"} onChange={(event) => updateParam("sort_order", event.target.value)}>
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
             </select>
           </label>
 
@@ -207,11 +194,9 @@ export function RunResultsPage() {
       </div>
 
       <div className="panel table-panel">
-        {loading ? <p className="state-message">Loading run results...</p> : null}
+        {loading ? <p className="state-message">Loading active applications...</p> : null}
         {error ? <p className="state-message error-message">{error}</p> : null}
-        {!loading && !error && data.length === 0 ? (
-          <p className="state-message">This run has no scored applications to display for the current filters.</p>
-        ) : null}
+        {!loading && !error && data.length === 0 ? <p className="state-message">No active applications match current filters.</p> : null}
 
         {!loading && !error && data.length > 0 ? (
           <>
@@ -220,27 +205,27 @@ export function RunResultsPage() {
                 <tr>
                   <th>Company</th>
                   <th>Title</th>
-                  <th>Score</th>
-                  <th>Screening</th>
-                  <th>Classification</th>
+                  <th>Status</th>
+                  <th>Next Interview</th>
+                  <th>Interview Stage</th>
+                  <th>Rounds</th>
                   <th>Resume</th>
-                  <th>Run Item</th>
-                  <th>Compensation</th>
+                  <th>Updated</th>
                 </tr>
               </thead>
               <tbody>
-                {data.map((item) => (
-                  <tr key={item.run_item_id} onClick={() => setSelected(item)}>
-                    <td>{item.company_name ?? "Unknown"}</td>
-                    <td>{item.title ?? "Untitled role"}</td>
-                    <td>{item.score ?? "N/A"}</td>
-                    <td>{item.screening_likelihood ?? "N/A"}</td>
-                    <td>{item.classification_key ?? "N/A"}</td>
-                    <td>{item.resume_name ?? "N/A"}</td>
+                {data.map((application) => (
+                  <tr key={application.id} onClick={() => setSelected(application)}>
+                    <td>{application.company_name ?? "Unknown"}</td>
+                    <td>{application.title ?? "Untitled role"}</td>
                     <td>
-                      <span className={`status-pill status-${item.run_item_status}`}>{item.run_item_status}</span>
+                      <span className={`status-pill status-${application.status}`}>{application.status}</span>
                     </td>
-                    <td>{moneyRange(item.yearly_min_compensation, item.yearly_max_compensation)}</td>
+                    <td>{formatDate(application.next_interview_at)}</td>
+                    <td>{application.next_interview_stage ?? "N/A"}</td>
+                    <td>{application.interview_rounds_total}</td>
+                    <td>{application.resume_name ?? "N/A"}</td>
+                    <td>{formatDate(application.updated_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -258,14 +243,27 @@ export function RunResultsPage() {
 
       {selected ? (
         <ApplicationDetailModal
-          applicationId={selected.job_application_id}
+          applicationId={selected.id}
           fallbackTitle={selected.title ?? "Untitled role"}
-          fallbackSubtitle={`Run item #${selected.run_item_id} · ${selected.company_name ?? "Unknown company"}`}
+          fallbackSubtitle={`Application #${selected.id} · ${selected.company_name ?? "Unknown company"}`}
           onClose={() => setSelected(null)}
           onPrevious={() => setSelected(data[selectedIndex - 1])}
           onNext={() => setSelected(data[selectedIndex + 1])}
           previousDisabled={selectedIndex <= 0}
           nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
+          onApplicationUpdated={(updated) => {
+            setData((current) => {
+              const next = current
+                .map((item) => (item.id === updated.id ? updated : item))
+                .filter((item) => ["applied", "screening", "interview"].includes(item.status));
+              return next;
+            });
+            if (["applied", "screening", "interview"].includes(updated.status)) {
+              setSelected(updated);
+            } else {
+              setSelected(null);
+            }
+          }}
         />
       ) : null}
     </section>

@@ -258,7 +258,9 @@ class ApplicationStatusWrite(BaseModel):
     applied_at: datetime | None = None
     offer_at: datetime | None = None
     rejected_at: datetime | None = None
+    ghosted_at: datetime | None = None
     withdrawn_at: datetime | None = None
+    passed_at: datetime | None = None
 
 
 class JobApplicationRead(BaseModel):
@@ -301,8 +303,13 @@ class JobApplicationRead(BaseModel):
     applied_at: datetime | None = None
     offer_at: datetime | None = None
     rejected_at: datetime | None = None
+    ghosted_at: datetime | None = None
     withdrawn_at: datetime | None = None
+    passed_at: datetime | None = None
     last_error_at: datetime | None = None
+    next_interview_at: datetime | None = None
+    next_interview_stage: str | None = None
+    interview_rounds_total: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -435,7 +442,16 @@ class ApplicationErrorWrite(BaseModel):
 class InterviewRoundCreate(BaseModel):
     round_number: int
     stage_name: str | None = None
-    status: str = "scheduled"
+    status: Literal["scheduled", "completed"] = "scheduled"
+    notes: str | None = None
+    scheduled_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class InterviewRoundUpdate(BaseModel):
+    round_number: int | None = None
+    stage_name: str | None = None
+    status: Literal["scheduled", "completed"] | None = None
     notes: str | None = None
     scheduled_at: datetime | None = None
     completed_at: datetime | None = None

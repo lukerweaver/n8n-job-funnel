@@ -32,6 +32,7 @@ from schemas import (
     InterviewRoundCreate,
     InterviewRoundListResponse,
     InterviewRoundRead,
+    InterviewRoundUpdate,
     JobIngestItem,
     JobIngestResponse,
     JobApplicationListResponse,
@@ -107,7 +108,20 @@ ALLOWED_APPLICATION_STATUSES = {
     "interview",
     "offer",
     "rejected",
+    "ghosted",
     "withdrawn",
+    "pass",
+}
+ACTIVE_APPLICATION_STATUSES = {"applied", "screening", "interview"}
+TERMINAL_APPLICATION_STATUSES = {"offer", "rejected", "ghosted", "withdrawn", "pass"}
+APPLICATION_TRANSITIONS = {
+    "new": {"applied", "pass"},
+    "scored": {"applied", "pass"},
+    "tailored": {"applied", "pass"},
+    "notified": {"applied", "pass"},
+    "applied": {"screening", "interview", "offer", "rejected", "ghosted", "withdrawn", "pass"},
+    "screening": {"interview", "offer", "rejected", "ghosted", "withdrawn", "pass"},
+    "interview": {"offer", "rejected", "ghosted", "withdrawn", "pass"},
 }
 
 OPENAPI_TAGS = [
@@ -235,6 +249,15 @@ def _normalize_float_dict_json(value: object) -> dict[str, float] | None:
 def _serialize_application(application: JobApplication) -> JobApplicationRead:
     job = application.job_posting
     resume = application.resume
+    scheduled_rounds = sorted(
+        (
+            interview_round
+            for interview_round in application.interview_rounds
+            if interview_round.status == "scheduled" and interview_round.scheduled_at is not None
+        ),
+        key=lambda interview_round: interview_round.scheduled_at,
+    )
+    next_interview = scheduled_rounds[0] if scheduled_rounds else None
     return JobApplicationRead(
         id=application.id,
         user_id=application.user_id,
@@ -273,8 +296,13 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         applied_at=application.applied_at,
         offer_at=application.offer_at,
         rejected_at=application.rejected_at,
+        ghosted_at=application.ghosted_at,
         withdrawn_at=application.withdrawn_at,
+        passed_at=application.passed_at,
         last_error_at=application.last_error_at,
+        next_interview_at=next_interview.scheduled_at if next_interview is not None else None,
+        next_interview_stage=next_interview.stage_name if next_interview is not None else None,
+        interview_rounds_total=len(application.interview_rounds),
         created_at=application.created_at,
         updated_at=application.updated_at,
     )
@@ -363,7 +391,21 @@ def apply_application_error(application: JobApplication, error_payload: Applicat
     application.status = "new" if error_payload.status == "error" else error_payload.status
 
 
+def _validate_application_transition(current_status: str, next_status: str) -> None:
+    if next_status not in ALLOWED_APPLICATION_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Unsupported application status '{next_status}'")
+    if current_status == next_status:
+        return
+    allowed_transitions = APPLICATION_TRANSITIONS.get(current_status)
+    if allowed_transitions is None or next_status not in allowed_transitions:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot transition application from '{current_status}' to '{next_status}'",
+        )
+
+
 def apply_application_status(application: JobApplication, payload: ApplicationStatusWrite) -> None:
+    _validate_application_transition(application.status, payload.status)
     application.status = payload.status
     if payload.status == "applied":
         application.applied_at = payload.applied_at or utcnow()
@@ -371,8 +413,27 @@ def apply_application_status(application: JobApplication, payload: ApplicationSt
         application.offer_at = payload.offer_at or utcnow()
     elif payload.status == "rejected":
         application.rejected_at = payload.rejected_at or utcnow()
+    elif payload.status == "ghosted":
+        application.ghosted_at = payload.ghosted_at or utcnow()
     elif payload.status == "withdrawn":
         application.withdrawn_at = payload.withdrawn_at or utcnow()
+    elif payload.status == "pass":
+        application.passed_at = payload.passed_at or utcnow()
+
+
+def apply_interview_round_updates(interview_round: InterviewRound, payload: InterviewRoundUpdate) -> None:
+    if "round_number" in payload.model_fields_set:
+        interview_round.round_number = payload.round_number
+    if "stage_name" in payload.model_fields_set:
+        interview_round.stage_name = payload.stage_name
+    if "status" in payload.model_fields_set:
+        interview_round.status = payload.status
+    if "notes" in payload.model_fields_set:
+        interview_round.notes = payload.notes
+    if "scheduled_at" in payload.model_fields_set:
+        interview_round.scheduled_at = payload.scheduled_at
+    if "completed_at" in payload.model_fields_set:
+        interview_round.completed_at = payload.completed_at
 
 
 def _get_run_by_id(session: Session, run_id: int) -> Run | None:
@@ -544,6 +605,45 @@ def ensure_resumes_schema() -> None:
             connection.execute(text("UPDATE resumes SET is_default = FALSE WHERE is_default IS NULL"))
 
 
+def ensure_application_schema() -> None:
+    inspector = inspect(engine)
+
+    application_columns = {column["name"] for column in inspector.get_columns("job_applications")}
+    interview_round_columns = {column["name"] for column in inspector.get_columns("interview_rounds")}
+    datetime_type = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME"
+
+    application_statements: list[str] = []
+    if "ghosted_at" not in application_columns:
+        application_statements.append(f"ALTER TABLE job_applications ADD COLUMN ghosted_at {datetime_type}")
+    if "passed_at" not in application_columns:
+        application_statements.append(f"ALTER TABLE job_applications ADD COLUMN passed_at {datetime_type}")
+
+    interview_round_statements: list[str] = []
+    if "status" not in interview_round_columns:
+        interview_round_statements.append(
+            "ALTER TABLE interview_rounds ADD COLUMN status VARCHAR(50) DEFAULT 'scheduled'"
+        )
+
+    if not application_statements and not interview_round_statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in application_statements:
+            connection.execute(text(statement))
+        for statement in interview_round_statements:
+            connection.execute(text(statement))
+        if "status" not in interview_round_columns:
+            connection.execute(
+                text(
+                    """
+                    UPDATE interview_rounds
+                    SET status = 'scheduled'
+                    WHERE status IS NULL
+                    """
+                )
+            )
+
+
 def ensure_run_schema() -> None:
     inspector = inspect(engine)
 
@@ -628,6 +728,7 @@ async def lifespan(_app: FastAPI):
     ensure_job_postings_schema()
     ensure_prompt_library_schema()
     ensure_resumes_schema()
+    ensure_application_schema()
     ensure_run_schema()
     with Session(engine) as session:
         run_startup_backfill(session)
@@ -713,8 +814,8 @@ def list_jobs(
     has_classification: bool | None = None,
     has_applications: bool | None = None,
     classified_since: datetime | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = 100,
+    offset: int = 0,
 ):
     query = select(JobPosting).order_by(JobPosting.created_at.desc())
     count_query = select(JobPosting)
@@ -823,8 +924,8 @@ def list_runs(
     prompt_key: str | None = None,
     callback_status: str | None = None,
     created_since: datetime | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = 100,
+    offset: int = 0,
 ):
     query = select(Run).order_by(Run.created_at.desc())
     count_query = select(Run)
@@ -877,8 +978,8 @@ def list_run_applications(
     score_max: float | None = None,
     sort_by: str = "score",
     sort_order: str = "desc",
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = 100,
+    offset: int = 0,
 ):
     run = _get_run_by_id(session, run_id)
     if run is None:
@@ -1084,20 +1185,25 @@ def list_applications(
     classification_key: str | None = None,
     recommendation: str | None = None,
     status: str | None = None,
+    status_group: str | None = None,
     score_min: float | None = None,
     score_max: float | None = None,
     created_since: datetime | None = None,
     updated_since: datetime | None = None,
     sort_by: str = "created_at",
     sort_order: str = "desc",
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: int = 100,
+    offset: int = 0,
 ):
     order_by = _resolve_application_sort(sort_by, sort_order)
     secondary_order = asc(JobApplication.id) if sort_order.lower() == "asc" else desc(JobApplication.id)
     query = (
         select(JobApplication)
-        .options(selectinload(JobApplication.job_posting), selectinload(JobApplication.resume))
+        .options(
+            selectinload(JobApplication.job_posting),
+            selectinload(JobApplication.resume),
+            selectinload(JobApplication.interview_rounds),
+        )
         .order_by(order_by, secondary_order)
     )
     count_query = select(JobApplication)
@@ -1123,6 +1229,11 @@ def list_applications(
     if status:
         query = query.where(JobApplication.status == status)
         count_query = count_query.where(JobApplication.status == status)
+    if status_group:
+        if status_group != "active":
+            raise HTTPException(status_code=400, detail=f"Unsupported application status group '{status_group}'")
+        query = query.where(JobApplication.status.in_(ACTIVE_APPLICATION_STATUSES))
+        count_query = count_query.where(JobApplication.status.in_(ACTIVE_APPLICATION_STATUSES))
     if score_min is not None:
         query = query.where(JobApplication.score.is_not(None), JobApplication.score >= score_min)
         count_query = count_query.where(JobApplication.score.is_not(None), JobApplication.score >= score_min)
@@ -1144,7 +1255,11 @@ def list_applications(
 def get_application(application_id: int, session: Session = Depends(get_session)):
     application = session.scalar(
         select(JobApplication)
-        .options(selectinload(JobApplication.job_posting), selectinload(JobApplication.resume))
+        .options(
+            selectinload(JobApplication.job_posting),
+            selectinload(JobApplication.resume),
+            selectinload(JobApplication.interview_rounds),
+        )
         .where(JobApplication.id == application_id)
     )
     if application is None:
@@ -1476,10 +1591,53 @@ def create_interview_round(
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail="Interview round already exists for that application") from exc
-    if application.status not in {"offer", "rejected", "withdrawn"}:
+    if application.status not in TERMINAL_APPLICATION_STATUSES:
         application.status = "interview"
         _commit_or_fail(session)
     return InterviewRoundRead.model_validate(interview_round)
+
+
+@app.put("/applications/{application_id}/interview-rounds/{interview_round_id}", response_model=InterviewRoundRead, tags=["applications"])
+def update_interview_round(
+    application_id: int,
+    interview_round_id: int,
+    payload: InterviewRoundUpdate,
+    session: Session = Depends(get_session),
+):
+    interview_round = session.scalar(
+        select(InterviewRound).where(
+            InterviewRound.id == interview_round_id,
+            InterviewRound.job_application_id == application_id,
+        )
+    )
+    if interview_round is None:
+        raise HTTPException(status_code=404, detail=f"Interview round '{interview_round_id}' was not found")
+    apply_interview_round_updates(interview_round, payload)
+    try:
+        _commit_or_fail(session)
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Interview round already exists for that application") from exc
+    return InterviewRoundRead.model_validate(interview_round)
+
+
+@app.delete("/applications/{application_id}/interview-rounds/{interview_round_id}", tags=["applications"])
+def delete_interview_round(
+    application_id: int,
+    interview_round_id: int,
+    session: Session = Depends(get_session),
+):
+    interview_round = session.scalar(
+        select(InterviewRound).where(
+            InterviewRound.id == interview_round_id,
+            InterviewRound.job_application_id == application_id,
+        )
+    )
+    if interview_round is None:
+        raise HTTPException(status_code=404, detail=f"Interview round '{interview_round_id}' was not found")
+    session.delete(interview_round)
+    _commit_or_fail(session)
+    return {"deleted": True, "id": interview_round_id}
 
 
 @app.get("/prompt-library", response_model=PromptLibraryListResponse, tags=["prompt-library"])

@@ -15,6 +15,7 @@ from app import (
     create_prompt_library,
     create_resume,
     create_user,
+    delete_interview_round,
     delete_prompt_library,
     ensure_job_postings_schema,
     get_job,
@@ -43,6 +44,7 @@ from app import (
     run_jobs_classification,
     store_application_score,
     update_application_status,
+    update_interview_round,
     update_resume,
     update_prompt_library,
 )
@@ -58,6 +60,7 @@ from schemas import (
     ApplicationsScoreRunRequest,
     ApplicationStatusWrite,
     InterviewRoundCreate,
+    InterviewRoundUpdate,
     JobClassificationRunRequest,
     JobIngestItem,
     ResumeCreate,
@@ -904,8 +907,15 @@ def test_application_scoring_and_interview_rounds(db_session, monkeypatch):
         InterviewRoundCreate(round_number=1, stage_name="Hiring Manager"),
         db_session,
     )
+    updated_round = update_interview_round(
+        application.id,
+        round_one.id,
+        InterviewRoundUpdate(status="completed", completed_at=datetime.now(timezone.utc), notes="Strong signal"),
+        db_session,
+    )
     rounds = list_interview_rounds(application.id, db_session)
     assert round_one.round_number == 1
+    assert updated_round.status == "completed"
     assert rounds.total == 1
 
     with pytest.raises(HTTPException):
@@ -914,6 +924,10 @@ def test_application_scoring_and_interview_rounds(db_session, monkeypatch):
             InterviewRoundCreate(round_number=1, stage_name="Duplicate"),
             db_session,
         )
+
+    deleted = delete_interview_round(application.id, round_one.id, db_session)
+    assert deleted == {"deleted": True, "id": round_one.id}
+    assert list_interview_rounds(application.id, db_session).total == 0
 
 
 def test_application_reads_include_job_context(db_session):
@@ -1596,7 +1610,7 @@ def test_validate_application_entities_error_paths(db_session):
     ],
 )
 def test_apply_application_status_sets_terminal_timestamps(status, timestamp_field):
-    application = JobApplication(status="new")
+    application = JobApplication(status="interview")
 
     app_module.apply_application_status(application, ApplicationStatusWrite(status=status))
 
@@ -1613,6 +1627,45 @@ def test_apply_application_error_preserves_non_error_status():
 
     app_module.apply_application_error(application, ApplicationErrorWrite(status="error"))
     assert application.status == "new"
+
+
+@pytest.mark.parametrize(
+    ("status", "timestamp_field"),
+    [
+        ("ghosted", "ghosted_at"),
+        ("pass", "passed_at"),
+    ],
+)
+def test_apply_application_status_sets_new_terminal_timestamps(status, timestamp_field):
+    application = JobApplication(status="interview")
+
+    app_module.apply_application_status(application, ApplicationStatusWrite(status=status))
+
+    assert application.status == status
+    assert getattr(application, timestamp_field) is not None
+
+
+def test_apply_application_status_rejects_invalid_transition():
+    application = JobApplication(status="new")
+
+    with pytest.raises(HTTPException, match="Cannot transition application from 'new' to 'screening'"):
+        app_module.apply_application_status(application, ApplicationStatusWrite(status="screening"))
+
+
+def test_list_applications_filters_active_status_group(db_session):
+    user = seed_user(db_session, name="Ava", email="ava@example.com")
+    resume = seed_resume(db_session, user=user, name="Base", prompt_key="default")
+    job_one = seed_job(db_session, job_id="job-active-1")
+    job_two = seed_job(db_session, job_id="job-active-2")
+    job_three = seed_job(db_session, job_id="job-active-3")
+    seed_application(db_session, user=user, job=job_one, resume=resume, status="applied")
+    seed_application(db_session, user=user, job=job_two, resume=resume, status="screening")
+    seed_application(db_session, user=user, job=job_three, resume=resume, status="rejected")
+
+    response = list_applications(db_session, user_id=user.id, status_group="active")
+
+    assert response.total == 2
+    assert {item.status for item in response.items} == {"applied", "screening"}
 
 
 def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):

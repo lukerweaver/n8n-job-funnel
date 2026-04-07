@@ -308,7 +308,9 @@ textarea {
 }
 
 .status-rejected,
+.status-ghosted,
 .status-withdrawn,
+.status-pass,
 .status-interview,
 .status-offer,
 .status-tailored,
@@ -323,6 +325,11 @@ textarea {
   margin: 0;
   padding: 2rem 1rem;
   text-align: center;
+}
+
+.compact-state-message {
+  padding: 0.25rem 0;
+  text-align: left;
 }
 
 .detail-header p {
@@ -345,6 +352,10 @@ textarea {
 .detail-list {
   display: grid;
   gap: 0.75rem;
+}
+
+.detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .detail-list div {
@@ -414,6 +425,12 @@ textarea {
   flex-wrap: wrap;
 }
 
+.workflow-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .inline-feedback {
   font-size: 0.85rem;
   font-weight: 700;
@@ -460,6 +477,10 @@ textarea {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+}
+
+.active-page-subtitle {
+  color: rgba(21, 33, 27, 0.72);
 }
 
 .modal-backdrop {
@@ -599,6 +620,45 @@ textarea {
   flex-wrap: wrap;
 }
 
+.interview-rounds {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.round-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  background: rgba(35, 83, 164, 0.05);
+  border: 1px solid rgba(35, 83, 164, 0.12);
+}
+
+.round-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.round-card-header p,
+.round-meta {
+  margin: 0;
+  color: rgba(21, 33, 27, 0.72);
+}
+
+.round-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.round-form-header h5 {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .detail-pre {
   margin: 0;
   padding: 1rem;
@@ -650,6 +710,10 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
   .filter-grid {
     grid-template-columns: 1fr;
   }

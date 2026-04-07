@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { createJobDescription, getApplications } from "../api";
+import { ApplicationDetailModal } from "../components/ApplicationDetailModal";
 import { DetailModal } from "../components/DetailModal";
 import { PaginationControls } from "../components/PaginationControls";
 import type { JobApplication } from "../types";
-import { formatDate, moneyRange, renderListish } from "../utils";
+import { formatDate } from "../utils";
 
-const APPLICATION_STATUSES = ["", "scored", "new", "tailored", "notified", "applied", "screening", "interview", "offer", "rejected", "withdrawn"];
+const APPLICATION_STATUSES = ["", "scored", "new", "tailored", "notified", "applied", "screening", "interview", "offer", "rejected", "ghosted", "withdrawn", "pass"];
 const APPLICATION_RECOMMENDATIONS = ["", "Strong Apply", "Apply", "Selective Apply", "Pass"];
 const DEFAULT_LIMIT = 25;
 
@@ -40,7 +41,6 @@ export function ApplicationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<JobApplication | null>(null);
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [isCreatingJobDescription, setIsCreatingJobDescription] = useState(false);
   const [jobDescriptionForm, setJobDescriptionForm] = useState<JobDescriptionFormState>(EMPTY_JOB_DESCRIPTION_FORM);
   const [jobDescriptionSubmitError, setJobDescriptionSubmitError] = useState<string | null>(null);
@@ -141,41 +141,11 @@ export function ApplicationsPage() {
   }, [data, selected, selectedIndex]);
 
   useEffect(() => {
-    setCopyState("idle");
-  }, [selected]);
-
-  useEffect(() => {
     if (!isCreatingJobDescription) {
       setJobDescriptionForm(EMPTY_JOB_DESCRIPTION_FORM);
       setJobDescriptionSubmitError(null);
     }
   }, [isCreatingJobDescription]);
-
-  async function handleCopyDescription() {
-    if (!selected?.description) {
-      setCopyState("error");
-      return;
-    }
-
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(selected.description);
-      } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = selected.description;
-        textArea.setAttribute("readonly", "");
-        textArea.style.position = "absolute";
-        textArea.style.left = "-9999px";
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textArea);
-      }
-      setCopyState("copied");
-    } catch {
-      setCopyState("error");
-    }
-  }
 
   function openCreateJobDescriptionModal() {
     setJobDescriptionSuccess(null);
@@ -403,84 +373,20 @@ export function ApplicationsPage() {
       </div>
 
       {selected ? (
-        <DetailModal
-          title={selected.title ?? "Untitled role"}
-          subtitle={`Application #${selected.id} · ${selected.company_name ?? "Unknown company"}`}
+        <ApplicationDetailModal
+          applicationId={selected.id}
+          fallbackTitle={selected.title ?? "Untitled role"}
+          fallbackSubtitle={`Application #${selected.id} · ${selected.company_name ?? "Unknown company"}`}
           onClose={() => setSelected(null)}
           onPrevious={() => setSelected(data[selectedIndex - 1])}
           onNext={() => setSelected(data[selectedIndex + 1])}
           previousDisabled={selectedIndex <= 0}
           nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
-        >
-          <div className="detail-section">
-            <h4>Summary</h4>
-            <dl className="detail-list">
-              <div>
-                <dt>Score</dt>
-                <dd>{selected.score ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Screening</dt>
-                <dd>{selected.screening_likelihood ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Recommendation</dt>
-                <dd>{selected.recommendation ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Compensation</dt>
-                <dd>{moneyRange(selected.yearly_min_compensation, selected.yearly_max_compensation)}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="detail-section">
-            <h4>Rationale</h4>
-            <p>{selected.justification ?? "No justification captured."}</p>
-            <p><strong>Gating flags:</strong> {renderListish(selected.gating_flags)}</p>
-            <p><strong>Strengths:</strong> {renderListish(selected.strengths)}</p>
-            <p><strong>Gaps:</strong> {renderListish(selected.gaps)}</p>
-          </div>
-
-          <div className="detail-section">
-            <h4>Metadata</h4>
-            <dl className="detail-list">
-              <div>
-                <dt>Job ID</dt>
-                <dd className="mono">{selected.job_id ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Classification</dt>
-                <dd>{selected.classification_key ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Resume</dt>
-                <dd>{selected.resume_name ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Scored At</dt>
-                <dd>{formatDate(selected.scored_at)}</dd>
-              </div>
-            </dl>
-            <div className="detail-actions">
-              {selected.apply_url ? (
-                <a className="action-button" href={selected.apply_url} target="_blank" rel="noreferrer">
-                  Open Apply URL
-                </a>
-              ) : null}
-              <button
-                type="button"
-                className="action-button"
-                onClick={handleCopyDescription}
-                disabled={!selected.description}
-              >
-                Copy Job Description
-              </button>
-              {copyState === "copied" ? <span className="inline-feedback">Copied.</span> : null}
-              {copyState === "error" ? <span className="inline-feedback error-text">Unable to copy.</span> : null}
-            </div>
-          </div>
-        </DetailModal>
+          onApplicationUpdated={(updated) => {
+            setData((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+            setSelected(updated);
+          }}
+        />
       ) : null}
 
       {isCreatingJobDescription ? (
