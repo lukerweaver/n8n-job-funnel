@@ -116,6 +116,7 @@ ALLOWED_APPLICATION_STATUSES = {
 }
 ACTIVE_APPLICATION_STATUSES = {"applied", "screening", "interview"}
 TERMINAL_APPLICATION_STATUSES = {"offer", "rejected", "ghosted", "withdrawn", "pass"}
+HISTORICAL_APPLICATION_STATUSES = ACTIVE_APPLICATION_STATUSES | TERMINAL_APPLICATION_STATUSES
 HIDDEN_APPLICATION_STATUSES = {"error"}
 APPLICATION_TRANSITIONS = {
     "new": {"applied", "pass"},
@@ -1321,10 +1322,14 @@ def list_applications(
         query = query.where(JobApplication.status == status)
         count_query = count_query.where(JobApplication.status == status)
     if status_group:
-        if status_group != "active":
+        if status_group == "active":
+            query = query.where(JobApplication.status.in_(ACTIVE_APPLICATION_STATUSES))
+            count_query = count_query.where(JobApplication.status.in_(ACTIVE_APPLICATION_STATUSES))
+        elif status_group == "historical":
+            query = query.where(JobApplication.status.in_(HISTORICAL_APPLICATION_STATUSES))
+            count_query = count_query.where(JobApplication.status.in_(HISTORICAL_APPLICATION_STATUSES))
+        else:
             raise HTTPException(status_code=400, detail=f"Unsupported application status group '{status_group}'")
-        query = query.where(JobApplication.status.in_(ACTIVE_APPLICATION_STATUSES))
-        count_query = count_query.where(JobApplication.status.in_(ACTIVE_APPLICATION_STATUSES))
     if score_min is not None:
         query = query.where(JobApplication.score.is_not(None), JobApplication.score >= score_min)
         count_query = count_query.where(JobApplication.score.is_not(None), JobApplication.score >= score_min)

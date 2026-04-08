@@ -14,6 +14,7 @@ export function RunsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const params = useMemo(() => {
     const next = new URLSearchParams(searchParams);
@@ -22,6 +23,14 @@ export function RunsPage() {
     }
     return next;
   }, [searchParams]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setRefreshTick((current) => current + 1);
+    }, 60000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +58,7 @@ export function RunsPage() {
     return () => {
       cancelled = true;
     };
-  }, [params]);
+  }, [params, refreshTick]);
 
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -78,8 +87,9 @@ export function RunsPage() {
     <section className="page-grid">
       <div className="page-header">
         <div>
-          <p className="eyebrow">Page 2</p>
+          <p className="eyebrow">Page 4</p>
           <h2>Runs</h2>
+          <p className="page-subtitle">Refreshes from the API every 60 seconds.</p>
         </div>
         <div className="stat-chip">{total} visible runs</div>
       </div>

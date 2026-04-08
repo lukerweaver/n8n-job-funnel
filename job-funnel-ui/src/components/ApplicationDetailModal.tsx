@@ -72,6 +72,16 @@ interface LifecycleMilestone {
   noteField: LifecycleNoteField;
 }
 
+const LIFECYCLE_MILESTONES: LifecycleMilestone[] = [
+  { status: "applied", label: "Applied", field: "applied_at", noteField: "applied_notes" },
+  { status: "screening", label: "Screening", field: "screening_at", noteField: "screening_notes" },
+  { status: "offer", label: "Offer", field: "offer_at", noteField: "offer_notes" },
+  { status: "rejected", label: "Rejected", field: "rejected_at", noteField: "rejected_notes" },
+  { status: "ghosted", label: "Ghosted", field: "ghosted_at", noteField: "ghosted_notes" },
+  { status: "withdrawn", label: "Withdrawn", field: "withdrawn_at", noteField: "withdrawn_notes" },
+  { status: "pass", label: "Pass", field: "passed_at", noteField: "passed_notes" },
+];
+
 const EMPTY_ROUND_FORM: InterviewRoundFormState = {
   round_number: "",
   stage_name: "",
@@ -139,16 +149,6 @@ export function ApplicationDetailModal({
   nextDisabled = false,
   onApplicationUpdated,
 }: ApplicationDetailModalProps) {
-  const lifecycleMilestones: LifecycleMilestone[] = [
-    { status: "applied", label: "Applied", field: "applied_at", noteField: "applied_notes" },
-    { status: "screening", label: "Screening", field: "screening_at", noteField: "screening_notes" },
-    { status: "offer", label: "Offer", field: "offer_at", noteField: "offer_notes" },
-    { status: "rejected", label: "Rejected", field: "rejected_at", noteField: "rejected_notes" },
-    { status: "ghosted", label: "Ghosted", field: "ghosted_at", noteField: "ghosted_notes" },
-    { status: "withdrawn", label: "Withdrawn", field: "withdrawn_at", noteField: "withdrawn_notes" },
-    { status: "pass", label: "Pass", field: "passed_at", noteField: "passed_notes" },
-  ];
-
   const [application, setApplication] = useState<JobApplication | null>(null);
   const [interviewRounds, setInterviewRounds] = useState<InterviewRound[]>([]);
   const [loading, setLoading] = useState(true);
@@ -221,7 +221,7 @@ export function ApplicationDetailModal({
     if (!application) {
       return [];
     }
-    return lifecycleMilestones.filter((milestone) => Boolean(application[milestone.field]));
+    return LIFECYCLE_MILESTONES.filter((milestone) => Boolean(application[milestone.field]));
   }, [application]);
 
   async function refreshApplication() {
@@ -269,7 +269,7 @@ export function ApplicationDetailModal({
         passed_at?: string | null;
         passed_notes?: string | null;
       } = { status };
-      const milestone = lifecycleMilestones.find((item) => item.status === status);
+      const milestone = LIFECYCLE_MILESTONES.find((item) => item.status === status);
       if (milestone && actionDate) {
         lifecyclePayload[milestone.field] = toIsoOrNull(actionDate);
         lifecyclePayload[milestone.noteField] = actionNote.trim() || null;

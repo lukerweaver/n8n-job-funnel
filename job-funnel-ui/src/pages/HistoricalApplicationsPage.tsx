@@ -8,8 +8,9 @@ import type { JobApplication } from "../types";
 import { formatDate } from "../utils";
 
 const DEFAULT_LIMIT = 25;
+const HISTORICAL_APPLICATION_STATUSES = ["applied", "screening", "interview", "offer", "rejected", "ghosted", "withdrawn", "pass"];
 
-export function ActiveApplicationsPage() {
+export function HistoricalApplicationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState<JobApplication[]>([]);
   const [total, setTotal] = useState(0);
@@ -24,7 +25,7 @@ export function ActiveApplicationsPage() {
       next.set("limit", String(DEFAULT_LIMIT));
     }
     if (!next.get("status_group")) {
-      next.set("status_group", "active");
+      next.set("status_group", "historical");
     }
     if (!next.get("sort_by")) {
       next.set("sort_by", "updated_at");
@@ -85,7 +86,7 @@ export function ActiveApplicationsPage() {
   function clearFilters() {
     setSearchParams({
       limit: String(DEFAULT_LIMIT),
-      status_group: "active",
+      status_group: "historical",
       sort_by: "updated_at",
       sort_order: "desc",
       offset: "0",
@@ -95,7 +96,7 @@ export function ActiveApplicationsPage() {
   const limit = Number(params.get("limit") ?? String(DEFAULT_LIMIT));
   const offset = Number(params.get("offset") ?? "0");
   const selectedIndex = selected ? data.findIndex((item) => item.id === selected.id) : -1;
-  const upcomingCount = data.filter((item) => item.next_interview_at).length;
+  const terminalCount = data.filter((item) => ["offer", "rejected", "ghosted", "withdrawn", "pass"].includes(item.status)).length;
 
   useEffect(() => {
     const currentQuery = params.get("q") ?? "";
@@ -135,13 +136,13 @@ export function ActiveApplicationsPage() {
     <section className="page-grid">
       <div className="page-header">
         <div>
-          <p className="eyebrow">Page 2</p>
-          <h2>Active Applications</h2>
-          <p className="page-subtitle active-page-subtitle">In-flight applications with upcoming interview visibility.</p>
+          <p className="eyebrow">Page 3</p>
+          <h2>Historical Applications</h2>
+          <p className="page-subtitle">Applied applications across active and completed lifecycle states.</p>
         </div>
         <div className="page-actions">
-          <div className="stat-chip">{total} active applications</div>
-          <div className="stat-chip">{upcomingCount} with upcoming interviews</div>
+          <div className="stat-chip">{total} historical applications</div>
+          <div className="stat-chip">{terminalCount} completed outcomes</div>
         </div>
       </div>
 
@@ -155,6 +156,18 @@ export function ActiveApplicationsPage() {
               onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Company, title, or job id"
             />
+          </label>
+
+          <label>
+            Status
+            <select value={params.get("status") ?? ""} onChange={(event) => updateParam("status", event.target.value)}>
+              <option value="">All</option>
+              {HISTORICAL_APPLICATION_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label>
@@ -222,9 +235,9 @@ export function ActiveApplicationsPage() {
       </div>
 
       <div className="panel table-panel">
-        {loading ? <p className="state-message">Loading active applications...</p> : null}
+        {loading ? <p className="state-message">Loading historical applications...</p> : null}
         {error ? <p className="state-message error-message">{error}</p> : null}
-        {!loading && !error && data.length === 0 ? <p className="state-message">No active applications match current filters.</p> : null}
+        {!loading && !error && data.length === 0 ? <p className="state-message">No historical applications match current filters.</p> : null}
 
         {!loading && !error && data.length > 0 ? (
           <>
@@ -234,8 +247,8 @@ export function ActiveApplicationsPage() {
                   <th>Company</th>
                   <th>Title</th>
                   <th>Status</th>
+                  <th>Applied</th>
                   <th>Next Interview</th>
-                  <th>Interview Stage</th>
                   <th>Rounds</th>
                   <th>Resume</th>
                   <th>Updated</th>
@@ -249,8 +262,8 @@ export function ActiveApplicationsPage() {
                     <td>
                       <span className={`status-pill status-${application.status}`}>{application.status}</span>
                     </td>
+                    <td>{formatDate(application.applied_at)}</td>
                     <td>{formatDate(application.next_interview_at)}</td>
-                    <td>{application.next_interview_stage ?? "N/A"}</td>
                     <td>{application.interview_rounds_total}</td>
                     <td>{application.resume_name ?? "N/A"}</td>
                     <td>{formatDate(application.updated_at)}</td>
@@ -283,10 +296,10 @@ export function ActiveApplicationsPage() {
             setData((current) => {
               const next = current
                 .map((item) => (item.id === updated.id ? updated : item))
-                .filter((item) => ["applied", "screening", "interview"].includes(item.status));
+                .filter((item) => HISTORICAL_APPLICATION_STATUSES.includes(item.status));
               return next;
             });
-            if (["applied", "screening", "interview"].includes(updated.status)) {
+            if (HISTORICAL_APPLICATION_STATUSES.includes(updated.status)) {
               setSelected(updated);
             } else {
               setSelected(null);
