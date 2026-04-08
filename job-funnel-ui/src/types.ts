@@ -8,7 +8,24 @@ export type ApplicationStatus =
   | "interview"
   | "offer"
   | "rejected"
-  | "withdrawn";
+  | "ghosted"
+  | "withdrawn"
+  | "pass";
+
+export type InterviewRoundStatus = "scheduled" | "completed";
+
+export interface InterviewRound {
+  id: number;
+  job_application_id: number;
+  round_number: number;
+  stage_name: string | null;
+  status: InterviewRoundStatus;
+  notes: string | null;
+  scheduled_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface JobApplication {
   id: number;
@@ -46,10 +63,23 @@ export interface JobApplication {
   tailored_at: string | null;
   notified_at: string | null;
   applied_at: string | null;
+  applied_notes: string | null;
+  screening_at: string | null;
+  screening_notes: string | null;
   offer_at: string | null;
+  offer_notes: string | null;
   rejected_at: string | null;
+  rejected_notes: string | null;
+  ghosted_at: string | null;
+  ghosted_notes: string | null;
   withdrawn_at: string | null;
+  withdrawn_notes: string | null;
+  passed_at: string | null;
+  passed_notes: string | null;
   last_error_at: string | null;
+  next_interview_at: string | null;
+  next_interview_stage: string | null;
+  interview_rounds_total: number;
   created_at: string;
   updated_at: string;
 }
@@ -121,6 +151,11 @@ export interface RunApplication {
 export interface RunApplicationsResponse {
   total: number;
   items: RunApplication[];
+}
+
+export interface InterviewRoundListResponse {
+  total: number;
+  items: InterviewRound[];
 }
 
 export interface Resume {

@@ -153,9 +153,19 @@ class JobApplication(Base):
 
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    screening_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    screening_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     offer_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    offer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ghosted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ghosted_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    withdrawn_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    passed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    passed_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False

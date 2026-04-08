@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import { getRunApplications } from "../api";
-import { DetailModal } from "../components/DetailModal";
+import { ApplicationDetailModal } from "../components/ApplicationDetailModal";
 import { PaginationControls } from "../components/PaginationControls";
 import type { RunApplication } from "../types";
-import { formatDate, moneyRange } from "../utils";
+import { moneyRange } from "../utils";
 
 const DEFAULT_LIMIT = 25;
 
@@ -257,67 +257,16 @@ export function RunResultsPage() {
       </div>
 
       {selected ? (
-        <DetailModal
-          title={selected.title ?? "Untitled role"}
-          subtitle={`Run item #${selected.run_item_id} · ${selected.company_name ?? "Unknown company"}`}
+        <ApplicationDetailModal
+          applicationId={selected.job_application_id}
+          fallbackTitle={selected.title ?? "Untitled role"}
+          fallbackSubtitle={`Run item #${selected.run_item_id} · ${selected.company_name ?? "Unknown company"}`}
           onClose={() => setSelected(null)}
           onPrevious={() => setSelected(data[selectedIndex - 1])}
           onNext={() => setSelected(data[selectedIndex + 1])}
           previousDisabled={selectedIndex <= 0}
           nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
-        >
-          <div className="detail-section">
-            <h4>Summary</h4>
-            <dl className="detail-list">
-              <div>
-                <dt>Score</dt>
-                <dd>{selected.score ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Screening</dt>
-                <dd>{selected.screening_likelihood ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Recommendation</dt>
-                <dd>{selected.recommendation ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>{selected.run_item_status}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="detail-section">
-            <h4>Job</h4>
-            <dl className="detail-list">
-              <div>
-                <dt>Job ID</dt>
-                <dd className="mono">{selected.job_id ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Classification</dt>
-                <dd>{selected.classification_key ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Resume</dt>
-                <dd>{selected.resume_name ?? "N/A"}</dd>
-              </div>
-              <div>
-                <dt>Scored At</dt>
-                <dd>{formatDate(selected.scored_at)}</dd>
-              </div>
-            </dl>
-            {selected.run_item_error_message ? (
-              <p className="error-callout">{selected.run_item_error_message}</p>
-            ) : null}
-            {selected.apply_url ? (
-              <a className="action-link" href={selected.apply_url} target="_blank" rel="noreferrer">
-                Open Apply URL
-              </a>
-            ) : null}
-          </div>
-        </DetailModal>
+        />
       ) : null}
     </section>
   );

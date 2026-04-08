@@ -1,5 +1,8 @@
 import type {
+  InterviewRound,
+  InterviewRoundListResponse,
   JobApplicationListResponse,
+  JobApplication,
   JobIngestResponse,
   PromptLibrary,
   PromptLibraryListResponse,
@@ -63,6 +66,95 @@ async function sendJson<T>(path: string, method: "POST" | "PUT" | "DELETE", body
 
 export function getApplications(params: URLSearchParams) {
   return fetchJson<JobApplicationListResponse>("/applications", params);
+}
+
+export function getApplication(applicationId: number) {
+  return fetchJson<JobApplication>(`/applications/${applicationId}`);
+}
+
+export function updateApplicationStatus(
+  applicationId: number,
+  payload: {
+    status: string;
+    applied_at?: string | null;
+    applied_notes?: string | null;
+    screening_at?: string | null;
+    screening_notes?: string | null;
+    offer_at?: string | null;
+    offer_notes?: string | null;
+    rejected_at?: string | null;
+    rejected_notes?: string | null;
+    ghosted_at?: string | null;
+    ghosted_notes?: string | null;
+    withdrawn_at?: string | null;
+    withdrawn_notes?: string | null;
+    passed_at?: string | null;
+    passed_notes?: string | null;
+  },
+) {
+  return sendJson<JobApplication>(`/applications/${applicationId}/status`, "POST", payload);
+}
+
+export function updateApplicationLifecycleDates(
+  applicationId: number,
+  payload: {
+    applied_at?: string | null;
+    applied_notes?: string | null;
+    screening_at?: string | null;
+    screening_notes?: string | null;
+    offer_at?: string | null;
+    offer_notes?: string | null;
+    rejected_at?: string | null;
+    rejected_notes?: string | null;
+    ghosted_at?: string | null;
+    ghosted_notes?: string | null;
+    withdrawn_at?: string | null;
+    withdrawn_notes?: string | null;
+    passed_at?: string | null;
+    passed_notes?: string | null;
+  },
+) {
+  return sendJson<JobApplication>(`/applications/${applicationId}/lifecycle-dates`, "PUT", payload);
+}
+
+export function getInterviewRounds(applicationId: number) {
+  return fetchJson<InterviewRoundListResponse>(`/applications/${applicationId}/interview-rounds`);
+}
+
+export function createInterviewRound(
+  applicationId: number,
+  payload: {
+    round_number: number;
+    stage_name?: string | null;
+    status?: "scheduled" | "completed";
+    notes?: string | null;
+    scheduled_at?: string | null;
+    completed_at?: string | null;
+  },
+) {
+  return sendJson<InterviewRound>(`/applications/${applicationId}/interview-rounds`, "POST", payload);
+}
+
+export function updateInterviewRound(
+  applicationId: number,
+  interviewRoundId: number,
+  payload: {
+    round_number?: number | null;
+    stage_name?: string | null;
+    status?: "scheduled" | "completed" | null;
+    notes?: string | null;
+    scheduled_at?: string | null;
+    completed_at?: string | null;
+  },
+) {
+  return sendJson<InterviewRound>(`/applications/${applicationId}/interview-rounds/${interviewRoundId}`, "PUT", payload);
+}
+
+export function deleteInterviewRound(applicationId: number, interviewRoundId: number) {
+  return sendJson<{ deleted: boolean; id: number }>(
+    `/applications/${applicationId}/interview-rounds/${interviewRoundId}`,
+    "DELETE",
+  );
 }
 
 export function createJobDescription(payload: {

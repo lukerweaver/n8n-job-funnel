@@ -3,6 +3,7 @@ from typing import Literal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+from pydantic import model_validator
 
 
 class JobIngestItem(BaseModel):
@@ -256,9 +257,36 @@ class ApplicationsGenerateRunResponse(BaseModel):
 class ApplicationStatusWrite(BaseModel):
     status: str
     applied_at: datetime | None = None
+    applied_notes: str | None = None
+    screening_at: datetime | None = None
+    screening_notes: str | None = None
     offer_at: datetime | None = None
+    offer_notes: str | None = None
     rejected_at: datetime | None = None
+    rejected_notes: str | None = None
+    ghosted_at: datetime | None = None
+    ghosted_notes: str | None = None
     withdrawn_at: datetime | None = None
+    withdrawn_notes: str | None = None
+    passed_at: datetime | None = None
+    passed_notes: str | None = None
+
+
+class ApplicationLifecycleDatesUpdate(BaseModel):
+    applied_at: datetime | None = None
+    applied_notes: str | None = None
+    screening_at: datetime | None = None
+    screening_notes: str | None = None
+    offer_at: datetime | None = None
+    offer_notes: str | None = None
+    rejected_at: datetime | None = None
+    rejected_notes: str | None = None
+    ghosted_at: datetime | None = None
+    ghosted_notes: str | None = None
+    withdrawn_at: datetime | None = None
+    withdrawn_notes: str | None = None
+    passed_at: datetime | None = None
+    passed_notes: str | None = None
 
 
 class JobApplicationRead(BaseModel):
@@ -299,10 +327,23 @@ class JobApplicationRead(BaseModel):
     tailored_at: datetime | None = None
     notified_at: datetime | None = None
     applied_at: datetime | None = None
+    applied_notes: str | None = None
+    screening_at: datetime | None = None
+    screening_notes: str | None = None
     offer_at: datetime | None = None
+    offer_notes: str | None = None
     rejected_at: datetime | None = None
+    rejected_notes: str | None = None
+    ghosted_at: datetime | None = None
+    ghosted_notes: str | None = None
     withdrawn_at: datetime | None = None
+    withdrawn_notes: str | None = None
+    passed_at: datetime | None = None
+    passed_notes: str | None = None
     last_error_at: datetime | None = None
+    next_interview_at: datetime | None = None
+    next_interview_stage: str | None = None
+    interview_rounds_total: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -435,10 +476,27 @@ class ApplicationErrorWrite(BaseModel):
 class InterviewRoundCreate(BaseModel):
     round_number: int
     stage_name: str | None = None
-    status: str = "scheduled"
+    status: Literal["scheduled", "completed"] = "scheduled"
     notes: str | None = None
     scheduled_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+class InterviewRoundUpdate(BaseModel):
+    round_number: int | None = None
+    stage_name: str | None = None
+    status: Literal["scheduled", "completed"] | None = None
+    notes: str | None = None
+    scheduled_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def reject_null_for_required_fields(self):
+        if "round_number" in self.model_fields_set and self.round_number is None:
+            raise ValueError("round_number may not be null")
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status may not be null")
+        return self
 
 
 class InterviewRoundRead(BaseModel):
