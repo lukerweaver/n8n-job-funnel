@@ -424,35 +424,40 @@ export function ApplicationDetailModal({
 
           <div className="detail-section">
             <h4>Lifecycle</h4>
-            <div className="lifecycle-action-bar">
-              <label>
-                Effective Date
-                <input type="date" value={actionDate} onChange={(event) => setActionDate(event.target.value)} />
-              </label>
-              <label className="lifecycle-note-field">
-                Event Note
-                <textarea
-                  className="editor-textarea editor-textarea-compact"
-                  value={actionNote}
-                  onChange={(event) => setActionNote(event.target.value)}
-                  placeholder="Optional note for the selected lifecycle event."
-                />
-              </label>
-            </div>
-            <div className="workflow-actions">
-              {availableTransitions.length === 0 ? <p className="state-message compact-state-message">No further guided actions.</p> : null}
-              {availableTransitions.map((status) => (
-                <button
-                  key={status}
-                  type="button"
-                  className={`action-button ${status === "rejected" || status === "ghosted" || status === "withdrawn" || status === "pass" ? "danger-button" : ""}`}
-                  onClick={() => handleStatusUpdate(status)}
-                  disabled={statusSubmitting !== null}
-                >
-                  {statusSubmitting === status ? "Saving..." : `Mark ${STATUS_LABELS[status]}`}
-                </button>
-              ))}
-            </div>
+            {availableTransitions.length > 0 ? (
+              <>
+                <div className="lifecycle-action-bar">
+                  <label>
+                    Effective Date
+                    <input type="date" value={actionDate} onChange={(event) => setActionDate(event.target.value)} />
+                  </label>
+                  <label className="lifecycle-note-field">
+                    Event Note
+                    <textarea
+                      className="editor-textarea editor-textarea-compact"
+                      value={actionNote}
+                      onChange={(event) => setActionNote(event.target.value)}
+                      placeholder="Optional note for the selected lifecycle event."
+                    />
+                  </label>
+                </div>
+                <div className="workflow-actions">
+                  {availableTransitions.map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      className={`action-button ${status === "rejected" || status === "ghosted" || status === "withdrawn" || status === "pass" ? "danger-button" : ""}`}
+                      onClick={() => handleStatusUpdate(status)}
+                      disabled={statusSubmitting !== null}
+                    >
+                      {statusSubmitting === status ? "Saving..." : `Mark ${STATUS_LABELS[status]}`}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="state-message compact-state-message">No further guided actions.</p>
+            )}
             {visibleLifecycleMilestones.length > 0 ? (
               <div className="lifecycle-milestones">
                 {visibleLifecycleMilestones.map((milestone) => (
