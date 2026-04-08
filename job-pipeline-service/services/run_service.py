@@ -32,6 +32,10 @@ class RunCounts:
 SUCCESS_STATUSES = {"classified", "scored"}
 
 
+class EmptyRunSelectionError(ValueError):
+    pass
+
+
 def enqueue_application_score_run(
     session,
     *,
@@ -57,6 +61,9 @@ def enqueue_application_score_run(
         query = query.where(JobApplication.job_posting_id == job_posting_id)
 
     applications = list(session.scalars(query).all())
+    if not applications:
+        raise EmptyRunSelectionError("No items to process")
+
     effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
     run = Run(
         type="application_scoring",
@@ -105,6 +112,9 @@ def enqueue_classification_run(
         query = query.where(JobPosting.classification_key.is_(None))
 
     jobs = list(session.scalars(query).all())
+    if not jobs:
+        raise EmptyRunSelectionError("No items to process")
+
     effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
     run = Run(
         type="classification",
