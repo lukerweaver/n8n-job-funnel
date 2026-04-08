@@ -3,7 +3,7 @@
 This repository combines:
 
 - `job-pipeline-service/`: the FastAPI backend and current source of truth
-- `job-funnel-ui/`: the internal operator UI for applications and runs
+- `job-funnel-ui/`: the internal operator UI for applications, runs, statistics, resumes, and prompts
 - `job-scraper-chrome/`: the Chrome extension used to ingest jobs
 - `exports/`: sanitized n8n workflow exports and prompt seed data
 - `docs/`: lightweight architecture artifacts
@@ -78,6 +78,7 @@ High-value route groups:
 
 - Jobs: `/jobs/ingest`, `/jobs`, `/jobs/{id}`, `/jobs/{id}/classify/run`, `/jobs/classify/run`
 - Runs: `/runs`, `/runs/{run_id}`, `/runs/{run_id}/items`, `/runs/{run_id}/applications`
+- Statistics: `/statistics`
 - Users and resumes: `/users`, `/resumes`, `/resumes/{id}`
 - Applications: `/applications`, `/applications/generate`, `/applications/generate/run`, `/applications/{id}/score/run`, `/applications/score/run`
 - Prompt library: `/prompt-library`, `/prompt-library/{prompt_id}`
@@ -102,6 +103,7 @@ Database behavior:
 
 - default: SQLite at `job-pipeline-service/data/jobs.db`
 - override: set `DATABASE_URL` to use Postgres or another SQLAlchemy-supported database
+- LLM calls require explicit configuration through either `OLLAMA_BASE_URL` or the generic hosted-provider variables described in [`job-pipeline-service/README.md`](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/README.md).
 
 ### UX only
 
@@ -205,9 +207,11 @@ Details are in [job-scraper-chrome/README.md](/home/lrw5016/projects/n8n-job-fun
 
 The internal operator UI lives in [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui). It currently provides:
 
-- scored application review
-- run history
-- run results drill-down
+- All Applications, Active Applications, and Historical Applications views
+- run history and run results drill-down
+- direct launch actions for classification and scoring runs
+- statistics for job ingest and score distribution
+- resume and prompt library management
 
 Details are in [job-funnel-ui/README.md](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui/README.md).
 

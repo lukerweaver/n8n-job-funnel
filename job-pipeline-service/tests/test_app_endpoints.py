@@ -23,6 +23,7 @@ from app import (
     get_application,
     get_prompt_library,
     get_run,
+    get_statistics,
     health,
     ingest_jobs,
     list_applications,
@@ -1919,6 +1920,87 @@ def test_list_applications_hides_error_status_rows(db_session):
 
     assert response.total == 1
     assert all(item.status != "error" for item in response.items)
+
+
+def test_get_statistics_returns_ingest_series_and_score_distribution(db_session):
+    user = seed_user(db_session, name="Stats User", email="stats@example.com")
+    resume = seed_resume(db_session, user=user, name="Stats Resume", prompt_key="default")
+
+    day_one = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
+    day_two = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+    day_three = datetime(2026, 4, 3, 12, 0, tzinfo=timezone.utc)
+
+    first_job = seed_job(db_session, job_id="job-stats-1", created_at=day_one)
+    second_job = seed_job(db_session, job_id="job-stats-2", created_at=day_one + timedelta(hours=1))
+    third_job = seed_job(db_session, job_id="job-stats-3", created_at=day_two)
+    fourth_job = seed_job(db_session, job_id="job-stats-4", created_at=day_three)
+
+    seed_application(
+        db_session,
+        user=user,
+        job=first_job,
+        resume=resume,
+        status="scored",
+        score=18.6,
+        created_at=day_one,
+        scored_at=day_one,
+    )
+    seed_application(
+        db_session,
+        user=user,
+        job=second_job,
+        resume=resume,
+        status="scored",
+        score=11.2,
+        created_at=day_one + timedelta(hours=2),
+        scored_at=day_one + timedelta(hours=2),
+    )
+    seed_application(
+        db_session,
+        user=user,
+        job=third_job,
+        resume=resume,
+        status="scored",
+        score=19.5,
+        created_at=day_two,
+        scored_at=day_two,
+    )
+    seed_application(
+        db_session,
+        user=user,
+        job=fourth_job,
+        resume=resume,
+        status="scored",
+        score=17.0,
+        created_at=day_three,
+        scored_at=day_three,
+    )
+
+    response = get_statistics(db_session, days=30, high_score_threshold=18, bucket_size=2)
+
+    assert response.ingested_jobs.total_days == 3
+    assert response.ingested_jobs.total_ingested_job_postings == 4
+    assert response.ingested_jobs.total_high_job_postings == 2
+    assert [item.created_date.isoformat() for item in response.ingested_jobs.items] == [
+        "2026-04-03",
+        "2026-04-02",
+        "2026-04-01",
+    ]
+
+    latest_day = response.ingested_jobs.items[0]
+    assert latest_day.ingested_job_postings == 1
+    assert latest_day.high_job_postings == 0
+    assert latest_day.percentage_high == 0.0
+
+    score_distribution = response.score_distribution
+    assert score_distribution.total_scored_jobs == 4
+    assert score_distribution.bucket_size == 2
+    assert [bucket.count for bucket in score_distribution.buckets] == [1, 1, 2]
+    assert [(bucket.bucket_start, bucket.bucket_end) for bucket in score_distribution.buckets] == [
+        (10.0, 12.0),
+        (16.0, 18.0),
+        (18.0, 20.0),
+    ]
 
 
 def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):

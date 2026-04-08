@@ -1,4 +1,8 @@
 import type {
+  ApplicationScoreRunRequest,
+  ApplicationScoreRunResponse,
+  ClassificationRunRequest,
+  ClassificationRunResponse,
   InterviewRound,
   InterviewRoundListResponse,
   JobApplicationListResponse,
@@ -10,6 +14,7 @@ import type {
   ResumeListResponse,
   RunApplicationsResponse,
   RunListResponse,
+  StatisticsResponse,
 } from "./types";
 
 declare global {
@@ -172,8 +177,20 @@ export function getRuns(params: URLSearchParams) {
   return fetchJson<RunListResponse>("/runs", params);
 }
 
+export function createClassificationRun(payload: ClassificationRunRequest) {
+  return sendJson<ClassificationRunResponse>("/jobs/classify/run", "POST", payload);
+}
+
+export function createApplicationScoreRun(payload: ApplicationScoreRunRequest) {
+  return sendJson<ApplicationScoreRunResponse>("/applications/score/run", "POST", payload);
+}
+
 export function getRunApplications(runId: string, params: URLSearchParams) {
   return fetchJson<RunApplicationsResponse>(`/runs/${runId}/applications`, params);
+}
+
+export function getStatistics(params: URLSearchParams) {
+  return fetchJson<StatisticsResponse>("/statistics", params);
 }
 
 export function getResumes(params: URLSearchParams) {

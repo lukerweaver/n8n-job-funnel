@@ -2,11 +2,16 @@
 
 Internal React/Vite UI for the job funnel backend.
 
-Current MVP pages:
+Current operator pages:
 
-- `/applications` - scored application review table plus detail drawer
-- `/runs` - run history table
+- `/applications` - All Applications table with detail modal and manual job-posting workflow
+- `/active-applications` - active lifecycle states with interview visibility
+- `/historical-applications` - applied and terminal-state review
+- `/runs` - run history table plus launch actions for classification and scoring runs
 - `/runs/:runId` - run results view backed by joined run/application rows
+- `/statistics` - ingest trend table/chart and scored-job distribution
+- `/resumes` - resume inventory with modal-based create/edit flows
+- `/prompts` - prompt library table with modal-based create/edit flows
 
 ## Requirements
 
@@ -102,6 +107,14 @@ API_BASE_URL=http://localhost:8000
 
 That is correct for local browser access to the published API port. If you deploy behind a hostname or reverse proxy, change `API_BASE_URL` to the browser-visible API URL.
 
+## Current UX Patterns
+
+- The UI is intentionally server-driven and reads directly from FastAPI list and action endpoints.
+- Filter state is stored in the URL query string so refresh and navigation preserve the current view.
+- Primary list pages follow the pattern `filters -> dense table -> modal detail`.
+- The Runs page can queue classification and scoring runs directly from the UI.
+- The Statistics page combines lightweight charts with tables rather than a dashboard-card layout.
+
 ## What the UX Service Does
 
 The `job-funnel-ui` container:
@@ -115,5 +128,5 @@ The UX service does not proxy the API. It talks directly to the backend URL conf
 
 ## Notes
 
-- The UI is intentionally server-driven and reads directly from the list endpoints.
-- Filtering and sorting are expressed through URL query params so page state survives refresh and navigation.
+- The UX service does not proxy the API; it talks directly to the configured backend URL.
+- `API_BASE_URL` must be reachable from the browser, not just from inside Docker.

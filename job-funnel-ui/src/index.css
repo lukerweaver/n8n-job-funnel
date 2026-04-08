@@ -140,6 +140,11 @@ textarea {
   flex-wrap: wrap;
 }
 
+.stats-page-subtitle,
+.stats-section-subtitle {
+  color: rgba(21, 33, 27, 0.72);
+}
+
 .stat-chip {
   display: inline-flex;
   align-items: center;
@@ -189,6 +194,10 @@ textarea {
 .filter-actions {
   display: flex;
   align-items: end;
+}
+
+.stats-filter-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .primary-button,
@@ -518,6 +527,128 @@ textarea {
   gap: 0.75rem;
 }
 
+.stats-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.stats-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem 1.1rem;
+}
+
+.stats-card strong {
+  font-size: 1.9rem;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.stats-card p {
+  margin: 0;
+  color: rgba(21, 33, 27, 0.68);
+}
+
+.stats-card-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(21, 33, 27, 0.58);
+}
+
+.stats-panel-header h3 {
+  margin: 0;
+}
+
+.chart-shell {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  color: rgba(21, 33, 27, 0.72);
+  font-size: 0.86rem;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 4px;
+  border-radius: 999px;
+}
+
+.legend-bar-ingested {
+  height: 10px;
+  background: rgba(35, 83, 164, 0.28);
+}
+
+.legend-bar-high {
+  height: 10px;
+  background: rgba(121, 161, 140, 0.48);
+}
+
+.legend-line-ingested {
+  background: #2353a4;
+}
+
+.legend-line-high {
+  background: #355f46;
+}
+
+.chart-svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.chart-grid-line {
+  stroke: rgba(21, 33, 27, 0.12);
+  stroke-width: 1;
+}
+
+.chart-axis-label {
+  fill: rgba(21, 33, 27, 0.58);
+  font-size: 12px;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.chart-bar-ingested {
+  fill: rgba(35, 83, 164, 0.28);
+}
+
+.chart-bar-high {
+  fill: rgba(53, 95, 70, 0.5);
+}
+
+.chart-line-ingested {
+  stroke: #2353a4;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-line-high {
+  stroke: #355f46;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.score-chart-bar {
+  fill: rgba(143, 46, 51, 0.66);
+}
+
 .error-callout {
   padding: 0.85rem 1rem;
   border-radius: 16px;
@@ -740,6 +871,10 @@ textarea {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .stats-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .split-layout {
     grid-template-columns: 1fr;
   }
@@ -761,6 +896,11 @@ textarea {
 
   .filter-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stats-filter-grid,
+  .stats-card-grid {
+    grid-template-columns: 1fr;
   }
 }
 

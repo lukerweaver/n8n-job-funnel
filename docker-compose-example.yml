@@ -24,6 +24,25 @@ services:
     container_name: job-pipeline-service
     environment:
       DATABASE_URL: postgresql+psycopg://jobs_user:jobs_pass@postgres:5432/jobs_db
+
+      # Choose exactly one LLM configuration path.
+
+      # Ollama
+      SCORING_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://localhost:11434
+      OLLAMA_MODEL: qwen2.5:14b-instruct
+
+      # OpenAI-compatible host example
+      # SCORING_PROVIDER: openai_compatible
+      # LLM_BASE_URL: https://api.openai.com/v1
+      # LLM_API_KEY: your-api-key
+      # SCORING_MODEL: gpt-4.1-mini
+
+      # Groq example using the same OpenAI-compatible client
+      # SCORING_PROVIDER: groq
+      # LLM_BASE_URL: https://api.groq.com/openai/v1
+      # LLM_API_KEY: your-api-key
+      # SCORING_MODEL: llama-3.3-70b-versatile
     ports:
       - "8000:8000"
     depends_on:

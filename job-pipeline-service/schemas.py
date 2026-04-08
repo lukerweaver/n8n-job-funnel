@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from typing import Any
 
@@ -120,6 +120,45 @@ class RunApplicationRead(BaseModel):
 class RunApplicationsResponse(BaseModel):
     total: int
     items: list[RunApplicationRead]
+
+
+class DailyIngestStatisticsRead(BaseModel):
+    created_date: date
+    ingested_job_postings: int
+    rolling_7_day_avg_ingested: float
+    high_job_postings: int
+    rolling_7_day_avg_high: float
+    percentage_high: float | None = None
+    rolling_7_day_percentage: float | None = None
+
+
+class IngestStatisticsResponse(BaseModel):
+    total_days: int
+    total_ingested_job_postings: int
+    total_high_job_postings: int
+    average_daily_ingested: float
+    average_daily_high: float
+    items: list[DailyIngestStatisticsRead]
+
+
+class ScoreDistributionBucketRead(BaseModel):
+    bucket_start: float
+    bucket_end: float
+    count: int
+
+
+class ScoreDistributionResponse(BaseModel):
+    total_scored_jobs: int
+    average_score: float | None = None
+    minimum_score: float | None = None
+    maximum_score: float | None = None
+    bucket_size: float
+    buckets: list[ScoreDistributionBucketRead]
+
+
+class StatisticsResponse(BaseModel):
+    ingested_jobs: IngestStatisticsResponse
+    score_distribution: ScoreDistributionResponse
 
 
 class PromptLibraryBase(BaseModel):

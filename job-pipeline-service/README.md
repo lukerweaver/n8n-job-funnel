@@ -9,11 +9,19 @@ FastAPI backend for:
 5. tracking notification, lifecycle, and interview state
 6. exposing async run status for n8n-style orchestration
 
+The current operator UI consumes this service directly for:
+
+- application review across all, active, and historical views
+- run inspection plus direct classification/scoring run launch
+- statistics for ingest volume and score spread
+- resume management
+- prompt library management
+
 ## Requirements
 
 - Python 3.11+
 - optional Docker runtime for the compose example
-- optional Ollama endpoint if you want service-side classification or scoring
+- an LLM endpoint if you want service-side classification or scoring
 
 ## Database
 
@@ -40,13 +48,64 @@ Current core tables:
 Supported environment variables:
 
 - `DATABASE_URL`
-- `SCORING_PROVIDER` default `ollama`
-- `SCORING_MODEL` default `qwen2.5:14b-instruct`
-- `OLLAMA_BASE_URL` default `http://localhost:11434`
+- `SCORING_PROVIDER` optional
+- `SCORING_MODEL` optional, required for `openai_compatible`
+- `OLLAMA_BASE_URL` optional, required for `ollama`
+- `OLLAMA_MODEL` optional, defaults to `qwen2.5:14b-instruct` when using Ollama
 - `OLLAMA_NUM_CTX` default `50000`
+- `LLM_BASE_URL` optional, required for `openai_compatible`
+- `LLM_API_KEY` optional, required for `openai_compatible`
 - `LLM_TIMEOUT_SECONDS` default `180`
 
-The current LLM implementation supports `ollama`.
+The current LLM implementation supports:
+
+- `ollama`
+- `openai_compatible`
+
+`openai_compatible` is the generic hosted-provider path and works with any provider that exposes an OpenAI-style chat completions API given a host, API key, and model.
+
+Accepted explicit `SCORING_PROVIDER` values:
+
+- `ollama`
+- `openai_compatible`
+- `openai` (alias of `openai_compatible`)
+- `groq` (alias of `openai_compatible`)
+
+Provider resolution rules:
+
+1. If `SCORING_PROVIDER` is set, that provider is used.
+2. Otherwise if `OLLAMA_BASE_URL` is set, the service uses `ollama`.
+3. Otherwise if `LLM_BASE_URL` and `LLM_API_KEY` are set, the service uses `openai_compatible`.
+4. Otherwise classification and scoring calls fail with a clear "No LLM provider configured" error.
+
+There is intentionally no default `OLLAMA_BASE_URL`. This prevents installs from silently assuming a local Ollama instance exists.
+
+### LLM configuration examples
+
+Ollama:
+
+```bash
+export OLLAMA_BASE_URL=http://localhost:11434
+export OLLAMA_MODEL=qwen2.5:14b-instruct
+```
+
+Generic OpenAI-compatible host:
+
+```bash
+export SCORING_PROVIDER=openai_compatible
+export LLM_BASE_URL=https://api.openai.com/v1
+export LLM_API_KEY=your-api-key
+export SCORING_MODEL=gpt-4.1-mini
+```
+
+Groq using the same generic client:
+
+```bash
+export SCORING_PROVIDER=groq
+export LLM_BASE_URL=https://api.groq.com/openai/v1
+export LLM_API_KEY=your-api-key
+export SCORING_MODEL=llama-3.3-70b-versatile
+```
 
 ## Prompt Model
 
@@ -133,6 +192,7 @@ The compose example:
 - exposes the API on `localhost:8000`
 - starts Postgres on `localhost:5432`
 - sets `DATABASE_URL` for the API container
+- includes an example LLM configuration block you can switch between Ollama and hosted providers
 
 Stop it:
 
@@ -214,6 +274,10 @@ Optional threshold gate:
 - `GET /runs/{run_id}/items`
 - `GET /runs/{run_id}/applications`
 
+### Statistics
+
+- `GET /statistics`
+
 ### Users and resumes
 
 - `GET /users`
@@ -235,8 +299,11 @@ Optional threshold gate:
 - `POST /applications/{application_id}/notify`
 - `POST /applications/{application_id}/error`
 - `POST /applications/{application_id}/status`
+- `PUT /applications/{application_id}/lifecycle-dates`
 - `GET /applications/{application_id}/interview-rounds`
 - `POST /applications/{application_id}/interview-rounds`
+- `PUT /applications/{application_id}/interview-rounds/{interview_round_id}`
+- `DELETE /applications/{application_id}/interview-rounds/{interview_round_id}`
 
 ### Prompt library
 
@@ -357,6 +424,15 @@ Example:
   "callback_url": "https://<n8n-host>/webhook/application-score-complete"
 }
 ```
+
+### `GET /statistics`
+
+Returns the operator-facing statistics payload used by the Statistics tab.
+
+Current response sections:
+
+- `ingested_jobs`: daily ingest counts, high-score counts, rolling 7-day averages, and high-score percentages
+- `score_distribution`: scored-job count, min/max/average score, and histogram buckets
 
 ## Prompt Library Seed
 

@@ -153,6 +153,102 @@ export interface RunApplicationsResponse {
   items: RunApplication[];
 }
 
+export interface ClassificationRunRequest {
+  limit: number;
+  source?: string | null;
+  classification_key?: string | null;
+  prompt_key?: string | null;
+  force: boolean;
+  callback_url?: string | null;
+}
+
+export interface ClassificationRunResponse {
+  run_id: number;
+  type: string;
+  status: string;
+  selected: number;
+  processed: number;
+  classified: number;
+  errored: number;
+  skipped: number;
+  jobs: number[];
+  applications: number[];
+  callback_url: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_error: string | null;
+}
+
+export interface ApplicationScoreRunRequest {
+  limit: number;
+  status: string;
+  user_id?: number | null;
+  resume_id?: number | null;
+  job_posting_id?: number | null;
+  classification_key?: string | null;
+  prompt_key?: string | null;
+  force: boolean;
+  callback_url?: string | null;
+}
+
+export interface ApplicationScoreRunResponse {
+  run_id: number;
+  type: string;
+  status: string;
+  processed: number;
+  selected: number;
+  scored: number;
+  errored: number;
+  skipped: number;
+  jobs: number[];
+  applications: number[];
+  callback_url: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_error: string | null;
+}
+
+export interface DailyIngestStatistics {
+  created_date: string;
+  ingested_job_postings: number;
+  rolling_7_day_avg_ingested: number;
+  high_job_postings: number;
+  rolling_7_day_avg_high: number;
+  percentage_high: number | null;
+  rolling_7_day_percentage: number | null;
+}
+
+export interface IngestStatisticsResponse {
+  total_days: number;
+  total_ingested_job_postings: number;
+  total_high_job_postings: number;
+  average_daily_ingested: number;
+  average_daily_high: number;
+  items: DailyIngestStatistics[];
+}
+
+export interface ScoreDistributionBucket {
+  bucket_start: number;
+  bucket_end: number;
+  count: number;
+}
+
+export interface ScoreDistributionResponse {
+  total_scored_jobs: number;
+  average_score: number | null;
+  minimum_score: number | null;
+  maximum_score: number | null;
+  bucket_size: number;
+  buckets: ScoreDistributionBucket[];
+}
+
+export interface StatisticsResponse {
+  ingested_jobs: IngestStatisticsResponse;
+  score_distribution: ScoreDistributionResponse;
+}
+
 export interface InterviewRoundListResponse {
   total: number;
   items: InterviewRound[];

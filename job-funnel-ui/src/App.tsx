@@ -7,6 +7,7 @@ import { PromptsPage } from "./pages/PromptsPage";
 import { ResumesPage } from "./pages/ResumesPage";
 import { RunResultsPage } from "./pages/RunResultsPage";
 import { RunsPage } from "./pages/RunsPage";
+import { StatisticsPage } from "./pages/StatisticsPage";
 
 export function App() {
   return (
@@ -22,7 +23,7 @@ export function App() {
 
         <nav className="nav">
           <NavLink className="nav-link" to="/applications">
-            Applications
+            All Applications
           </NavLink>
           <NavLink className="nav-link" to="/active-applications">
             Active Applications
@@ -32,6 +33,9 @@ export function App() {
           </NavLink>
           <NavLink className="nav-link" to="/runs">
             Runs
+          </NavLink>
+          <NavLink className="nav-link" to="/statistics">
+            Statistics
           </NavLink>
           <NavLink className="nav-link" to="/resumes">
             Resumes
@@ -54,6 +58,7 @@ export function App() {
           <Route path="/historical-applications" element={<HistoricalApplicationsPage />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/runs/:runId" element={<RunResultsPage />} />
+          <Route path="/statistics" element={<StatisticsPage />} />
           <Route path="/resumes" element={<ResumesPage />} />
           <Route path="/prompts" element={<PromptsPage />} />
         </Routes>

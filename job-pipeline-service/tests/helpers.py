@@ -3,15 +3,23 @@ from datetime import datetime, timezone
 from models import JobApplication, JobPosting, PromptLibrary, Resume, Run, RunItem, User
 
 
-def seed_job(session, *, job_id="job-1", description="Role details", source="linkedin") -> JobPosting:
+def seed_job(
+    session,
+    *,
+    job_id="job-1",
+    description="Role details",
+    source="linkedin",
+    created_at=None,
+) -> JobPosting:
+    created_at = created_at or datetime.now(timezone.utc)
     job = JobPosting(
         job_id=job_id,
         source=source,
         company_name="Acme",
         title="PM",
         description=description,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=created_at,
+        updated_at=created_at,
     )
     session.add(job)
     session.commit()
@@ -100,14 +108,20 @@ def seed_application(
     job: JobPosting,
     resume: Resume,
     status="new",
+    score=None,
+    created_at=None,
+    scored_at=None,
 ) -> JobApplication:
+    created_at = created_at or datetime.now(timezone.utc)
     application = JobApplication(
         user_id=user.id,
         job_posting_id=job.id,
         resume_id=resume.id,
         status=status,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        score=score,
+        scored_at=scored_at,
+        created_at=created_at,
+        updated_at=created_at,
     )
     session.add(application)
     session.commit()

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
-from sqlalchemy import asc, desc, exists, inspect, or_, select, text
+from sqlalchemy import Float, Integer, asc, cast, desc, exists, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, selectinload
 
@@ -30,6 +30,8 @@ from schemas import (
     ApplicationsScoreRunResponse,
     ApplicationLifecycleDatesUpdate,
     ApplicationStatusWrite,
+    DailyIngestStatisticsRead,
+    IngestStatisticsResponse,
     InterviewRoundCreate,
     InterviewRoundListResponse,
     InterviewRoundRead,
@@ -51,6 +53,9 @@ from schemas import (
     ResumeListResponse,
     ResumeRead,
     ResumeUpdate,
+    ScoreDistributionBucketRead,
+    ScoreDistributionResponse,
+    StatisticsResponse,
     RunApplicationsResponse,
     RunApplicationRead,
     RunItemsResponse,
@@ -133,6 +138,7 @@ OPENAPI_TAGS = [
     {"name": "jobs", "description": "Job ingest, listing, and classification routes."},
     {"name": "applications", "description": "Application generation, scoring, notification, status, and interview lifecycle routes."},
     {"name": "runs", "description": "Async run inspection for classification and application scoring."},
+    {"name": "statistics", "description": "Operational statistics and score distributions for the operator console."},
     {"name": "users", "description": "User records that own resumes and applications."},
     {"name": "resumes", "description": "Resume inventory keyed to classification domains."},
     {"name": "prompt-library", "description": "Versioned prompt templates resolved by prompt key and prompt type."},
@@ -1140,6 +1146,135 @@ def list_run_items(run_id: int, session: Session = Depends(get_session)):
             )
             for item in items
         ],
+    )
+
+
+@app.get("/statistics", response_model=StatisticsResponse, tags=["statistics"])
+def get_statistics(
+    session: Session = Depends(get_session),
+    days: Annotated[int | None, Query(ge=7, le=3650)] = 90,
+    high_score_threshold: float = Query(default=18),
+    bucket_size: float = Query(default=2, gt=0, le=20),
+):
+    created_date = func.date(JobPosting.created_at)
+    application_created_date = func.date(JobApplication.created_at)
+
+    daily_counts = (
+        select(
+            created_date.label("created_date"),
+            func.count(JobPosting.id).label("ingested_job_postings"),
+        )
+        .group_by(created_date)
+        .subquery()
+    )
+
+    daily_high_counts = (
+        select(
+            application_created_date.label("created_date"),
+            func.count(JobApplication.id).label("high_job_postings"),
+        )
+        .where(JobApplication.score.is_not(None))
+        .where(JobApplication.score >= high_score_threshold)
+        .group_by(application_created_date)
+        .subquery()
+    )
+
+    high_job_postings = func.coalesce(daily_high_counts.c.high_job_postings, 0)
+    percentage_high = (
+        cast(high_job_postings, Float) * 100.0 / func.nullif(cast(daily_counts.c.ingested_job_postings, Float), 0.0)
+    )
+
+    daily_statistics_query = (
+        select(
+            daily_counts.c.created_date,
+            daily_counts.c.ingested_job_postings,
+            func.avg(daily_counts.c.ingested_job_postings).over(
+                order_by=daily_counts.c.created_date,
+                rows=(-6, 0),
+            ).label("rolling_7_day_avg_ingested"),
+            high_job_postings.label("high_job_postings"),
+            func.avg(high_job_postings).over(
+                order_by=daily_counts.c.created_date,
+                rows=(-6, 0),
+            ).label("rolling_7_day_avg_high"),
+            percentage_high.label("percentage_high"),
+            func.avg(percentage_high).over(
+                order_by=daily_counts.c.created_date,
+                rows=(-6, 0),
+            ).label("rolling_7_day_percentage"),
+        )
+        .select_from(daily_counts.outerjoin(daily_high_counts, daily_counts.c.created_date == daily_high_counts.c.created_date))
+        .order_by(daily_counts.c.created_date.desc())
+    )
+
+    if days is not None:
+        daily_statistics_query = daily_statistics_query.limit(days)
+
+    daily_rows = session.execute(daily_statistics_query).all()
+    daily_items = [
+        DailyIngestStatisticsRead(
+            created_date=datetime.strptime(str(row.created_date), "%Y-%m-%d").date(),
+            ingested_job_postings=int(row.ingested_job_postings or 0),
+            rolling_7_day_avg_ingested=float(row.rolling_7_day_avg_ingested or 0),
+            high_job_postings=int(row.high_job_postings or 0),
+            rolling_7_day_avg_high=float(row.rolling_7_day_avg_high or 0),
+            percentage_high=float(row.percentage_high) if row.percentage_high is not None else None,
+            rolling_7_day_percentage=float(row.rolling_7_day_percentage) if row.rolling_7_day_percentage is not None else None,
+        )
+        for row in daily_rows
+    ]
+
+    score_summary_row = session.execute(
+        select(
+            func.count(JobApplication.id).label("total_scored_jobs"),
+            func.avg(JobApplication.score).label("average_score"),
+            func.min(JobApplication.score).label("minimum_score"),
+            func.max(JobApplication.score).label("maximum_score"),
+        )
+        .where(JobApplication.score.is_not(None))
+    ).one()
+
+    bucket_start = (cast(JobApplication.score / bucket_size, Integer) * bucket_size).label("bucket_start")
+    bucket_rows = session.execute(
+        select(
+            bucket_start,
+            func.count(JobApplication.id).label("count"),
+        )
+        .where(JobApplication.score.is_not(None))
+        .group_by(bucket_start)
+        .order_by(bucket_start.asc())
+    ).all()
+
+    score_distribution = ScoreDistributionResponse(
+        total_scored_jobs=int(score_summary_row.total_scored_jobs or 0),
+        average_score=float(score_summary_row.average_score) if score_summary_row.average_score is not None else None,
+        minimum_score=float(score_summary_row.minimum_score) if score_summary_row.minimum_score is not None else None,
+        maximum_score=float(score_summary_row.maximum_score) if score_summary_row.maximum_score is not None else None,
+        bucket_size=bucket_size,
+        buckets=[
+            ScoreDistributionBucketRead(
+                bucket_start=float(row.bucket_start),
+                bucket_end=float(row.bucket_start + bucket_size),
+                count=int(row.count),
+            )
+            for row in bucket_rows
+        ],
+    )
+
+    return StatisticsResponse(
+        ingested_jobs=IngestStatisticsResponse(
+            total_days=len(daily_items),
+            total_ingested_job_postings=sum(item.ingested_job_postings for item in daily_items),
+            total_high_job_postings=sum(item.high_job_postings for item in daily_items),
+            average_daily_ingested=(
+                sum(item.ingested_job_postings for item in daily_items) / len(daily_items) if daily_items else 0.0
+            ),
+            average_daily_high=(
+                sum(item.high_job_postings for item in daily_items) / len(daily_items) if daily_items else 0.0
+            ),
+            items=daily_items,
+        ),
+        score_distribution=score_distribution,
     )
 
 
