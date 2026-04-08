@@ -22,7 +22,8 @@ def render_user_prompt(job: JobPosting, prompt: PromptLibrary) -> str:
     }
 
     for key, pattern in PLACEHOLDER_PATTERNS.items():
-        rendered = pattern.sub(str(replacements[key]), rendered)
+        replacement = str(replacements[key])
+        rendered = pattern.sub(lambda _match, value=replacement: value, rendered)
 
     return rendered
 
@@ -38,6 +39,7 @@ def render_application_prompt(application: JobApplication, prompt: PromptLibrary
     }
 
     for key, pattern in PLACEHOLDER_PATTERNS.items():
-        rendered = pattern.sub(str(replacements[key]), rendered)
+        replacement = str(replacements[key])
+        rendered = pattern.sub(lambda _match, value=replacement: value, rendered)
 
     return rendered
