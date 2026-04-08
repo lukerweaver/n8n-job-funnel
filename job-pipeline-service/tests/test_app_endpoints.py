@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy import select, text
 
@@ -1709,6 +1710,14 @@ def test_apply_application_status_preserves_supplied_timestamp():
     )
 
     assert application.screening_at == timestamp
+
+
+def test_interview_round_update_rejects_null_required_fields():
+    with pytest.raises(ValidationError, match="round_number may not be null"):
+        InterviewRoundUpdate(round_number=None)
+
+    with pytest.raises(ValidationError, match="status may not be null"):
+        InterviewRoundUpdate(status=None)
 
 
 def test_apply_application_status_sets_milestone_notes():

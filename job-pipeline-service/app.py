@@ -990,8 +990,8 @@ def list_runs(
     prompt_key: str | None = None,
     callback_status: str | None = None,
     created_since: datetime | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ):
     query = select(Run).order_by(Run.created_at.desc())
     count_query = select(Run)
@@ -1044,8 +1044,8 @@ def list_run_applications(
     score_max: float | None = None,
     sort_by: str = "score",
     sort_order: str = "desc",
-    limit: int = 100,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ):
     run = _get_run_by_id(session, run_id)
     if run is None:
@@ -1261,8 +1261,8 @@ def list_applications(
     updated_since: datetime | None = None,
     sort_by: str = "created_at",
     sort_order: str = "desc",
-    limit: int = 100,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ):
     order_by = _resolve_application_sort(sort_by, sort_order)
     secondary_order = asc(JobApplication.id) if sort_order.lower() == "asc" else desc(JobApplication.id)

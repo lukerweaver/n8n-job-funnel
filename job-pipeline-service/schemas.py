@@ -3,6 +3,7 @@ from typing import Literal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+from pydantic import model_validator
 
 
 class JobIngestItem(BaseModel):
@@ -488,6 +489,14 @@ class InterviewRoundUpdate(BaseModel):
     notes: str | None = None
     scheduled_at: datetime | None = None
     completed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def reject_null_for_required_fields(self):
+        if "round_number" in self.model_fields_set and self.round_number is None:
+            raise ValueError("round_number may not be null")
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status may not be null")
+        return self
 
 
 class InterviewRoundRead(BaseModel):
