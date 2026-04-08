@@ -276,6 +276,21 @@ def test_run_jobs_classification_filters_preclassified_jobs(db_session):
     assert excluded.id not in response.jobs
 
 
+def test_run_jobs_classification_empty_selection_does_not_create_run(db_session):
+    job = seed_job(db_session, job_id="job-1")
+    job.classification_key = "Product Manager"
+    db_session.commit()
+
+    existing_run_ids = db_session.scalars(select(app_module.Run.id)).all()
+
+    with pytest.raises(HTTPException) as exc_info:
+        run_jobs_classification(JobsClassificationRunRequest(limit=10, force=False), db_session)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "No items to process"
+    assert db_session.scalars(select(app_module.Run.id)).all() == existing_run_ids
+
+
 def test_user_and_resume_crud(db_session):
     user = create_user(UserCreate(name="Alice", email="alice@example.com"), db_session)
     resume = create_resume(
@@ -839,14 +854,17 @@ def test_run_applications_score_batch(db_session, monkeypatch):
 
 
 def test_run_applications_score_empty_selection(db_session):
-    result = run_applications_score(
-        ApplicationsScoreRunRequest(status="new", limit=10, user_id=9999, force=False),
-        db_session,
-    )
+    existing_run_ids = db_session.scalars(select(app_module.Run.id)).all()
 
-    assert result.selected == 0
-    assert result.processed == 0
-    assert result.applications == []
+    with pytest.raises(HTTPException) as exc_info:
+        run_applications_score(
+            ApplicationsScoreRunRequest(status="new", limit=10, user_id=9999, force=False),
+            db_session,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "No items to process"
+    assert db_session.scalars(select(app_module.Run.id)).all() == existing_run_ids
 
 
 def test_run_applications_score_creates_generic_run_items(db_session):

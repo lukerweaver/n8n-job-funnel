@@ -67,6 +67,7 @@ from services.classification_service import classify_job
 from services.llm_client import LlmRequestError
 from services.prompt_service import PromptResolutionError
 from services.run_service import (
+    EmptyRunSelectionError,
     RunWorker,
     enqueue_application_score_run,
     enqueue_classification_run,
@@ -965,15 +966,18 @@ def run_job_classification(job_id: int, payload: JobClassificationRunRequest, se
 
 @app.post("/jobs/classify/run", response_model=JobsClassificationRunResponse, status_code=202, tags=["jobs"])
 def run_jobs_classification(payload: JobsClassificationRunRequest, session: Session = Depends(get_session)):
-    run = enqueue_classification_run(
-        session,
-        limit=payload.limit,
-        source=payload.source,
-        classification_key=payload.classification_key,
-        prompt_key=payload.prompt_key,
-        force=payload.force,
-        callback_url=payload.callback_url,
-    )
+    try:
+        run = enqueue_classification_run(
+            session,
+            limit=payload.limit,
+            source=payload.source,
+            classification_key=payload.classification_key,
+            prompt_key=payload.prompt_key,
+            force=payload.force,
+            callback_url=payload.callback_url,
+        )
+    except EmptyRunSelectionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _commit_or_fail(session)
     session.refresh(run)
     return JobsClassificationRunResponse(**serialize_classification_run(session, run))
@@ -1594,18 +1598,21 @@ def run_application_score(
 
 @app.post("/applications/score/run", response_model=ApplicationsScoreRunResponse, status_code=202, tags=["applications"])
 def run_applications_score(payload: ApplicationsScoreRunRequest, session: Session = Depends(get_session)):
-    run = enqueue_application_score_run(
-        session,
-        limit=payload.limit,
-        status=payload.status,
-        user_id=payload.user_id,
-        resume_id=payload.resume_id,
-        job_posting_id=payload.job_posting_id,
-        classification_key=payload.classification_key,
-        prompt_key=payload.prompt_key,
-        force=payload.force,
-        callback_url=payload.callback_url,
-    )
+    try:
+        run = enqueue_application_score_run(
+            session,
+            limit=payload.limit,
+            status=payload.status,
+            user_id=payload.user_id,
+            resume_id=payload.resume_id,
+            job_posting_id=payload.job_posting_id,
+            classification_key=payload.classification_key,
+            prompt_key=payload.prompt_key,
+            force=payload.force,
+            callback_url=payload.callback_url,
+        )
+    except EmptyRunSelectionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _commit_or_fail(session)
     session.refresh(run)
     return ApplicationsScoreRunResponse(**serialize_application_score_run(session, run))
