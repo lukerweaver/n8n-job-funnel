@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 import time
 from urllib.parse import urlparse
@@ -1156,28 +1156,29 @@ def get_statistics(
     high_score_threshold: float = Query(default=18),
     bucket_size: float = Query(default=2, gt=0, le=20),
 ):
+    cutoff_datetime: datetime | None = None
+    if days is not None:
+        cutoff_date = utcnow().date() - timedelta(days=days - 1)
+        cutoff_datetime = datetime.combine(cutoff_date, datetime.min.time(), tzinfo=timezone.utc)
+
     created_date = func.date(JobPosting.created_at)
     application_created_date = func.date(JobApplication.created_at)
 
-    daily_counts = (
-        select(
-            created_date.label("created_date"),
-            func.count(JobPosting.id).label("ingested_job_postings"),
-        )
-        .group_by(created_date)
-        .subquery()
+    daily_counts_query = select(
+        created_date.label("created_date"),
+        func.count(JobPosting.id).label("ingested_job_postings"),
     )
+    if cutoff_datetime is not None:
+        daily_counts_query = daily_counts_query.where(JobPosting.created_at >= cutoff_datetime)
+    daily_counts = daily_counts_query.group_by(created_date).subquery()
 
-    daily_high_counts = (
-        select(
-            application_created_date.label("created_date"),
-            func.count(JobApplication.id).label("high_job_postings"),
-        )
-        .where(JobApplication.score.is_not(None))
-        .where(JobApplication.score >= high_score_threshold)
-        .group_by(application_created_date)
-        .subquery()
-    )
+    daily_high_counts_query = select(
+        application_created_date.label("created_date"),
+        func.count(func.distinct(JobApplication.job_posting_id)).label("high_job_postings"),
+    ).where(JobApplication.score.is_not(None), JobApplication.score >= high_score_threshold)
+    if cutoff_datetime is not None:
+        daily_high_counts_query = daily_high_counts_query.where(JobApplication.created_at >= cutoff_datetime)
+    daily_high_counts = daily_high_counts_query.group_by(application_created_date).subquery()
 
     high_job_postings = func.coalesce(daily_high_counts.c.high_job_postings, 0)
     percentage_high = (
@@ -1207,9 +1208,6 @@ def get_statistics(
         .order_by(daily_counts.c.created_date.desc())
     )
 
-    if days is not None:
-        daily_statistics_query = daily_statistics_query.limit(days)
-
     daily_rows = session.execute(daily_statistics_query).all()
     daily_items = [
         DailyIngestStatisticsRead(
@@ -1224,25 +1222,28 @@ def get_statistics(
         for row in daily_rows
     ]
 
-    score_summary_row = session.execute(
-        select(
-            func.count(JobApplication.id).label("total_scored_jobs"),
-            func.avg(JobApplication.score).label("average_score"),
-            func.min(JobApplication.score).label("minimum_score"),
-            func.max(JobApplication.score).label("maximum_score"),
-        )
-        .where(JobApplication.score.is_not(None))
-    ).one()
+    score_summary_query = select(
+        func.count(JobApplication.id).label("total_scored_jobs"),
+        func.avg(JobApplication.score).label("average_score"),
+        func.min(JobApplication.score).label("minimum_score"),
+        func.max(JobApplication.score).label("maximum_score"),
+    ).where(JobApplication.score.is_not(None))
+    if cutoff_datetime is not None:
+        score_summary_query = score_summary_query.where(JobApplication.created_at >= cutoff_datetime)
+    score_summary_row = session.execute(score_summary_query).one()
 
     bucket_start = (cast(JobApplication.score / bucket_size, Integer) * bucket_size).label("bucket_start")
-    bucket_rows = session.execute(
+    bucket_query = (
         select(
             bucket_start,
             func.count(JobApplication.id).label("count"),
         )
         .where(JobApplication.score.is_not(None))
-        .group_by(bucket_start)
-        .order_by(bucket_start.asc())
+    )
+    if cutoff_datetime is not None:
+        bucket_query = bucket_query.where(JobApplication.created_at >= cutoff_datetime)
+    bucket_rows = session.execute(
+        bucket_query.group_by(bucket_start).order_by(bucket_start.asc())
     ).all()
 
     score_distribution = ScoreDistributionResponse(

@@ -1922,18 +1922,23 @@ def test_list_applications_hides_error_status_rows(db_session):
     assert all(item.status != "error" for item in response.items)
 
 
-def test_get_statistics_returns_ingest_series_and_score_distribution(db_session):
+def test_get_statistics_returns_ingest_series_and_score_distribution(db_session, monkeypatch):
     user = seed_user(db_session, name="Stats User", email="stats@example.com")
     resume = seed_resume(db_session, user=user, name="Stats Resume", prompt_key="default")
+    resume_two = seed_resume(db_session, user=user, name="Stats Resume 2", prompt_key="default")
+
+    monkeypatch.setattr(app_module, "utcnow", lambda: datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc))
 
     day_one = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
     day_two = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
     day_three = datetime(2026, 4, 3, 12, 0, tzinfo=timezone.utc)
+    old_day = datetime(2026, 2, 1, 12, 0, tzinfo=timezone.utc)
 
     first_job = seed_job(db_session, job_id="job-stats-1", created_at=day_one)
     second_job = seed_job(db_session, job_id="job-stats-2", created_at=day_one + timedelta(hours=1))
     third_job = seed_job(db_session, job_id="job-stats-3", created_at=day_two)
     fourth_job = seed_job(db_session, job_id="job-stats-4", created_at=day_three)
+    old_job = seed_job(db_session, job_id="job-stats-old", created_at=old_day)
 
     seed_application(
         db_session,
@@ -1944,6 +1949,16 @@ def test_get_statistics_returns_ingest_series_and_score_distribution(db_session)
         score=18.6,
         created_at=day_one,
         scored_at=day_one,
+    )
+    seed_application(
+        db_session,
+        user=user,
+        job=first_job,
+        resume=resume_two,
+        status="scored",
+        score=20.0,
+        created_at=day_one + timedelta(minutes=30),
+        scored_at=day_one + timedelta(minutes=30),
     )
     seed_application(
         db_session,
@@ -1975,6 +1990,16 @@ def test_get_statistics_returns_ingest_series_and_score_distribution(db_session)
         created_at=day_three,
         scored_at=day_three,
     )
+    seed_application(
+        db_session,
+        user=user,
+        job=old_job,
+        resume=resume,
+        status="scored",
+        score=24.0,
+        created_at=old_day,
+        scored_at=old_day,
+    )
 
     response = get_statistics(db_session, days=30, high_score_threshold=18, bucket_size=2)
 
@@ -1992,10 +2017,14 @@ def test_get_statistics_returns_ingest_series_and_score_distribution(db_session)
     assert latest_day.high_job_postings == 0
     assert latest_day.percentage_high == 0.0
 
+    earliest_visible_day = response.ingested_jobs.items[-1]
+    assert earliest_visible_day.created_date.isoformat() == "2026-04-01"
+    assert earliest_visible_day.high_job_postings == 1
+
     score_distribution = response.score_distribution
-    assert score_distribution.total_scored_jobs == 4
+    assert score_distribution.total_scored_jobs == 5
     assert score_distribution.bucket_size == 2
-    assert [bucket.count for bucket in score_distribution.buckets] == [1, 1, 2]
+    assert [bucket.count for bucket in score_distribution.buckets] == [1, 1, 3]
     assert [(bucket.bucket_start, bucket.bucket_end) for bucket in score_distribution.buckets] == [
         (10.0, 12.0),
         (16.0, 18.0),
