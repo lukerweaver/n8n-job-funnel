@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { createJobDescription, getApplications } from "../api";
@@ -98,7 +98,7 @@ export function ApplicationsPage() {
     };
   }, [params]);
 
-  function updateParam(key: string, value: string) {
+  const updateParam = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value) {
       next.set(key, value);
@@ -109,7 +109,7 @@ export function ApplicationsPage() {
       next.set("offset", "0");
     }
     setSearchParams(next);
-  }
+  }, [params, setSearchParams]);
 
   function clearFilters() {
     setSearchParams({
@@ -135,7 +135,7 @@ export function ApplicationsPage() {
     }, 1000);
 
     return () => window.clearTimeout(timeoutId);
-  }, [params, searchInput]);
+  }, [params, searchInput, updateParam]);
 
   useEffect(() => {
     if (!selected) {
