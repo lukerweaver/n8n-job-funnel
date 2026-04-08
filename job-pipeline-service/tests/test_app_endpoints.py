@@ -50,7 +50,7 @@ from app import (
     update_resume,
     update_prompt_library,
 )
-from models import JobApplication, Resume, User
+from models import InterviewRound, JobApplication, Resume, User
 from schemas import (
     ApplicationCreate,
     ApplicationErrorWrite,
@@ -1700,6 +1700,15 @@ def test_apply_application_status_rejects_invalid_transition():
         app_module.apply_application_status(application, ApplicationStatusWrite(status="screening"))
 
 
+def test_validate_application_transition_rejects_unsupported_status():
+    with pytest.raises(HTTPException, match="Unsupported application status 'bogus'"):
+        app_module._validate_application_transition("new", "bogus")
+
+
+def test_validate_application_transition_allows_same_status():
+    app_module._validate_application_transition("applied", "applied")
+
+
 def test_apply_application_status_preserves_supplied_timestamp():
     timestamp = datetime(2026, 2, 24, tzinfo=timezone.utc)
     application = JobApplication(status="applied")
@@ -1752,6 +1761,68 @@ def test_apply_application_lifecycle_dates_updates_existing_milestones():
     assert application.rejected_notes == "Rejected after panel"
 
 
+def test_apply_application_lifecycle_dates_updates_all_milestone_fields():
+    application = JobApplication(status="offer")
+    milestone_time = datetime(2026, 3, 1, tzinfo=timezone.utc)
+
+    app_module.apply_application_lifecycle_dates(
+        application,
+        ApplicationLifecycleDatesUpdate(
+            applied_at=milestone_time,
+            applied_notes="Applied note",
+            screening_at=milestone_time,
+            screening_notes="Screening note",
+            offer_at=milestone_time,
+            offer_notes="Offer note",
+            rejected_at=milestone_time,
+            rejected_notes="Rejected note",
+            ghosted_at=milestone_time,
+            ghosted_notes="Ghosted note",
+            withdrawn_at=milestone_time,
+            withdrawn_notes="Withdrawn note",
+            passed_at=milestone_time,
+            passed_notes="Pass note",
+        ),
+    )
+
+    assert application.applied_notes == "Applied note"
+    assert application.screening_notes == "Screening note"
+    assert application.offer_notes == "Offer note"
+    assert application.rejected_notes == "Rejected note"
+    assert application.ghosted_notes == "Ghosted note"
+    assert application.withdrawn_notes == "Withdrawn note"
+    assert application.passed_notes == "Pass note"
+
+
+def test_apply_interview_round_updates_updates_all_fields():
+    interview_round = InterviewRound(
+        job_application_id=1,
+        round_number=1,
+        status="scheduled",
+    )
+    scheduled_at = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    completed_at = datetime(2026, 4, 2, tzinfo=timezone.utc)
+
+    app_module.apply_interview_round_updates(
+        interview_round,
+        InterviewRoundUpdate(
+            round_number=2,
+            stage_name="Hiring Manager",
+            status="completed",
+            notes="Strong signal",
+            scheduled_at=scheduled_at,
+            completed_at=completed_at,
+        ),
+    )
+
+    assert interview_round.round_number == 2
+    assert interview_round.stage_name == "Hiring Manager"
+    assert interview_round.status == "completed"
+    assert interview_round.notes == "Strong signal"
+    assert interview_round.scheduled_at == scheduled_at
+    assert interview_round.completed_at == completed_at
+
+
 def test_list_applications_filters_active_status_group(db_session):
     user = seed_user(db_session, name="Ava", email="ava@example.com")
     resume = seed_resume(db_session, user=user, name="Base", prompt_key="default")
@@ -1766,6 +1837,11 @@ def test_list_applications_filters_active_status_group(db_session):
 
     assert response.total == 2
     assert {item.status for item in response.items} == {"applied", "screening"}
+
+
+def test_list_applications_rejects_unsupported_status_group(db_session):
+    with pytest.raises(HTTPException, match="Unsupported application status group 'terminal'"):
+        list_applications(db_session, status_group="terminal")
 
 
 def test_list_applications_filters_by_text_search(db_session):
@@ -1891,3 +1967,155 @@ def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
     assert any("UPDATE runs" in statement and "SET classification_key = prompt_key" in statement for statement in run_executed)
     assert any("ALTER TABLE run_items ADD COLUMN type VARCHAR(50)" in statement for statement in run_executed)
     assert any("ALTER TABLE run_items ADD COLUMN job_application_id INTEGER" in statement for statement in run_executed)
+
+
+def test_ensure_application_schema_branches(monkeypatch):
+    executed = []
+
+    class FakeConnection:
+        def execute(self, statement):
+            executed.append(statement)
+
+    class FakeBegin:
+        def __enter__(self):
+            return FakeConnection()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    fake_engine = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    monkeypatch.setattr(app_module, "engine", fake_engine)
+    monkeypatch.setattr(app_module, "text", lambda statement: statement)
+    monkeypatch.setattr(fake_engine, "begin", lambda: FakeBegin(), raising=False)
+    monkeypatch.setattr(
+        app_module,
+        "inspect",
+        lambda _engine: SimpleNamespace(
+            get_columns=lambda table: [{"name": "id"}] if table == "job_applications" else [{"name": "round_number"}]
+        ),
+    )
+
+    app_module.ensure_application_schema()
+
+    assert any("ADD COLUMN ghosted_at DATETIME" in statement for statement in executed)
+    assert any("ADD COLUMN passed_at DATETIME" in statement for statement in executed)
+    assert any("ADD COLUMN screening_at DATETIME" in statement for statement in executed)
+    assert any("ADD COLUMN applied_notes TEXT" in statement for statement in executed)
+    assert any("ADD COLUMN screening_notes TEXT" in statement for statement in executed)
+    assert any("ADD COLUMN offer_notes TEXT" in statement for statement in executed)
+    assert any("ADD COLUMN rejected_notes TEXT" in statement for statement in executed)
+    assert any("ADD COLUMN ghosted_notes TEXT" in statement for statement in executed)
+    assert any("ADD COLUMN withdrawn_notes TEXT" in statement for statement in executed)
+    assert any("ADD COLUMN passed_notes TEXT" in statement for statement in executed)
+    assert any("ALTER TABLE interview_rounds ADD COLUMN status VARCHAR(50) DEFAULT 'scheduled'" in statement for statement in executed)
+    assert any("UPDATE interview_rounds" in statement and "SET status = 'scheduled'" in statement for statement in executed)
+
+
+def test_ensure_application_schema_returns_when_columns_exist(monkeypatch):
+    begin_calls = []
+
+    fake_engine = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    monkeypatch.setattr(app_module, "engine", fake_engine)
+    monkeypatch.setattr(
+        app_module,
+        "inspect",
+        lambda _engine: SimpleNamespace(
+            get_columns=lambda table: [
+                {"name": name}
+                for name in (
+                    (
+                        "id",
+                        "ghosted_at",
+                        "passed_at",
+                        "screening_at",
+                        "applied_notes",
+                        "screening_notes",
+                        "offer_notes",
+                        "rejected_notes",
+                        "ghosted_notes",
+                        "withdrawn_notes",
+                        "passed_notes",
+                    )
+                    if table == "job_applications"
+                    else ("round_number", "status")
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(fake_engine, "begin", lambda: begin_calls.append(True), raising=False)
+
+    app_module.ensure_application_schema()
+
+    assert begin_calls == []
+
+
+def test_ensure_run_schema_handles_legacy_tables(monkeypatch):
+    executed = []
+
+    class FakeConnection:
+        def execute(self, statement):
+            executed.append(statement)
+
+    class FakeBegin:
+        def __enter__(self):
+            return FakeConnection()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _get_columns(table):
+        if table in {"runs", "run_items"}:
+            raise RuntimeError("missing table")
+        if table == "score_runs":
+            return [{"name": "prompt_key"}]
+        if table == "score_run_items":
+            return [{"name": "score_run_id"}]
+        raise AssertionError(f"unexpected table {table}")
+
+    fake_engine = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    monkeypatch.setattr(app_module, "engine", fake_engine)
+    monkeypatch.setattr(app_module, "text", lambda statement: statement)
+    monkeypatch.setattr(fake_engine, "begin", lambda: FakeBegin(), raising=False)
+    monkeypatch.setattr(
+        app_module,
+        "inspect",
+        lambda _engine: SimpleNamespace(get_columns=_get_columns),
+    )
+
+    app_module.ensure_run_schema()
+
+    assert "ALTER TABLE score_runs RENAME TO runs" in executed
+    assert "ALTER TABLE score_run_items RENAME TO run_items" in executed
+    assert any("ALTER TABLE runs ADD COLUMN type VARCHAR(50)" in statement for statement in executed)
+    assert any("ALTER TABLE runs ADD COLUMN classification_key VARCHAR(255)" in statement for statement in executed)
+    assert any("ALTER TABLE run_items ADD COLUMN type VARCHAR(50)" in statement for statement in executed)
+    assert any("ALTER TABLE run_items ADD COLUMN run_id INTEGER" in statement for statement in executed)
+    assert any("ALTER TABLE run_items ADD COLUMN job_application_id INTEGER" in statement for statement in executed)
+    assert any("UPDATE run_items SET run_id = score_run_id WHERE run_id IS NULL" in statement for statement in executed)
+    assert any("UPDATE run_items SET type = 'scoring' WHERE type IS NULL" in statement for statement in executed)
+
+
+def test_create_interview_round_preserves_terminal_application_status(db_session):
+    user = seed_user(db_session, name="Terminal", email="terminal@example.com")
+    job = seed_job(db_session, job_id="job-terminal-round")
+    resume = seed_resume(db_session, user=user, prompt_key="default", content="Resume body")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="rejected")
+
+    interview_round = create_interview_round(
+        application.id,
+        InterviewRoundCreate(round_number=1, stage_name="Recruiter"),
+        db_session,
+    )
+
+    db_session.refresh(application)
+    assert interview_round.round_number == 1
+    assert application.status == "rejected"
+
+
+def test_update_application_lifecycle_dates_missing_application(db_session):
+    with pytest.raises(HTTPException, match="Application '9999' was not found"):
+        update_application_lifecycle_dates(
+            9999,
+            ApplicationLifecycleDatesUpdate(applied_notes="Missing"),
+            db_session,
+        )
