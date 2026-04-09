@@ -23,7 +23,7 @@
         "url": "http://<job-pipeline-service-host>:8000/applications/generate/run",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { \"user_id\": 1, \"limit\": 100, \"resume_strategy\": \"default_only\" } }}",
+        "jsonBody": "={{ { \"user_id\": 1, \"limit\": 100, \"resume_strategy\": \"default_fallback\" } }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
