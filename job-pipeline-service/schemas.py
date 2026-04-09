@@ -482,6 +482,7 @@ class ApplicationScoreRunRequest(BaseModel):
     classification_key: str | None = None
     prompt_key: str | None = None
     force: bool = False
+    refresh_resume_match: bool = False
 
 
 class ApplicationsScoreRunResponse(BaseModel):

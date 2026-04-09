@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { createJobDescription, getApplications } from "../api";
+import { createJobDescription, getApplications, runApplicationScore } from "../api";
 import { ApplicationDetailModal } from "../components/ApplicationDetailModal";
 import { DetailModal } from "../components/DetailModal";
 import { PaginationControls } from "../components/PaginationControls";
@@ -47,6 +47,8 @@ export function ApplicationsPage() {
   const [jobDescriptionSubmitError, setJobDescriptionSubmitError] = useState<string | null>(null);
   const [jobDescriptionSuccess, setJobDescriptionSuccess] = useState<string | null>(null);
   const [submittingJobDescription, setSubmittingJobDescription] = useState(false);
+  const [rescoringId, setRescoringId] = useState<number | null>(null);
+  const [rescoreMessage, setRescoreMessage] = useState<string | null>(null);
 
   const params = useMemo(() => {
     const next = new URLSearchParams(searchParams);
@@ -201,6 +203,27 @@ export function ApplicationsPage() {
     }
   }
 
+  async function handleRescore(application: JobApplication) {
+    setRescoringId(application.id);
+    setError(null);
+    setRescoreMessage(null);
+
+    try {
+      const updated = await runApplicationScore(application.id, {
+        classification_key: application.classification_key,
+        force: true,
+        refresh_resume_match: true,
+      });
+      setData((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setSelected((current) => (current?.id === updated.id ? updated : current));
+      setRescoreMessage(`Rescored application #${updated.id} using ${updated.resume_name ?? "the matched resume"}.`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to re-score application.");
+    } finally {
+      setRescoringId(null);
+    }
+  }
+
   return (
     <section className="page-grid">
       <div className="page-header">
@@ -217,6 +240,7 @@ export function ApplicationsPage() {
       </div>
 
       {jobDescriptionSuccess ? <p className="success-callout">{jobDescriptionSuccess}</p> : null}
+      {rescoreMessage ? <p className="success-callout">{rescoreMessage}</p> : null}
 
       <div className="panel filter-panel">
         <div className="filter-grid">
@@ -369,6 +393,7 @@ export function ApplicationsPage() {
                   <th>Resume</th>
                   <th>Status</th>
                   <th>Scored</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -385,6 +410,19 @@ export function ApplicationsPage() {
                       <span className={`status-pill status-${application.status}`}>{application.status}</span>
                     </td>
                     <td>{formatDate(application.scored_at)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="action-button table-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleRescore(application);
+                        }}
+                        disabled={rescoringId !== null}
+                      >
+                        {rescoringId === application.id ? "Rescoring..." : "Rescore"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

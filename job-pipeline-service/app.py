@@ -223,6 +223,42 @@ def _select_resumes_for_job_generation(
     return classification_resumes
 
 
+class ApplicationResumeMatchConflictError(ValueError):
+    pass
+
+
+def _refresh_application_resume_match(session: Session, application: JobApplication) -> None:
+    job = application.job_posting
+    resumes = _select_resumes_for_job_generation(
+        session,
+        job=job,
+        user_id=application.user_id,
+        resume_strategy="classification_first",
+    )
+    if not resumes:
+        return
+
+    matched_resume = resumes[0]
+    if matched_resume.id == application.resume_id:
+        return
+
+    existing = session.scalar(
+        select(JobApplication).where(
+            JobApplication.job_posting_id == application.job_posting_id,
+            JobApplication.resume_id == matched_resume.id,
+            JobApplication.id != application.id,
+        )
+    )
+    if existing is not None:
+        raise ApplicationResumeMatchConflictError(
+            f"Application '{existing.id}' already exists for resume '{matched_resume.id}'"
+        )
+
+    application.resume_id = matched_resume.id
+    application.resume = matched_resume
+    session.flush()
+
+
 def _normalize_list_or_dict_json(value: object) -> list | dict | None:
     if value is None:
         return None
@@ -1723,6 +1759,11 @@ def run_application_score(
     application = _get_application_by_id(session, application_id)
     if application is None:
         raise HTTPException(status_code=404, detail=f"Application '{application_id}' was not found")
+    if payload.refresh_resume_match:
+        try:
+            _refresh_application_resume_match(session, application)
+        except ApplicationResumeMatchConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
         result = score_application(
             session,

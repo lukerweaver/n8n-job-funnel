@@ -272,6 +272,10 @@ textarea {
   vertical-align: top;
 }
 
+.data-table td:last-child {
+  white-space: nowrap;
+}
+
 .data-table tbody tr {
   cursor: pointer;
   transition: background 150ms ease, transform 150ms ease;
@@ -427,6 +431,11 @@ textarea {
   cursor: not-allowed;
 }
 
+.table-action-button {
+  min-height: 2.2rem;
+  padding: 0.5rem 0.75rem;
+}
+
 .detail-actions {
   display: flex;
   align-items: center;
@@ -443,20 +452,22 @@ textarea {
 .lifecycle-action-bar label {
   display: grid;
   gap: 0.45rem;
-  max-width: 220px;
+  max-width: none;
   font-size: 0.85rem;
   font-weight: 600;
 }
 
 .lifecycle-action-bar {
-  display: flex;
+  display: grid;
   gap: 1rem;
-  flex-wrap: wrap;
+}
+
+.lifecycle-date-field {
+  max-width: 220px;
 }
 
 .lifecycle-note-field {
-  flex: 1 1 320px;
-  max-width: none;
+  width: 100%;
 }
 
 .lifecycle-action-bar input,

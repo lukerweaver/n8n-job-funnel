@@ -952,6 +952,85 @@ def test_application_scoring_and_interview_rounds(db_session, monkeypatch):
     assert list_interview_rounds(application.id, db_session).total == 0
 
 
+def test_run_application_score_refreshes_resume_match(db_session, monkeypatch):
+    user = seed_user(db_session, name="Resume Switch", email="resume-switch@example.com")
+    seed_prompt(db_session, key="product")
+    job = seed_job(db_session, job_id="job-resume-switch", description="Role details")
+    job.classification_key = "product"
+    db_session.commit()
+
+    pm_resume = seed_resume(
+        db_session,
+        user=user,
+        name="PM Resume",
+        prompt_key="product",
+        classification_key="product-manager",
+        content="PM resume body",
+    )
+    po_resume = seed_resume(
+        db_session,
+        user=user,
+        name="PO Resume",
+        prompt_key="product",
+        classification_key="product",
+        content="PO resume body",
+    )
+    application = seed_application(db_session, user=user, job=job, resume=pm_resume, status="new")
+
+    def _fake_score_application(session, target_application, **_kwargs):
+        target_application.status = "scored"
+        target_application.score = 87
+        target_application.scored_at = datetime.now(timezone.utc)
+        return SimpleNamespace(application=target_application)
+
+    monkeypatch.setattr(app_module, "score_application", _fake_score_application)
+    scored = run_application_score(
+        application.id,
+        ApplicationScoreRunRequest(force=True, refresh_resume_match=True),
+        db_session,
+    )
+
+    assert scored.score == 87
+    assert scored.resume_id == po_resume.id
+    assert scored.resume_name == po_resume.name
+
+
+def test_run_application_score_refresh_resume_match_conflict(db_session):
+    user = seed_user(db_session, name="Resume Conflict", email="resume-conflict@example.com")
+    job = seed_job(db_session, job_id="job-resume-conflict", description="Role details")
+    job.classification_key = "product"
+    db_session.commit()
+
+    stale_resume = seed_resume(
+        db_session,
+        user=user,
+        name="Stale Resume",
+        prompt_key="product",
+        classification_key="product-manager",
+        content="PM resume body",
+    )
+    matched_resume = seed_resume(
+        db_session,
+        user=user,
+        name="Matched Resume",
+        prompt_key="product",
+        classification_key="product",
+        content="PO resume body",
+    )
+    original = seed_application(db_session, user=user, job=job, resume=stale_resume, status="new")
+    seed_application(db_session, user=user, job=job, resume=matched_resume, status="new")
+
+    with pytest.raises(HTTPException) as exc_info:
+        run_application_score(
+            original.id,
+            ApplicationScoreRunRequest(force=True, refresh_resume_match=True),
+            db_session,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "already exists for resume" in str(exc_info.value.detail)
+
+
 def test_application_reads_include_job_context(db_session):
     user = seed_user(db_session, name="Dana", email="dana@example.com")
     job = seed_job(db_session, job_id="job-app-read")

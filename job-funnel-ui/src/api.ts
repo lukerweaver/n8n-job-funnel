@@ -185,6 +185,19 @@ export function createApplicationScoreRun(payload: ApplicationScoreRunRequest) {
   return sendJson<ApplicationScoreRunResponse>("/applications/score/run", "POST", payload);
 }
 
+export async function runApplicationScore(
+  applicationId: number,
+  payload: {
+    classification_key?: string | null;
+    prompt_key?: string | null;
+    force: boolean;
+    refresh_resume_match?: boolean;
+  },
+) {
+  await sendJson(`/applications/${applicationId}/score/run`, "POST", payload);
+  return getApplication(applicationId);
+}
+
 export function getRunApplications(runId: string, params: URLSearchParams) {
   return fetchJson<RunApplicationsResponse>(`/runs/${runId}/applications`, params);
 }

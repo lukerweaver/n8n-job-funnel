@@ -5,6 +5,7 @@ import {
   deleteInterviewRound,
   getApplication,
   getInterviewRounds,
+  runApplicationScore,
   updateApplicationLifecycleDates,
   updateApplicationStatus,
   updateInterviewRound,
@@ -166,6 +167,7 @@ export function ApplicationDetailModal({
   const [roundSubmitError, setRoundSubmitError] = useState<string | null>(null);
   const [roundSubmitting, setRoundSubmitting] = useState(false);
   const [deletingRoundId, setDeletingRoundId] = useState<number | null>(null);
+  const [rescoring, setRescoring] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -371,6 +373,24 @@ export function ApplicationDetailModal({
     }
   }
 
+  async function handleRescore() {
+    setRescoring(true);
+    setError(null);
+    try {
+      const updated = await runApplicationScore(applicationId, {
+        classification_key: application?.classification_key ?? null,
+        force: true,
+        refresh_resume_match: true,
+      });
+      setApplication(updated);
+      onApplicationUpdated?.(updated);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to re-score application.");
+    } finally {
+      setRescoring(false);
+    }
+  }
+
   return (
     <DetailModal
       title={application?.title ?? fallbackTitle}
@@ -427,7 +447,7 @@ export function ApplicationDetailModal({
             {availableTransitions.length > 0 ? (
               <>
                 <div className="lifecycle-action-bar">
-                  <label>
+                  <label className="lifecycle-date-field">
                     Effective Date
                     <input type="date" value={actionDate} onChange={(event) => setActionDate(event.target.value)} />
                   </label>
@@ -665,6 +685,9 @@ export function ApplicationDetailModal({
               </div>
             </dl>
             <div className="detail-actions">
+              <button type="button" className="action-button" onClick={handleRescore} disabled={rescoring}>
+                {rescoring ? "Rescoring..." : "Rescore With Matched Resume"}
+              </button>
               {application.apply_url ? (
                 <a className="action-button" href={application.apply_url} target="_blank" rel="noreferrer">
                   Open Apply URL

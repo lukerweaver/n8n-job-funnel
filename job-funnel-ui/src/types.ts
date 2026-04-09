@@ -189,6 +189,7 @@ export interface ApplicationScoreRunRequest {
   classification_key?: string | null;
   prompt_key?: string | null;
   force: boolean;
+  refresh_resume_match?: boolean;
   callback_url?: string | null;
 }
 
