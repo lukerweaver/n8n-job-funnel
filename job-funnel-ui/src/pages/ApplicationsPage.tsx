@@ -210,7 +210,6 @@ export function ApplicationsPage() {
 
     try {
       const updated = await runApplicationScore(application.id, {
-        classification_key: application.classification_key,
         force: true,
         refresh_resume_match: true,
       });

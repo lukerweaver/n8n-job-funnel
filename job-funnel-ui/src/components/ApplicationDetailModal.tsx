@@ -378,7 +378,6 @@ export function ApplicationDetailModal({
     setError(null);
     try {
       const updated = await runApplicationScore(applicationId, {
-        classification_key: application?.classification_key ?? null,
         force: true,
         refresh_resume_match: true,
       });
