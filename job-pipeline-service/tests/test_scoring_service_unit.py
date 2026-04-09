@@ -95,6 +95,56 @@ def test_score_application_error_path_for_llm_failure(db_session):
     assert application.score_attempts == 1
 
 
+def test_score_application_uses_resume_prompt_key_before_job_classification(db_session):
+    seed_prompt(db_session, key="product-scoring")
+    user = seed_user(db_session)
+    job = seed_job(db_session)
+    job.classification_key = "Product Owner"
+    db_session.commit()
+    resume = seed_resume(
+        db_session,
+        user=user,
+        prompt_key="product-scoring",
+        classification_key="Product Owner",
+        content="Resume body",
+    )
+    application = seed_application(db_session, user=user, job=job, resume=resume)
+
+    result = score_application(db_session, application, client=FakeClient(_valid_response(23)))
+
+    assert result.outcome == "scored"
+    assert application.scoring_prompt_key == "product-scoring"
+    assert application.score == 23
+
+
+def test_score_application_still_prefers_explicit_classification_override(db_session):
+    seed_prompt(db_session, key="explicit-product-owner")
+    seed_prompt(db_session, key="resume-default")
+    user = seed_user(db_session, email="explicit-override@example.com")
+    job = seed_job(db_session, job_id="job-explicit-override")
+    job.classification_key = "Product Owner"
+    db_session.commit()
+    resume = seed_resume(
+        db_session,
+        user=user,
+        prompt_key="resume-default",
+        classification_key="Product Owner",
+        content="Resume body",
+    )
+    application = seed_application(db_session, user=user, job=job, resume=resume)
+
+    result = score_application(
+        db_session,
+        application,
+        classification_key="explicit-product-owner",
+        client=FakeClient(_valid_response(24)),
+    )
+
+    assert result.outcome == "scored"
+    assert application.scoring_prompt_key == "explicit-product-owner"
+    assert application.score == 24
+
+
 def test_commit_scoring_progress_retries_and_raises():
     class FakeSession:
         def __init__(self, failures):

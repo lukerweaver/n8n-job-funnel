@@ -106,9 +106,13 @@ def score_application(
     effective_prompt_key = resolve_prompt_selector(
         prompt_key=prompt_key,
         classification_key=classification_key,
-        fallback_key=application.job_posting.classification_key,
+        fallback_key=application.resume.prompt_key or application.job_posting.classification_key,
     )
-    resolved_prompt = prompt or resolve_active_prompt(session, effective_prompt_key, prompt_type="scoring")
+    resolved_prompt = session.merge(prompt) if prompt is not None else resolve_active_prompt(
+        session,
+        effective_prompt_key,
+        prompt_type="scoring",
+    )
     llm_client = client or build_llm_client()
     rendered_prompt = render_application_prompt(application, resolved_prompt)
 
