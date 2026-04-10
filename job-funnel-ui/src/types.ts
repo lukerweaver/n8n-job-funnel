@@ -250,6 +250,50 @@ export interface StatisticsResponse {
   score_distribution: ScoreDistributionResponse;
 }
 
+export interface ApplicationCount {
+  label: string;
+  count: number;
+  percentage: number | null;
+}
+
+export interface ApplicationDurationMetric {
+  label: string;
+  count: number;
+  average_days: number | null;
+  minimum_days: number | null;
+  maximum_days: number | null;
+}
+
+export interface ApplicationFunnelStage {
+  label: string;
+  count: number;
+  percentage_from_start: number | null;
+  percentage_from_previous: number | null;
+}
+
+export interface DailyApplicationActivity {
+  activity_date: string;
+  applications: number;
+  screenings: number;
+  interviews: number;
+  rejections: number;
+  offers: number;
+  rolling_28_day_avg_applications: number;
+  rolling_28_day_avg_screenings: number;
+  rolling_28_day_avg_interviews: number;
+  rolling_28_day_avg_rejections: number;
+  rolling_28_day_avg_offers: number;
+}
+
+export interface ApplicationStatisticsResponse {
+  total_applications: number;
+  status_counts: ApplicationCount[];
+  stage_counts: ApplicationCount[];
+  duration_metrics: ApplicationDurationMetric[];
+  funnel: ApplicationFunnelStage[];
+  daily_activity: DailyApplicationActivity[];
+}
+
 export interface InterviewRoundListResponse {
   total: number;
   items: InterviewRound[];

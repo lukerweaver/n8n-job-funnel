@@ -252,7 +252,7 @@ export function StatisticsPage() {
       <div className="page-header">
         <div>
           <p className="eyebrow">Page 5</p>
-          <h2>Statistics</h2>
+          <h2>Job Posting Statistics</h2>
           <p className="page-subtitle stats-page-subtitle">Daily ingest flow and scored-job distribution from the API.</p>
         </div>
         <div className="stat-chip">{scoreDistribution?.total_scored_jobs ?? 0} scored jobs</div>

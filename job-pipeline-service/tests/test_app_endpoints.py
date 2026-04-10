@@ -21,6 +21,7 @@ from app import (
     ensure_job_postings_schema,
     get_job,
     get_application,
+    get_application_statistics,
     get_prompt_library,
     get_run,
     get_statistics,
@@ -1937,6 +1938,103 @@ def test_list_applications_filters_active_status_group(db_session):
     assert {item.status for item in response.items} == {"applied", "screening"}
 
 
+def test_list_applications_sorts_active_by_funnel_position(db_session):
+    user = seed_user(db_session, name="Funnel User", email="funnel-sort@example.com")
+    resume = seed_resume(db_session, user=user, name="Base", prompt_key="default")
+    base_date = datetime(2026, 3, 1, 9, 0, tzinfo=timezone.utc)
+
+    applied_old = seed_application(
+        db_session,
+        user=user,
+        job=seed_job(db_session, job_id="active-sort-applied-old"),
+        resume=resume,
+        status="applied",
+        created_at=base_date,
+    )
+    applied_old.applied_at = base_date
+    applied_new = seed_application(
+        db_session,
+        user=user,
+        job=seed_job(db_session, job_id="active-sort-applied-new"),
+        resume=resume,
+        status="applied",
+        created_at=base_date,
+    )
+    applied_new.applied_at = base_date + timedelta(days=3)
+
+    screening_old = seed_application(
+        db_session,
+        user=user,
+        job=seed_job(db_session, job_id="active-sort-screening-old"),
+        resume=resume,
+        status="screening",
+        created_at=base_date,
+    )
+    screening_old.screening_at = base_date + timedelta(days=1)
+    screening_new = seed_application(
+        db_session,
+        user=user,
+        job=seed_job(db_session, job_id="active-sort-screening-new"),
+        resume=resume,
+        status="screening",
+        created_at=base_date,
+    )
+    screening_new.screening_at = base_date + timedelta(days=5)
+
+    interview_round_2 = seed_application(
+        db_session,
+        user=user,
+        job=seed_job(db_session, job_id="active-sort-interview-round-2"),
+        resume=resume,
+        status="interview",
+        created_at=base_date,
+    )
+    interview_round_3 = seed_application(
+        db_session,
+        user=user,
+        job=seed_job(db_session, job_id="active-sort-interview-round-3"),
+        resume=resume,
+        status="interview",
+        created_at=base_date,
+    )
+    db_session.add_all(
+        [
+            InterviewRound(
+                job_application_id=interview_round_2.id,
+                round_number=2,
+                scheduled_at=base_date + timedelta(days=2),
+                created_at=base_date,
+                updated_at=base_date,
+            ),
+            InterviewRound(
+                job_application_id=interview_round_3.id,
+                round_number=3,
+                scheduled_at=base_date + timedelta(days=10),
+                created_at=base_date,
+                updated_at=base_date,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        status_group="active",
+        sort_by="active_funnel",
+        sort_order="desc",
+    )
+
+    assert [item.job_id for item in response.items] == [
+        "active-sort-interview-round-3",
+        "active-sort-interview-round-2",
+        "active-sort-screening-old",
+        "active-sort-screening-new",
+        "active-sort-applied-old",
+        "active-sort-applied-new",
+    ]
+
+
 def test_list_applications_filters_historical_status_group(db_session):
     user = seed_user(db_session, name="Harper", email="harper@example.com")
     resume = seed_resume(db_session, user=user, name="Base", prompt_key="default")
@@ -2109,6 +2207,87 @@ def test_get_statistics_returns_ingest_series_and_score_distribution(db_session,
         (16.0, 18.0),
         (18.0, 20.0),
     ]
+
+
+def test_get_application_statistics_returns_lifecycle_metrics(db_session, monkeypatch):
+    user = seed_user(db_session, name="App Stats User", email="app-stats@example.com")
+    resume = seed_resume(db_session, user=user, name="App Stats Resume", prompt_key="default")
+
+    monkeypatch.setattr(app_module, "utcnow", lambda: datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc))
+
+    day_one = datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc)
+    day_two = datetime(2026, 4, 2, 9, 0, tzinfo=timezone.utc)
+    day_three = datetime(2026, 4, 3, 9, 0, tzinfo=timezone.utc)
+    day_four = datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc)
+    old_day = datetime(2026, 1, 1, 9, 0, tzinfo=timezone.utc)
+
+    notified_job = seed_job(db_session, job_id="app-stats-notified", created_at=day_one)
+    screening_job = seed_job(db_session, job_id="app-stats-screening", created_at=day_one)
+    rejected_job = seed_job(db_session, job_id="app-stats-rejected", created_at=day_one)
+    offer_job = seed_job(db_session, job_id="app-stats-offer", created_at=day_one)
+    old_job = seed_job(db_session, job_id="app-stats-old", created_at=old_day)
+
+    seed_application(db_session, user=user, job=notified_job, resume=resume, status="notified", created_at=day_one)
+    screening = seed_application(db_session, user=user, job=screening_job, resume=resume, status="screening", created_at=day_one)
+    screening.applied_at = day_one
+    screening.screening_at = day_two
+
+    rejected = seed_application(db_session, user=user, job=rejected_job, resume=resume, status="rejected", created_at=day_one)
+    rejected.applied_at = day_one
+    rejected.screening_at = day_two
+    rejected.rejected_at = day_four
+
+    offer = seed_application(db_session, user=user, job=offer_job, resume=resume, status="offer", created_at=day_one)
+    offer.applied_at = day_one
+    offer.screening_at = day_two
+    offer.offer_at = day_four
+    db_session.add(
+        InterviewRound(
+            job_application_id=offer.id,
+            round_number=2,
+            stage_name="Round 2",
+            status="completed",
+            scheduled_at=day_three,
+            completed_at=day_three,
+            created_at=day_three,
+            updated_at=day_three,
+        )
+    )
+    seed_application(db_session, user=user, job=old_job, resume=resume, status="rejected", created_at=old_day)
+    db_session.commit()
+
+    response = get_application_statistics(db_session, days=30)
+
+    assert response.total_applications == 3
+    assert {item.label: item.count for item in response.status_counts} == {
+        "Screening": 1,
+        "Offer": 1,
+        "Not Selected": 1,
+    }
+    assert {item.label: item.count for item in response.stage_counts} == {
+        "Screening": 2,
+        "Round 2": 1,
+    }
+
+    funnel = {item.label: item for item in response.funnel}
+    assert funnel["Screening"].count == 3
+    assert funnel["Screening"].percentage_from_start == 100.0
+    assert funnel["Round 2"].percentage_from_previous == 33.33
+    assert funnel["Offer"].count == 1
+
+    duration_metrics = {item.label: item for item in response.duration_metrics}
+    assert duration_metrics["Application to Screening"].average_days == 1.0
+    assert duration_metrics["Screening to Round 2"].average_days == 1.0
+    assert duration_metrics["Screening to Rejection"].average_days == 2.0
+
+    daily_activity = {item.activity_date.isoformat(): item for item in response.daily_activity}
+    assert daily_activity["2026-04-01"].applications == 3
+    assert daily_activity["2026-04-01"].rolling_28_day_avg_applications == 0.13
+    assert daily_activity["2026-04-02"].screenings == 3
+    assert daily_activity["2026-04-03"].interviews == 1
+    assert daily_activity["2026-04-04"].rejections == 1
+    assert daily_activity["2026-04-04"].offers == 1
+    assert daily_activity["2026-04-04"].rolling_28_day_avg_offers == 0.04
 
 
 def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):

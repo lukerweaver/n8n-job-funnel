@@ -617,6 +617,26 @@ textarea {
   background: #355f46;
 }
 
+.legend-line-applications {
+  background: #4d3d8f;
+}
+
+.legend-line-screenings {
+  background: #2353a4;
+}
+
+.legend-line-interviews {
+  background: #355f46;
+}
+
+.legend-line-rejections {
+  background: #8f2e33;
+}
+
+.legend-line-offers {
+  background: #9a6a12;
+}
+
 .chart-svg {
   width: 100%;
   height: auto;
@@ -651,6 +671,41 @@ textarea {
 
 .chart-line-high {
   stroke: #355f46;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-line-applications {
+  stroke: #4d3d8f;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-line-screenings {
+  stroke: #2353a4;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-line-interviews {
+  stroke: #355f46;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-line-rejections {
+  stroke: #8f2e33;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-line-offers {
+  stroke: #9a6a12;
   stroke-width: 3;
   stroke-linejoin: round;
   stroke-linecap: round;
