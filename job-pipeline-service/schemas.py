@@ -161,6 +161,50 @@ class StatisticsResponse(BaseModel):
     score_distribution: ScoreDistributionResponse
 
 
+class ApplicationCountRead(BaseModel):
+    label: str
+    count: int
+    percentage: float | None = None
+
+
+class ApplicationDurationMetricRead(BaseModel):
+    label: str
+    count: int
+    average_days: float | None = None
+    minimum_days: float | None = None
+    maximum_days: float | None = None
+
+
+class ApplicationFunnelStageRead(BaseModel):
+    label: str
+    count: int
+    percentage_from_start: float | None = None
+    percentage_from_previous: float | None = None
+
+
+class DailyApplicationActivityRead(BaseModel):
+    activity_date: date
+    applications: int
+    screenings: int
+    interviews: int
+    rejections: int
+    offers: int
+    rolling_28_day_avg_applications: float
+    rolling_28_day_avg_screenings: float
+    rolling_28_day_avg_interviews: float
+    rolling_28_day_avg_rejections: float
+    rolling_28_day_avg_offers: float
+
+
+class ApplicationStatisticsResponse(BaseModel):
+    total_applications: int
+    status_counts: list[ApplicationCountRead]
+    stage_counts: list[ApplicationCountRead]
+    duration_metrics: list[ApplicationDurationMetricRead]
+    funnel: list[ApplicationFunnelStageRead]
+    daily_activity: list[DailyApplicationActivityRead]
+
+
 class PromptLibraryBase(BaseModel):
     prompt_key: str
     prompt_type: str = "scoring"

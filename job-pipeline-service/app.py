@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 import time
 from urllib.parse import urlparse
@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
-from sqlalchemy import Float, Integer, asc, cast, desc, exists, func, inspect, or_, select, text
+from sqlalchemy import Float, Integer, asc, case, cast, desc, exists, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, selectinload
 
@@ -20,10 +20,15 @@ from schemas import (
     ApplicationCreate,
     ApplicationGenerateRequest,
     ApplicationErrorWrite,
+    ApplicationCountRead,
+    ApplicationDurationMetricRead,
+    ApplicationFunnelStageRead,
     ApplicationsGenerateRunRequest,
     ApplicationsGenerateRunResponse,
     ApplicationGenerateResponse,
     ApplicationNotificationWrite,
+    ApplicationStatisticsResponse,
+    DailyApplicationActivityRead,
     ApplicationScoreRunRequest,
     ApplicationScoreWrite,
     ApplicationsScoreRunRequest,
@@ -559,6 +564,38 @@ def _resolve_application_sort(
     if normalized_order not in {"asc", "desc"}:
         raise HTTPException(status_code=400, detail=f"Unsupported application sort order '{sort_order}'")
     return asc(column) if normalized_order == "asc" else desc(column)
+
+
+def _active_application_ordering():
+    max_round = (
+        select(func.coalesce(func.max(InterviewRound.round_number), 0))
+        .where(InterviewRound.job_application_id == JobApplication.id)
+        .scalar_subquery()
+    )
+    first_interview_at = (
+        select(func.min(func.coalesce(InterviewRound.scheduled_at, InterviewRound.completed_at, InterviewRound.created_at)))
+        .where(InterviewRound.job_application_id == JobApplication.id)
+        .scalar_subquery()
+    )
+    has_interview = or_(JobApplication.status == "interview", max_round > 0)
+    stage_rank = case(
+        (has_interview, 0),
+        (JobApplication.status == "screening", 1),
+        (JobApplication.status == "applied", 2),
+        else_=3,
+    )
+    stage_date = case(
+        (has_interview, first_interview_at),
+        (JobApplication.status == "screening", JobApplication.screening_at),
+        (JobApplication.status == "applied", JobApplication.applied_at),
+        else_=JobApplication.updated_at,
+    )
+    return (
+        asc(stage_rank),
+        desc(max_round),
+        asc(func.coalesce(stage_date, JobApplication.updated_at, JobApplication.created_at)),
+        asc(JobApplication.id),
+    )
 
 
 def _resolve_run_application_sort(
@@ -1315,6 +1352,307 @@ def get_statistics(
     )
 
 
+@app.get("/statistics/job-postings", response_model=StatisticsResponse, tags=["statistics"])
+def get_job_posting_statistics(
+    session: Session = Depends(get_session),
+    days: Annotated[int | None, Query(ge=7, le=3650)] = 90,
+    high_score_threshold: float = Query(default=18),
+    bucket_size: float = Query(default=2, gt=0, le=20),
+):
+    return get_statistics(session, days=days, high_score_threshold=high_score_threshold, bucket_size=bucket_size)
+
+
+def _round_percentage(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round((numerator / denominator) * 100.0, 2)
+
+
+def _round_days(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(value, 2)
+
+
+def _application_status_label(status: str) -> str:
+    return {
+        "new": "Submitted",
+        "scored": "Submitted",
+        "tailored": "Submitted",
+        "notified": "Submitted",
+        "applied": "Submitted",
+        "screening": "Screening",
+        "interview": "Interview",
+        "offer": "Offer",
+        "rejected": "Not Selected",
+        "ghosted": "Ghosted",
+        "withdrawn": "Withdrawn",
+        "pass": "Passed",
+    }.get(status, status.replace("_", " ").title())
+
+
+def _application_stage_label(application: JobApplication, max_round: int) -> str:
+    if max_round >= 2:
+        return f"Round {max_round}"
+    if application.screening_at is not None or application.status in {"screening", "interview", "offer"}:
+        return "Screening"
+    return "Submitted"
+
+
+def _date_range(start: date, end: date) -> list[date]:
+    days = (end - start).days
+    if days < 0:
+        return []
+    return [start + timedelta(days=offset) for offset in range(days + 1)]
+
+
+def _add_activity(activity_by_date: dict[date, dict[str, int]], key: str, value: datetime | None) -> None:
+    if value is None:
+        return
+    activity_by_date.setdefault(
+        value.date(),
+        {"applications": 0, "screenings": 0, "interviews": 0, "rejections": 0, "offers": 0},
+    )[key] += 1
+
+
+def _duration_days(start: datetime | None, end: datetime | None) -> float | None:
+    if start is None or end is None or end < start:
+        return None
+    return (end - start).total_seconds() / 86400
+
+
+def _duration_metric(label: str, values: list[float]) -> ApplicationDurationMetricRead:
+    if not values:
+        return ApplicationDurationMetricRead(label=label, count=0)
+    return ApplicationDurationMetricRead(
+        label=label,
+        count=len(values),
+        average_days=_round_days(sum(values) / len(values)),
+        minimum_days=_round_days(min(values)),
+        maximum_days=_round_days(max(values)),
+    )
+
+
+@app.get("/statistics/applications", response_model=ApplicationStatisticsResponse, tags=["statistics"])
+def get_application_statistics(
+    session: Session = Depends(get_session),
+    days: Annotated[int | None, Query(ge=7, le=3650)] = 90,
+):
+    cutoff_datetime: datetime | None = None
+    start_date: date | None = None
+    if days is not None:
+        start_date = utcnow().date() - timedelta(days=days - 1)
+        cutoff_datetime = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+
+    application_query = (
+        select(JobApplication)
+        .where(JobApplication.applied_at.is_not(None))
+        .options(selectinload(JobApplication.interview_rounds))
+    )
+    if cutoff_datetime is not None:
+        has_recent_interview = exists(
+            select(InterviewRound.id).where(
+                InterviewRound.job_application_id == JobApplication.id,
+                or_(
+                    InterviewRound.scheduled_at >= cutoff_datetime,
+                    InterviewRound.completed_at >= cutoff_datetime,
+                    InterviewRound.created_at >= cutoff_datetime,
+                ),
+            )
+        )
+        application_query = application_query.where(
+            or_(
+                JobApplication.applied_at >= cutoff_datetime,
+                JobApplication.screening_at >= cutoff_datetime,
+                JobApplication.rejected_at >= cutoff_datetime,
+                JobApplication.offer_at >= cutoff_datetime,
+                has_recent_interview,
+            )
+        )
+
+    applications = [
+        application
+        for application in session.scalars(application_query.order_by(JobApplication.id.asc())).all()
+        if application.status not in HIDDEN_APPLICATION_STATUSES
+    ]
+    total_applications = len(applications)
+
+    max_round_by_application = {
+        application.id: max((round_.round_number for round_ in application.interview_rounds), default=0)
+        for application in applications
+    }
+
+    status_order = ["Submitted", "Screening", "Interview", "Offer", "Not Selected", "Ghosted", "Withdrawn", "Passed"]
+    status_counts_by_label = {label: 0 for label in status_order}
+    for application in applications:
+        label = _application_status_label(application.status)
+        status_counts_by_label[label] = status_counts_by_label.get(label, 0) + 1
+    status_counts = [
+        ApplicationCountRead(
+            label=label,
+            count=count,
+            percentage=_round_percentage(count, total_applications),
+        )
+        for label, count in status_counts_by_label.items()
+        if count > 0
+    ]
+
+    stage_order = ["Submitted", "Screening", "Round 2", "Round 3", "Round 4", "Round 5+"]
+    stage_counts_by_label = {label: 0 for label in stage_order}
+    for application in applications:
+        max_round = max_round_by_application[application.id]
+        label = "Round 5+" if max_round >= 5 else _application_stage_label(application, max_round)
+        stage_counts_by_label[label] = stage_counts_by_label.get(label, 0) + 1
+    stage_counts = [
+        ApplicationCountRead(
+            label=label,
+            count=count,
+            percentage=_round_percentage(count, total_applications),
+        )
+        for label, count in stage_counts_by_label.items()
+        if count > 0
+    ]
+
+    submitted_count = total_applications
+    screening_count = sum(
+        1
+        for application in applications
+        if application.screening_at is not None
+        or max_round_by_application[application.id] >= 2
+        or application.status in {"screening", "interview", "offer"}
+    )
+    round_2_count = sum(1 for max_round in max_round_by_application.values() if max_round >= 2)
+    round_3_count = sum(1 for max_round in max_round_by_application.values() if max_round >= 3)
+    round_4_count = sum(1 for max_round in max_round_by_application.values() if max_round >= 4)
+    offer_count = sum(1 for application in applications if application.offer_at is not None or application.status == "offer")
+    funnel_data = [
+        ("Submitted", submitted_count),
+        ("Screening", screening_count),
+        ("Round 2", round_2_count),
+        ("Round 3", round_3_count),
+        ("Round 4", round_4_count),
+        ("Offer", offer_count),
+    ]
+    funnel: list[ApplicationFunnelStageRead] = []
+    previous_count: int | None = None
+    for label, count in funnel_data:
+        funnel.append(
+            ApplicationFunnelStageRead(
+                label=label,
+                count=count,
+                percentage_from_start=_round_percentage(count, submitted_count),
+                percentage_from_previous=_round_percentage(count, previous_count) if previous_count is not None else None,
+            )
+        )
+        previous_count = count
+
+    round_2_by_application = {
+        application.id: min(
+            (
+                round_.completed_at or round_.scheduled_at
+                for round_ in application.interview_rounds
+                if round_.round_number == 2 and (round_.completed_at is not None or round_.scheduled_at is not None)
+            ),
+            default=None,
+        )
+        for application in applications
+    }
+    duration_metrics = [
+        _duration_metric(
+            "Application to Screening",
+            [
+                value
+                for application in applications
+                if (value := _duration_days(application.applied_at, application.screening_at)) is not None
+            ],
+        ),
+        _duration_metric(
+            "Application to Rejection",
+            [
+                value
+                for application in applications
+                if (value := _duration_days(application.applied_at, application.rejected_at)) is not None
+            ],
+        ),
+        _duration_metric(
+            "Screening to Round 2",
+            [
+                value
+                for application in applications
+                if (value := _duration_days(application.screening_at, round_2_by_application[application.id])) is not None
+            ],
+        ),
+        _duration_metric(
+            "Screening to Rejection",
+            [
+                value
+                for application in applications
+                if (value := _duration_days(application.screening_at, application.rejected_at)) is not None
+            ],
+        ),
+    ]
+
+    activity_by_date: dict[date, dict[str, int]] = {}
+    for application in applications:
+        _add_activity(activity_by_date, "applications", application.applied_at)
+        _add_activity(activity_by_date, "screenings", application.screening_at)
+        _add_activity(activity_by_date, "rejections", application.rejected_at)
+        _add_activity(activity_by_date, "offers", application.offer_at)
+        for round_ in application.interview_rounds:
+            _add_activity(activity_by_date, "interviews", round_.completed_at or round_.scheduled_at)
+
+    if start_date is None and activity_by_date:
+        start_date = min(activity_by_date)
+    end_date = utcnow().date()
+    if activity_by_date:
+        end_date = max(end_date, max(activity_by_date))
+
+    activity_dates = _date_range(start_date, end_date) if start_date is not None else []
+    daily_activity_ascending: list[DailyApplicationActivityRead] = []
+    for activity_date in activity_dates:
+        values = activity_by_date.get(activity_date, {"applications": 0, "screenings": 0, "interviews": 0, "rejections": 0, "offers": 0})
+        window = daily_activity_ascending[-27:]
+        daily_activity_ascending.append(
+            DailyApplicationActivityRead(
+                activity_date=activity_date,
+                applications=values["applications"],
+                screenings=values["screenings"],
+                interviews=values["interviews"],
+                rejections=values["rejections"],
+                offers=values["offers"],
+                rolling_28_day_avg_applications=round(
+                    (sum(item.applications for item in window) + values["applications"]) / (len(window) + 1),
+                    2,
+                ),
+                rolling_28_day_avg_screenings=round(
+                    (sum(item.screenings for item in window) + values["screenings"]) / (len(window) + 1),
+                    2,
+                ),
+                rolling_28_day_avg_interviews=round(
+                    (sum(item.interviews for item in window) + values["interviews"]) / (len(window) + 1),
+                    2,
+                ),
+                rolling_28_day_avg_rejections=round(
+                    (sum(item.rejections for item in window) + values["rejections"]) / (len(window) + 1),
+                    2,
+                ),
+                rolling_28_day_avg_offers=round(
+                    (sum(item.offers for item in window) + values["offers"]) / (len(window) + 1),
+                    2,
+                ),
+            )
+        )
+
+    return ApplicationStatisticsResponse(
+        total_applications=total_applications,
+        status_counts=status_counts,
+        stage_counts=stage_counts,
+        duration_metrics=duration_metrics,
+        funnel=funnel,
+        daily_activity=list(reversed(daily_activity_ascending)),
+    )
+
+
 @app.get("/users", response_model=UserListResponse, tags=["users"])
 def list_users(
     session: Session = Depends(get_session),
@@ -1441,8 +1779,14 @@ def list_applications(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
-    order_by = _resolve_application_sort(sort_by, sort_order)
-    secondary_order = asc(JobApplication.id) if sort_order.lower() == "asc" else desc(JobApplication.id)
+    if sort_by == "active_funnel":
+        if sort_order.lower() not in {"asc", "desc"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported application sort order '{sort_order}'")
+        order_by_items = _active_application_ordering()
+    else:
+        order_by = _resolve_application_sort(sort_by, sort_order)
+        secondary_order = asc(JobApplication.id) if sort_order.lower() == "asc" else desc(JobApplication.id)
+        order_by_items = (order_by, secondary_order)
     search_term = _normalize_text_search(q)
     query = (
         select(JobApplication)
@@ -1451,7 +1795,7 @@ def list_applications(
             selectinload(JobApplication.resume),
             selectinload(JobApplication.interview_rounds),
         )
-        .order_by(order_by, secondary_order)
+        .order_by(*order_by_items)
     )
     count_query = select(JobApplication)
     joined_job_posting = False

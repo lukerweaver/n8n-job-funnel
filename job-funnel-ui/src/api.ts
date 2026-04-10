@@ -1,4 +1,5 @@
 import type {
+  ApplicationStatisticsResponse,
   ApplicationScoreRunRequest,
   ApplicationScoreRunResponse,
   ClassificationRunRequest,
@@ -203,7 +204,11 @@ export function getRunApplications(runId: string, params: URLSearchParams) {
 }
 
 export function getStatistics(params: URLSearchParams) {
-  return fetchJson<StatisticsResponse>("/statistics", params);
+  return fetchJson<StatisticsResponse>("/statistics/job-postings", params);
+}
+
+export function getApplicationStatistics(params: URLSearchParams) {
+  return fetchJson<ApplicationStatisticsResponse>("/statistics/applications", params);
 }
 
 export function getResumes(params: URLSearchParams) {

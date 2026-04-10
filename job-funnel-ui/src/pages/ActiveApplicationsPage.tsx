@@ -27,10 +27,7 @@ export function ActiveApplicationsPage() {
       next.set("status_group", "active");
     }
     if (!next.get("sort_by")) {
-      next.set("sort_by", "updated_at");
-    }
-    if (!next.get("sort_order")) {
-      next.set("sort_order", "desc");
+      next.set("sort_by", "active_funnel");
     }
     return next;
   }, [searchParams]);
@@ -86,8 +83,7 @@ export function ActiveApplicationsPage() {
     setSearchParams({
       limit: String(DEFAULT_LIMIT),
       status_group: "active",
-      sort_by: "updated_at",
-      sort_order: "desc",
+      sort_by: "active_funnel",
       offset: "0",
     });
   }
@@ -205,14 +201,6 @@ export function ActiveApplicationsPage() {
             </select>
           </label>
 
-          <label>
-            Sort Order
-            <select value={params.get("sort_order") ?? "desc"} onChange={(event) => updateParam("sort_order", event.target.value)}>
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
-            </select>
-          </label>
-
           <div className="filter-actions">
             <button type="button" className="secondary-button" onClick={clearFilters}>
               Reset
@@ -238,7 +226,7 @@ export function ActiveApplicationsPage() {
                   <th>Interview Stage</th>
                   <th>Rounds</th>
                   <th>Resume</th>
-                  <th>Updated</th>
+                  <th>Applied</th>
                 </tr>
               </thead>
               <tbody>
@@ -253,7 +241,7 @@ export function ActiveApplicationsPage() {
                     <td>{application.next_interview_stage ?? "N/A"}</td>
                     <td>{application.interview_rounds_total}</td>
                     <td>{application.resume_name ?? "N/A"}</td>
-                    <td>{formatDate(application.updated_at)}</td>
+                    <td>{formatDate(application.applied_at)}</td>
                   </tr>
                 ))}
               </tbody>
