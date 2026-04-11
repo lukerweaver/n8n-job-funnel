@@ -25,6 +25,92 @@ class JobIngestResponse(BaseModel):
     skipped: int
     jobs: list[str]
 
+
+class ProviderSettingsWrite(BaseModel):
+    provider_mode: Literal["ollama", "hosted", "configure_later"] = "configure_later"
+    provider_name: str | None = None
+    provider_base_url: str | None = None
+    provider_api_key: str | None = None
+    provider_model: str | None = None
+
+
+class ProviderSettingsRead(BaseModel):
+    provider_mode: str
+    provider_name: str | None = None
+    provider_base_url: str | None = None
+    provider_model: str | None = None
+    has_api_key: bool = False
+
+
+class AppSettingsRead(BaseModel):
+    onboarding_completed: bool
+    default_user_id: int | None = None
+    profile_name: str | None = None
+    target_roles: list[str] | None = None
+    keywords: list[str] | None = None
+    location_preference: str | None = None
+    salary_preference: str | None = None
+    provider: ProviderSettingsRead
+    default_prompt_key: str
+    scoring_preferences: dict[str, Any] | None = None
+    automation_settings: dict[str, Any] | None = None
+    automation_state: dict[str, Any] | None = None
+    advanced_mode_enabled: bool
+    n8n_webhook_url: str | None = None
+
+
+class AppSettingsUpdate(BaseModel):
+    profile_name: str | None = None
+    target_roles: list[str] | None = None
+    keywords: list[str] | None = None
+    location_preference: str | None = None
+    salary_preference: str | None = None
+    provider: ProviderSettingsWrite | None = None
+    default_prompt_key: str | None = None
+    scoring_preferences: dict[str, Any] | None = None
+    automation_settings: dict[str, Any] | None = None
+    advanced_mode_enabled: bool | None = None
+    n8n_webhook_url: str | None = None
+
+
+class OnboardingStatusResponse(BaseModel):
+    completed: bool
+    settings: AppSettingsRead
+    default_user: "UserRead | None" = None
+    default_resume: "ResumeRead | None" = None
+    missing_steps: list[str]
+
+
+class OnboardingCompleteRequest(BaseModel):
+    profile_name: str
+    resume_name: str | None = None
+    resume_content: str
+    target_roles: list[str]
+    keywords: list[str] | None = None
+    location_preference: str | None = None
+    salary_preference: str | None = None
+    provider: ProviderSettingsWrite = ProviderSettingsWrite()
+
+
+class PasteJobRequest(BaseModel):
+    input_type: Literal["url", "description"]
+    url: str | None = None
+    description: str | None = None
+    title: str | None = None
+    company_name: str | None = None
+    user_id: int | None = None
+    process_now: bool = True
+    mode: Literal["async", "sync"] = "async"
+
+
+class PasteJobResponse(BaseModel):
+    job: "JobRead"
+    application: "JobApplicationRead"
+    status: str
+    run_ids: list[int]
+    provider_configured: bool
+    message: str | None = None
+
 class JobRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -440,6 +526,7 @@ class JobApplicationScoreResponse(BaseModel):
     id: int
     job_posting_id: int
     resume_id: int
+    resume_name: str | None = None
     status: str
     score: float | None = None
     recommendation: str | None = None

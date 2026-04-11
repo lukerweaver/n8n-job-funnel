@@ -10,6 +10,7 @@ from services.llm_client import LlmClient, LlmRequestError, build_llm_client
 from services.prompt_rendering import render_user_prompt
 from services.prompt_service import resolve_active_prompt, resolve_prompt_selector
 from services.scoring_service import JobScoringSkipped
+from services.settings_service import resolve_llm_config
 
 
 @dataclass
@@ -63,7 +64,7 @@ def classify_job(
 
     effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
     resolved_prompt = prompt or resolve_active_prompt(session, effective_prompt_key, prompt_type="classification")
-    llm_client = client or build_llm_client()
+    llm_client = client or build_llm_client(resolve_llm_config(session))
     rendered_prompt = render_user_prompt(job, resolved_prompt)
 
     raw_response: str | None = None
@@ -93,7 +94,7 @@ def classify_jobs(
 
     effective_prompt_key = resolve_prompt_selector(prompt_key=prompt_key, classification_key=classification_key)
     prompt = resolve_active_prompt(session, effective_prompt_key, prompt_type="classification")
-    client = build_llm_client()
+    client = build_llm_client(resolve_llm_config(session))
 
     classified = 0
     errored = 0

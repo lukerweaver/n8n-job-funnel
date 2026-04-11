@@ -29,6 +29,41 @@ class User(Base):
     )
 
 
+class AppSettings(Base):
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    default_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    profile_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_roles: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    keywords: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    location_preference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    salary_preference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    provider_mode: Mapped[str] = mapped_column(String(50), default="configure_later", nullable=False)
+    provider_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    provider_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    default_prompt_key: Mapped[str] = mapped_column(String(100), default="default", nullable=False)
+    scoring_preferences: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    automation_settings: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    automation_state: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    advanced_mode_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    n8n_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    default_user: Mapped["User | None"] = relationship()
+
+
 class JobPosting(Base):
     __tablename__ = "job_postings"
 

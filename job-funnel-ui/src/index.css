@@ -121,6 +121,24 @@ textarea {
   padding: 2rem;
 }
 
+.onboarding-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.onboarding-panel {
+  width: min(1100px, 100%);
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  border-radius: 8px;
+}
+
 .page-grid {
   display: grid;
   gap: 1.5rem;
@@ -167,6 +185,24 @@ textarea {
 .table-panel,
 .detail-panel {
   padding: 1rem;
+}
+
+.result-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.advanced-details {
+  border: 1px solid rgba(21, 33, 27, 0.15);
+  border-radius: 8px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.advanced-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--accent);
 }
 
 .filter-grid {

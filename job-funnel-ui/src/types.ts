@@ -89,12 +89,80 @@ export interface JobApplicationListResponse {
   items: JobApplication[];
 }
 
+export interface JobPosting {
+  id: number;
+  job_id: string;
+  source: string;
+  company_name: string | null;
+  title: string | null;
+  yearly_min_compensation: number | null;
+  yearly_max_compensation: number | null;
+  apply_url: string | null;
+  description: string | null;
+  classification_key: string | null;
+  classification_prompt_version: number | null;
+  classification_error: string | null;
+  classified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface JobIngestResponse {
   received: number;
   created: number;
   updated: number;
   skipped: number;
   jobs: string[];
+}
+
+export interface ProviderSettingsRead {
+  provider_mode: string;
+  provider_name: string | null;
+  provider_base_url: string | null;
+  provider_model: string | null;
+  has_api_key: boolean;
+}
+
+export interface AppSettings {
+  onboarding_completed: boolean;
+  default_user_id: number | null;
+  profile_name: string | null;
+  target_roles: string[] | null;
+  keywords: string[] | null;
+  location_preference: string | null;
+  salary_preference: string | null;
+  provider: ProviderSettingsRead;
+  default_prompt_key: string;
+  scoring_preferences: Record<string, unknown> | null;
+  automation_settings: Record<string, unknown> | null;
+  automation_state: Record<string, unknown> | null;
+  advanced_mode_enabled: boolean;
+  n8n_webhook_url: string | null;
+}
+
+export interface User {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OnboardingStatusResponse {
+  completed: boolean;
+  settings: AppSettings;
+  default_user: User | null;
+  default_resume: Resume | null;
+  missing_steps: string[];
+}
+
+export interface PasteJobResponse {
+  job: JobPosting;
+  application: JobApplication;
+  status: string;
+  run_ids: number[];
+  provider_configured: boolean;
+  message: string | null;
 }
 
 export interface Run {

@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
+import hashlib
+import re
 import time
 from urllib.parse import urlparse
+from urllib import error as url_error, request as url_request
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,8 +18,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from config import settings
 from database import Base, engine, get_session
-from models import InterviewRound, JobApplication, JobPosting, PromptLibrary, Resume, Run, RunItem, User
+from models import AppSettings, InterviewRound, JobApplication, JobPosting, PromptLibrary, Resume, Run, RunItem, User
 from schemas import (
+    AppSettingsRead,
+    AppSettingsUpdate,
     ApplicationCreate,
     ApplicationGenerateRequest,
     ApplicationErrorWrite,
@@ -50,6 +55,10 @@ from schemas import (
     JobClassificationRunRequest,
     JobListResponse,
     JobRead,
+    OnboardingCompleteRequest,
+    OnboardingStatusResponse,
+    PasteJobRequest,
+    PasteJobResponse,
     PromptLibraryCreate,
     PromptLibraryListResponse,
     PromptLibraryRead,
@@ -81,12 +90,24 @@ from services.run_service import (
     RunWorker,
     enqueue_application_score_run,
     enqueue_classification_run,
+    process_next_run,
     serialize_application_score_run,
     serialize_classification_run,
     serialize_run,
     serialize_runs,
 )
 from services.scoring_service import JobScoringSkipped, score_application
+from services.settings_service import (
+    DEFAULT_AUTOMATION_SETTINGS,
+    DEFAULT_PROMPT_KEY,
+    apply_provider_settings,
+    apply_settings_update,
+    get_or_create_app_settings,
+    is_provider_configured,
+    resolve_default_resume,
+    seed_default_prompts,
+    serialize_settings,
+)
 
 
 def merge_responses(existing, incoming):
@@ -144,6 +165,8 @@ OPENAPI_TAGS = [
     {"name": "applications", "description": "Application generation, scoring, notification, status, and interview lifecycle routes."},
     {"name": "runs", "description": "Async run inspection for classification and application scoring."},
     {"name": "statistics", "description": "Operational statistics and score distributions for the operator console."},
+    {"name": "onboarding", "description": "First-run setup and simplified app configuration."},
+    {"name": "settings", "description": "Simple and advanced product settings."},
     {"name": "users", "description": "User records that own resumes and applications."},
     {"name": "resumes", "description": "Resume inventory keyed to classification domains."},
     {"name": "prompt-library", "description": "Versioned prompt templates resolved by prompt key and prompt type."},
@@ -198,6 +221,121 @@ def _normalize_user_default_resume(
 
     for resume in resumes:
         resume.is_default = resume.id == default_resume_id
+
+
+def _normalize_string_list(value: list[str] | None) -> list[str] | None:
+    if not value:
+        return None
+    normalized = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return normalized or None
+
+
+def _serialize_onboarding_status(session: Session, settings: AppSettings) -> OnboardingStatusResponse:
+    user = session.get(User, settings.default_user_id) if settings.default_user_id is not None else None
+    resume = resolve_default_resume(session, settings)
+    missing_steps: list[str] = []
+    if user is None:
+        missing_steps.append("profile")
+    if resume is None:
+        missing_steps.append("resume")
+    if not is_provider_configured(settings):
+        missing_steps.append("ai_provider")
+
+    return OnboardingStatusResponse(
+        completed=settings.onboarding_completed,
+        settings=AppSettingsRead(**serialize_settings(settings)),
+        default_user=UserRead.model_validate(user) if user is not None else None,
+        default_resume=ResumeRead.model_validate(resume) if resume is not None else None,
+        missing_steps=missing_steps,
+    )
+
+
+def _manual_job_id(payload: PasteJobRequest) -> str:
+    base = payload.url or payload.description or ""
+    if base.strip():
+        digest = hashlib.sha256(base.strip().encode("utf-8")).hexdigest()[:16]
+        return f"manual-{digest}"
+    return f"manual-{int(time.time() * 1000)}"
+
+
+def _fetch_job_description_from_url(url: str) -> str | None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    req = url_request.Request(url, headers={"User-Agent": "job-funnel/1.0"})
+    try:
+        with url_request.urlopen(req, timeout=10) as response:
+            content_type = response.headers.get("content-type", "")
+            if "text" not in content_type and "html" not in content_type and "json" not in content_type:
+                return None
+            body = response.read(750_000).decode("utf-8", errors="replace")
+    except (url_error.HTTPError, url_error.URLError, TimeoutError, ValueError):
+        return None
+
+    text = re.sub(r"<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>", " ", body, flags=re.IGNORECASE)
+    text = re.sub(r"<style\b[^<]*(?:(?!</style>)<[^<]*)*</style>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:20000] if text else None
+
+
+def _enqueue_single_classification_run(
+    session: Session,
+    *,
+    job: JobPosting,
+    prompt_key: str | None,
+) -> Run:
+    run = Run(
+        type="classification",
+        status="queued",
+        requested_status="",
+        requested_source=job.source,
+        classification_key=None,
+        prompt_key=prompt_key,
+        force=False,
+        selected_count=1,
+    )
+    session.add(run)
+    session.flush()
+    session.add(
+        RunItem(
+            run_id=run.id,
+            type="classification",
+            job_posting_id=job.id,
+            status="queued",
+        )
+    )
+    return run
+
+
+def _enqueue_single_scoring_run(
+    session: Session,
+    *,
+    application: JobApplication,
+    prompt_key: str | None,
+) -> Run:
+    run = Run(
+        type="application_scoring",
+        status="queued",
+        requested_status=application.status,
+        requested_source=None,
+        classification_key=None,
+        prompt_key=prompt_key,
+        force=False,
+        selected_count=1,
+    )
+    session.add(run)
+    session.flush()
+    session.add(
+        RunItem(
+            run_id=run.id,
+            type="application_scoring",
+            job_posting_id=application.job_posting_id,
+            job_application_id=application.id,
+            status="queued",
+        )
+    )
+    return run
 
 
 def _select_resumes_for_job_generation(
@@ -372,6 +510,7 @@ def _serialize_application_score(application: JobApplication) -> JobApplicationS
         id=application.id,
         job_posting_id=application.job_posting_id,
         resume_id=application.resume_id,
+        resume_name=application.resume.name if application.resume is not None else None,
         status=application.status,
         score=application.score,
         recommendation=application.recommendation,
@@ -866,6 +1005,10 @@ def _backfill_resume_defaults(session: Session) -> None:
 def run_startup_backfill(session: Session) -> None:
     _backfill_resume_classification_keys(session)
     _backfill_resume_defaults(session)
+    seed_default_prompts(session)
+    settings = get_or_create_app_settings(session)
+    if settings.default_user_id is None:
+        settings.default_user_id = session.scalar(select(User.id).order_by(User.id.asc()).limit(1))
     session.commit()
 
 
@@ -915,6 +1058,196 @@ async def llm_request_error_handler(_: Request, exc: LlmRequestError) -> JSONRes
 @app.get("/health", tags=["system"])
 async def health():
     return {"ok": True}
+
+
+@app.get("/onboarding/status", response_model=OnboardingStatusResponse, tags=["onboarding"])
+def get_onboarding_status(session: Session = Depends(get_session)):
+    settings = get_or_create_app_settings(session)
+    seed_default_prompts(session)
+    _commit_or_fail(session)
+    return _serialize_onboarding_status(session, settings)
+
+
+@app.post("/onboarding/complete", response_model=OnboardingStatusResponse, tags=["onboarding"])
+def complete_onboarding(payload: OnboardingCompleteRequest, session: Session = Depends(get_session)):
+    settings = get_or_create_app_settings(session)
+    seed_default_prompts(session)
+
+    user = session.get(User, settings.default_user_id) if settings.default_user_id is not None else None
+    if user is None:
+        user = User(
+            name=payload.profile_name.strip(),
+            email=f"default-{int(time.time())}@job-funnel.local",
+        )
+        session.add(user)
+        session.flush()
+        settings.default_user_id = user.id
+    else:
+        user.name = payload.profile_name.strip()
+
+    resume = resolve_default_resume(session, settings)
+    resume_name = (payload.resume_name or "Default Resume").strip()
+    if resume is None:
+        resume = Resume(
+            user_id=user.id,
+            name=resume_name,
+            prompt_key=settings.default_prompt_key or DEFAULT_PROMPT_KEY,
+            classification_key=None,
+            content=payload.resume_content,
+            is_active=True,
+            is_default=True,
+        )
+        session.add(resume)
+        session.flush()
+    else:
+        resume.name = resume_name
+        resume.content = payload.resume_content
+        resume.prompt_key = settings.default_prompt_key or DEFAULT_PROMPT_KEY
+        resume.is_active = True
+        resume.is_default = True
+
+    _normalize_user_default_resume(session, user.id, selected_resume=resume)
+    settings.profile_name = payload.profile_name.strip()
+    settings.target_roles = _normalize_string_list(payload.target_roles)
+    settings.keywords = _normalize_string_list(payload.keywords)
+    settings.location_preference = payload.location_preference.strip() if payload.location_preference else None
+    settings.salary_preference = payload.salary_preference.strip() if payload.salary_preference else None
+    settings.default_prompt_key = settings.default_prompt_key or DEFAULT_PROMPT_KEY
+    settings.scoring_preferences = settings.scoring_preferences or {}
+    settings.automation_settings = settings.automation_settings or DEFAULT_AUTOMATION_SETTINGS
+    settings.automation_state = settings.automation_state or {}
+    apply_provider_settings(settings, payload.provider)
+    settings.onboarding_completed = True
+
+    _commit_or_fail(session)
+    return _serialize_onboarding_status(session, settings)
+
+
+@app.get("/settings", response_model=AppSettingsRead, tags=["settings"])
+def get_settings(session: Session = Depends(get_session)):
+    settings = get_or_create_app_settings(session)
+    seed_default_prompts(session)
+    _commit_or_fail(session)
+    return AppSettingsRead(**serialize_settings(settings))
+
+
+@app.put("/settings", response_model=AppSettingsRead, tags=["settings"])
+def update_settings(payload: AppSettingsUpdate, session: Session = Depends(get_session)):
+    settings = get_or_create_app_settings(session)
+    apply_settings_update(settings, payload)
+    _commit_or_fail(session)
+    return AppSettingsRead(**serialize_settings(settings))
+
+
+@app.post("/jobs/paste", response_model=PasteJobResponse, tags=["jobs"])
+def paste_job(payload: PasteJobRequest, session: Session = Depends(get_session)):
+    settings = get_or_create_app_settings(session)
+    seed_default_prompts(session)
+    user_id = payload.user_id or settings.default_user_id
+    if user_id is None:
+        raise HTTPException(status_code=409, detail="Complete onboarding before pasting a job")
+
+    user = _get_user_by_id(session, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' was not found")
+
+    resume = resolve_default_resume(session, settings)
+    if resume is None or resume.user_id != user.id:
+        resume = session.scalar(
+            select(Resume)
+            .where(Resume.user_id == user.id, Resume.is_active.is_(True))
+            .order_by(Resume.is_default.desc(), Resume.id.asc())
+            .limit(1)
+        )
+    if resume is None:
+        raise HTTPException(status_code=409, detail="Add a resume before pasting a job")
+
+    description = payload.description.strip() if payload.description else None
+    if payload.input_type == "url":
+        if not payload.url or not payload.url.strip():
+            raise HTTPException(status_code=422, detail="Job URL is required")
+        description = description or _fetch_job_description_from_url(payload.url.strip())
+    elif not description:
+        raise HTTPException(status_code=422, detail="Job description is required")
+
+    job_id = _manual_job_id(payload)
+    job = session.scalar(select(JobPosting).where(JobPosting.job_id == job_id))
+    if job is None:
+        job = JobPosting(job_id=job_id)
+        session.add(job)
+    job.source = "manual-entry"
+    job.company_name = payload.company_name.strip() if payload.company_name else None
+    job.title = payload.title.strip() if payload.title else None
+    job.apply_url = payload.url.strip() if payload.url else None
+    job.description = description or payload.url
+    job.raw_payload = {
+        "input_type": payload.input_type,
+        "url": payload.url,
+        "description_was_fetched": bool(payload.input_type == "url" and description),
+    }
+    session.flush()
+
+    application = session.scalar(
+        select(JobApplication).where(
+            JobApplication.job_posting_id == job.id,
+            JobApplication.resume_id == resume.id,
+        )
+    )
+    if application is None:
+        application = JobApplication(
+            user_id=user.id,
+            job_posting_id=job.id,
+            resume_id=resume.id,
+            status="new",
+        )
+        session.add(application)
+        session.flush()
+    else:
+        application.user_id = user.id
+        application.status = "new" if application.status in {"error"} else application.status
+
+    run_ids: list[int] = []
+    provider_configured = is_provider_configured(settings)
+    message: str | None = None
+    if payload.process_now and provider_configured:
+        if job.classification_key is None:
+            classification_run = _enqueue_single_classification_run(
+                session,
+                job=job,
+                prompt_key=settings.default_prompt_key or DEFAULT_PROMPT_KEY,
+            )
+            run_ids.append(classification_run.id)
+        if application.status == "new":
+            scoring_run = _enqueue_single_scoring_run(
+                session,
+                application=application,
+                prompt_key=settings.default_prompt_key or DEFAULT_PROMPT_KEY,
+            )
+            run_ids.append(scoring_run.id)
+        settings.automation_state = {
+            **(settings.automation_state if isinstance(settings.automation_state, dict) else {}),
+            "last_manual_trigger_at": utcnow().isoformat(),
+        }
+    elif payload.process_now:
+        message = "AI provider is not configured yet. The job was saved and can be processed after setup."
+
+    _commit_or_fail(session)
+
+    if payload.mode == "sync" and run_ids:
+        for _run_id in run_ids:
+            process_next_run()
+        session.refresh(job)
+        session.refresh(application)
+
+    status = "scored" if application.scored_at is not None else ("queued" if run_ids else "saved")
+    return PasteJobResponse(
+        job=JobRead.model_validate(job),
+        application=_serialize_application(application),
+        status=status,
+        run_ids=run_ids,
+        provider_configured=provider_configured,
+        message=message,
+    )
 
 
 @app.post("/jobs/ingest", response_model=JobIngestResponse, tags=["jobs"])
@@ -1305,7 +1638,7 @@ def get_statistics(
         score_summary_query = score_summary_query.where(JobApplication.created_at >= cutoff_datetime)
     score_summary_row = session.execute(score_summary_query).one()
 
-    bucket_start = (cast(JobApplication.score / bucket_size, Integer) * bucket_size).label("bucket_start")
+    bucket_start = (cast((JobApplication.score - 0.000000001) / bucket_size, Integer) * bucket_size).label("bucket_start")
     bucket_query = (
         select(
             bucket_start,

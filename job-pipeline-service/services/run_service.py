@@ -13,6 +13,7 @@ from services.classification_service import classify_job
 from services.llm_client import build_llm_client
 from services.prompt_service import resolve_active_prompt, resolve_prompt_selector
 from services.scoring_service import JobScoringSkipped, _commit_scoring_progress, score_application
+from services.settings_service import resolve_llm_config
 
 
 def utcnow() -> datetime:
@@ -316,7 +317,7 @@ def process_next_run() -> bool:
                 run.prompt_key,
                 prompt_type="classification" if run.type == "classification" else "scoring",
             )
-            client = build_llm_client()
+            client = build_llm_client(resolve_llm_config(session))
         except Exception as exc:
             _mark_run_failed(session, run, str(exc))
             if run.callback_url:

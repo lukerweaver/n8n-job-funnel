@@ -10,12 +10,125 @@ This repository combines:
 
 The active flow is:
 
-1. scrape jobs in the browser
-2. ingest them into `job_postings`
-3. classify postings
-4. generate user-owned `job_applications` from matching resumes
-5. score applications
-6. track notifications, lifecycle status, and interview rounds
+1. open the Job Funnel UI
+2. complete first-run onboarding
+3. paste a resume
+4. paste a job description or job URL
+5. receive a job fit score and recommendation
+6. optionally use advanced automation, the Chrome extension, or n8n workflows
+
+## Quick Start for Non-Technical Users
+
+This path does not require editing prompts, configuring n8n, or installing the Chrome extension.
+
+### 1. Install the basics
+
+Install:
+
+- [Git](https://git-scm.com/downloads)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or another Docker runtime
+
+Optional:
+
+- A hosted AI provider API key, such as an OpenAI-compatible API key
+- Ollama, if you prefer to run a local model
+
+### 2. Download the app
+
+From a terminal:
+
+```bash
+git clone https://github.com/lukerweaver/n8n-job-funnel.git
+cd n8n-job-funnel
+```
+
+### 3. Start the app
+
+From the repository root:
+
+```bash
+docker compose -f docker-compose-example.yml up --build -d
+```
+
+This starts:
+
+- Job Funnel UI: `http://localhost:8080`
+- Backend API: `http://localhost:8000`
+- Postgres database: `localhost:5432`
+
+Check that it started:
+
+```bash
+curl http://localhost:8000/health
+```
+
+The expected response is:
+
+```json
+{"ok":true}
+```
+
+### 4. Complete onboarding
+
+Open:
+
+```text
+http://localhost:8080
+```
+
+The first screen asks for:
+
+- Profile name
+- Target roles
+- Optional keywords
+- Location / remote preference
+- Optional salary preference
+- Resume text
+- AI provider
+
+Recommended AI provider choices:
+
+- Hosted: choose this if you have an API key. Use an OpenAI-compatible base URL such as `https://api.openai.com/v1`, enter the model, and paste the API key.
+- Local (Ollama): choose this if you already run Ollama. If the backend is running in Docker, the provider URL may need to be `http://host.docker.internal:11434` instead of `http://localhost:11434`.
+- Configure later: choose this to explore the app first. Jobs will be saved, but scoring will wait until an AI provider is configured in Settings.
+
+### 5. Paste a job and get a recommendation
+
+After onboarding:
+
+1. Go to **Paste Job**.
+2. Paste a job description or job URL.
+3. Add the company and role title if you have them.
+4. Click **Get Recommendation**.
+
+The app saves the job, creates an application record for your default resume, and processes classification/scoring in the background. When the score is ready, the result includes:
+
+- Role classification
+- Job fit score
+- Screening likelihood
+- Recommendation
+- Strengths
+- Gaps
+
+### 6. Optional advanced setup
+
+Advanced users can open **Settings** and enable advanced navigation for:
+
+- AI provider and model details
+- Prompt editing
+- Scoring and automation thresholds
+- Batch runs
+- n8n integration
+
+The Chrome extension remains optional. Use it only if you want browser-based job capture from LinkedIn or Hiring Cafe.
+
+### Stop the app
+
+From the repository root:
+
+```bash
+docker compose -f docker-compose-example.yml down
+```
 
 ## Deployment Modes
 
@@ -40,16 +153,27 @@ There are now three practical ways to run this project:
 ## Current Architecture
 
 ```text
+Job Funnel UI
+    -> first-run onboarding
+        -> users / resumes / app_settings / prompt_library
+    -> paste job description or URL
+        -> POST /jobs/paste
+            -> job-pipeline-service
+                -> job_postings
+                -> job_applications
+                -> backend run worker
+                -> classify postings
+                -> score applications with LLM prompts
+                -> return job fit score and recommendation
+
+Optional advanced ingestion:
 LinkedIn / Hiring Cafe
     -> job-scraper-chrome
         -> POST /jobs/ingest
-            -> job-pipeline-service
-                -> job_postings
-                -> classify postings
-                -> generate applications from resumes
-                -> score applications with LLM prompts
-                -> persist lifecycle + notification state
-                -> expose run status to n8n callbacks
+
+Optional advanced orchestration:
+n8n
+    -> run and callback endpoints
 ```
 
 ## Backend Overview
@@ -76,6 +200,9 @@ Two identifier types matter:
 
 High-value route groups:
 
+- Onboarding: `/onboarding/status`, `/onboarding/complete`
+- Settings: `/settings`
+- Paste job: `/jobs/paste`
 - Jobs: `/jobs/ingest`, `/jobs`, `/jobs/{id}`, `/jobs/{id}/classify/run`, `/jobs/classify/run`
 - Runs: `/runs`, `/runs/{run_id}`, `/runs/{run_id}/items`, `/runs/{run_id}/applications`
 - Statistics: `/statistics`

@@ -18,15 +18,25 @@ class LlmClient:
         raise NotImplementedError
 
 
+@dataclass
+class LlmClientConfig:
+    provider: str
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+
+
 class OllamaClient(LlmClient):
-    def __init__(self) -> None:
-        model = settings.resolve_model_for_provider("ollama")
-        if settings.ollama_base_url is None:
+    def __init__(self, config: LlmClientConfig | None = None) -> None:
+        model = config.model if config and config.model else settings.resolve_model_for_provider("ollama")
+        base_url = config.base_url.rstrip("/") if config and config.base_url else settings.ollama_base_url
+        if base_url is None:
             raise LlmRequestError("Ollama provider requires OLLAMA_BASE_URL to be set")
         if model is None:
             raise LlmRequestError("Ollama provider requires OLLAMA_MODEL or SCORING_MODEL to be set")
 
         super().__init__(provider="ollama", model=model)
+        self.base_url = base_url
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         payload = {
@@ -40,7 +50,7 @@ class OllamaClient(LlmClient):
         }
 
         req = request.Request(
-            url=f"{settings.ollama_base_url}/api/chat",
+            url=f"{self.base_url}/api/chat",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -69,13 +79,15 @@ class OllamaClient(LlmClient):
 
 
 class OpenAICompatibleClient(LlmClient):
-    def __init__(self, provider_name: str = "openai_compatible") -> None:
-        model = settings.resolve_model_for_provider(provider_name)
-        if settings.llm_base_url is None:
+    def __init__(self, provider_name: str = "openai_compatible", config: LlmClientConfig | None = None) -> None:
+        model = config.model if config and config.model else settings.resolve_model_for_provider(provider_name)
+        base_url = config.base_url.rstrip("/") if config and config.base_url else settings.llm_base_url
+        api_key = config.api_key if config and config.api_key else settings.llm_api_key
+        if base_url is None:
             raise LlmRequestError(
                 f"{provider_name} provider requires LLM_BASE_URL to be set"
             )
-        if settings.llm_api_key is None:
+        if api_key is None:
             raise LlmRequestError(
                 f"{provider_name} provider requires LLM_API_KEY to be set"
             )
@@ -85,6 +97,8 @@ class OpenAICompatibleClient(LlmClient):
             )
 
         super().__init__(provider=provider_name, model=model)
+        self.base_url = base_url
+        self.api_key = api_key
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         payload = {
@@ -96,11 +110,11 @@ class OpenAICompatibleClient(LlmClient):
         }
 
         req = request.Request(
-            url=f"{settings.llm_base_url}/chat/completions",
+            url=f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {settings.llm_api_key}",
+                "Authorization": f"Bearer {self.api_key}",
             },
             method="POST",
         )
@@ -131,13 +145,13 @@ class OpenAICompatibleClient(LlmClient):
         return content
 
 
-def build_llm_client() -> LlmClient:
-    provider = settings.resolve_llm_provider()
+def build_llm_client(config: LlmClientConfig | None = None) -> LlmClient:
+    provider = config.provider if config else settings.resolve_llm_provider()
 
     if provider == "ollama":
-        return OllamaClient()
+        return OllamaClient(config=config)
     if provider in {"openai_compatible", "openai", "groq"}:
-        return OpenAICompatibleClient(provider_name=provider)
+        return OpenAICompatibleClient(provider_name=provider, config=config)
     if provider == "unconfigured":
         raise LlmRequestError(
             "No LLM provider configured. Set SCORING_PROVIDER or configure OLLAMA_BASE_URL, "

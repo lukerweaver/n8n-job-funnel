@@ -64,10 +64,14 @@ from schemas import (
     ApplicationsGenerateRunRequest,
     ApplicationsScoreRunRequest,
     ApplicationStatusWrite,
+    AppSettingsUpdate,
     InterviewRoundCreate,
     InterviewRoundUpdate,
     JobClassificationRunRequest,
     JobIngestItem,
+    OnboardingCompleteRequest,
+    PasteJobRequest,
+    ProviderSettingsWrite,
     ResumeCreate,
     ResumeUpdate,
     JobsClassificationRunRequest,
@@ -345,6 +349,153 @@ def test_user_and_resume_crud(db_session):
         )
     with pytest.raises(HTTPException):
         create_user(UserCreate(name="Alice 2", email="alice@example.com"), db_session)
+
+
+def test_onboarding_status_complete_and_settings_redact_provider_key(db_session):
+    initial = app_module.get_onboarding_status(db_session)
+
+    assert initial.completed is False
+    assert "profile" in initial.missing_steps
+    assert "resume" in initial.missing_steps
+    assert initial.settings.provider.has_api_key is False
+
+    completed = app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="Marketing User",
+            resume_content="Resume body",
+            target_roles=["Product Marketing", "Growth"],
+            keywords=["B2B"],
+            location_preference="Remote",
+            salary_preference="$150k+",
+            provider=ProviderSettingsWrite(
+                provider_mode="hosted",
+                provider_name="openai_compatible",
+                provider_base_url="https://api.example.com/v1",
+                provider_api_key="secret-key",
+                provider_model="model-1",
+            ),
+        ),
+        db_session,
+    )
+
+    assert completed.completed is True
+    assert completed.default_user is not None
+    assert completed.default_user.name == "Marketing User"
+    assert completed.default_resume is not None
+    assert completed.default_resume.content == "Resume body"
+    assert completed.settings.provider.has_api_key is True
+    assert not hasattr(completed.settings.provider, "provider_api_key")
+
+    updated = app_module.update_settings(
+        AppSettingsUpdate(
+            advanced_mode_enabled=True,
+            provider=ProviderSettingsWrite(provider_mode="ollama"),
+        ),
+        db_session,
+    )
+    assert updated.advanced_mode_enabled is True
+    assert updated.provider.provider_name == "ollama"
+    assert updated.provider.provider_base_url == "http://localhost:11434"
+    assert updated.provider.has_api_key is False
+
+
+def test_paste_job_requires_onboarding_and_resume(db_session):
+    with pytest.raises(HTTPException) as missing_onboarding:
+        app_module.paste_job(PasteJobRequest(input_type="description", description="JD"), db_session)
+    assert missing_onboarding.value.status_code == 409
+
+    user = seed_user(db_session, name="No Resume", email="no-resume@example.com")
+    settings = app_module.get_or_create_app_settings(db_session)
+    settings.default_user_id = user.id
+    settings.onboarding_completed = True
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as missing_resume:
+        app_module.paste_job(PasteJobRequest(input_type="description", description="JD"), db_session)
+    assert missing_resume.value.status_code == 409
+
+
+def test_paste_job_saves_without_provider_and_queues_with_provider(db_session):
+    completed = app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="Paste User",
+            resume_content="Resume body",
+            target_roles=["Marketing"],
+            provider=ProviderSettingsWrite(provider_mode="configure_later"),
+        ),
+        db_session,
+    )
+    assert completed.default_resume is not None
+
+    saved = app_module.paste_job(
+        PasteJobRequest(
+            input_type="description",
+            description="A product marketing role",
+            title="PMM",
+            company_name="Acme",
+        ),
+        db_session,
+    )
+    assert saved.status == "saved"
+    assert saved.provider_configured is False
+    assert saved.run_ids == []
+    assert saved.message is not None
+
+    settings = app_module.get_or_create_app_settings(db_session)
+    settings.provider_mode = "ollama"
+    settings.provider_name = "ollama"
+    settings.provider_base_url = "http://localhost:11434"
+    settings.provider_model = "test-model"
+    db_session.commit()
+
+    queued = app_module.paste_job(
+        PasteJobRequest(
+            input_type="description",
+            description="A lifecycle marketing role",
+            title="Lifecycle Marketer",
+            company_name="Beta",
+        ),
+        db_session,
+    )
+    assert queued.status == "queued"
+    assert queued.provider_configured is True
+    assert len(queued.run_ids) == 2
+    assert queued.application.resume_id == completed.default_resume.id
+
+
+def test_paste_job_url_fetch_and_sync_mode(db_session, monkeypatch):
+    app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="URL User",
+            resume_content="Resume body",
+            target_roles=["Operations"],
+            provider=ProviderSettingsWrite(provider_mode="ollama"),
+        ),
+        db_session,
+    )
+    calls = {"process_next_run": 0}
+
+    monkeypatch.setattr(app_module, "_fetch_job_description_from_url", lambda _url: "Fetched job description")
+
+    def _fake_process_next_run():
+        calls["process_next_run"] += 1
+        return True
+
+    monkeypatch.setattr(app_module, "process_next_run", _fake_process_next_run)
+
+    response = app_module.paste_job(
+        PasteJobRequest(
+            input_type="url",
+            url="https://example.com/jobs/1",
+            title="Ops Manager",
+            mode="sync",
+        ),
+        db_session,
+    )
+
+    assert response.job.apply_url == "https://example.com/jobs/1"
+    assert response.job.description == "Fetched job description"
+    assert calls["process_next_run"] == len(response.run_ids)
 
 
 def test_application_crud_generate_and_status_flow(db_session):
