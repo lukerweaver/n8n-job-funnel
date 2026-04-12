@@ -12,7 +12,6 @@ AUTO_CLASSIFICATION_RUN_STATE_KEY = "active_auto_classification_run_id"
 AUTO_LAST_RUN_AT_STATE_KEY = "last_auto_process_run_at"
 AUTO_LAST_SCORING_RUN_STATE_KEY = "last_auto_scoring_run_id"
 RESUME_STRATEGIES = {"classification_first", "default_only", "default_fallback"}
-WORKFLOW_OWNERS = {"service", "external"}
 
 
 def utcnow() -> datetime:
@@ -33,11 +32,6 @@ def _automation_int(settings, key: str, default: int) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return default
-
-
-def _workflow_owner(settings) -> str:
-    value = _automation_settings(settings).get("workflow_owner", "service")
-    return value if value in WORKFLOW_OWNERS else "service"
 
 
 def _automation_resume_strategy(settings) -> str:
@@ -67,11 +61,7 @@ def _parse_datetime(value) -> datetime | None:
 
 def _service_workflow_enabled(settings) -> bool:
     automation = _automation_settings(settings)
-    return (
-        _workflow_owner(settings) == "service"
-        and automation.get("auto_process_jobs", True) is not False
-        and is_provider_configured(settings)
-    )
+    return automation.get("auto_process_jobs", True) is not False and is_provider_configured(settings)
 
 
 def _active_run_exists(session) -> bool:

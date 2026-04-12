@@ -84,8 +84,7 @@ There is intentionally no default `OLLAMA_BASE_URL`. This prevents installs from
 
 Settings can also store workflow controls in `automation_settings`:
 
-- `auto_process_jobs`: when false, disables service-managed automatic processing
-- `workflow_owner`: `service` by default, or `external` when n8n owns the workflow
+- `auto_process_jobs`: when false, disables service-managed automatic processing so n8n or another orchestrator can own the workflow
 - `unprocessed_jobs_threshold`: minimum pending unclassified jobs before automatic classification runs
 - `minutes_since_last_run_threshold`: time-based fallback for automatic classification runs
 - `resume_strategy`: `default_fallback`, `classification_first`, or `default_only`
@@ -342,7 +341,7 @@ Two job identifiers exist:
 Default service-managed automation:
 
 1. The run worker checks for queued/running work.
-2. If there is no active classification or scoring run, `workflow_owner` is `service`, `auto_process_jobs` is enabled, and an AI provider is configured, the service may queue `POST /jobs/classify/run` behavior internally.
+2. If there is no active classification or scoring run, `auto_process_jobs` is enabled, and an AI provider is configured, the service may queue `POST /jobs/classify/run` behavior internally.
 3. When that classification run completes, the service generates missing applications for classified jobs using `resume_strategy`.
 4. The service queues scoring for the generated applications.
 
@@ -354,7 +353,7 @@ External automation sequence:
 4. `POST /applications/score/run`
 5. downstream notification or tracking writes
 
-Set `automation_settings.workflow_owner` to `external` if n8n or another tool should own that sequence. The run endpoints remain available in both modes.
+Set `automation_settings.auto_process_jobs` to false if n8n or another tool should own that sequence. The run endpoints remain available in both modes.
 
 ## Selected Route Notes
 
@@ -368,7 +367,6 @@ Example automation payload:
 {
   "automation_settings": {
     "auto_process_jobs": true,
-    "workflow_owner": "service",
     "unprocessed_jobs_threshold": 5,
     "minutes_since_last_run_threshold": 60,
     "opportunistic_trigger_enabled": true,
@@ -377,7 +375,7 @@ Example automation payload:
 }
 ```
 
-Use `"workflow_owner": "external"` for n8n-managed workflows.
+Use `"auto_process_jobs": false` for n8n-managed workflows.
 
 ### `POST /jobs/paste`
 

@@ -10,7 +10,6 @@ class JobIngestItem(BaseModel):
     job_id: str
     company_name: str | None = None
     title: str | None = None
-    location: str | None = None
     yearly_min_compensation: float | None = None
     yearly_max_compensation: float | None = None
     apply_url: str | None = None
@@ -88,7 +87,6 @@ class PasteJobRequest(BaseModel):
     description: str | None = None
     title: str | None = None
     company_name: str | None = None
-    location: str | None = None
     user_id: int | None = None
     process_now: bool = True
     mode: Literal["async", "sync"] = "async"
@@ -110,7 +108,6 @@ class JobRead(BaseModel):
     source: str
     company_name: str | None
     title: str | None
-    location: str | None
     yearly_min_compensation: float | None
     yearly_max_compensation: float | None
     apply_url: str | None
@@ -461,7 +458,6 @@ class JobApplicationRead(BaseModel):
     source: str | None = None
     company_name: str | None = None
     title: str | None = None
-    location: str | None = None
     yearly_min_compensation: float | None = None
     yearly_max_compensation: float | None = None
     apply_url: str | None = None

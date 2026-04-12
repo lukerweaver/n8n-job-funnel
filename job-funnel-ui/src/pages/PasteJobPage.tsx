@@ -13,7 +13,6 @@ const EMPTY_FORM = {
   url: "",
   company_name: "",
   title: "",
-  location: "",
   description: "",
 };
 
@@ -52,7 +51,6 @@ export function PasteJobPage({ onboardingStatus }: PasteJobPageProps) {
         url: form.url.trim() || null,
         company_name: form.company_name.trim() || null,
         title: form.title.trim() || null,
-        location: form.location.trim() || null,
         description: form.description.trim() || null,
         process_now: true,
         mode: "async",
@@ -120,15 +118,6 @@ export function PasteJobPage({ onboardingStatus }: PasteJobPageProps) {
               />
             </label>
 
-            <label>
-              Location
-              <input
-                type="text"
-                value={form.location}
-                onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-                placeholder="Remote, New York, Hybrid"
-              />
-            </label>
           </div>
 
           <label>

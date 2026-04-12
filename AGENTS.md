@@ -41,4 +41,4 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Current operator UI routes are centered around:
   `/paste-job`, `/applications`, `/runs`, `/runs/{run_id}/applications`, `/resumes`, `/prompt-library`, and `/settings`.
 - Keep service-managed workflow orchestration explicit. `job-pipeline-service/services/automation_service.py` owns automatic classification-to-scoring workflow decisions; `run_service.py` should stay focused on run enqueueing and execution.
-- Preserve external/n8n orchestration support by honoring `automation_settings.workflow_owner == "external"` when changing automation behavior.
+- Preserve external/n8n orchestration support by honoring `automation_settings.auto_process_jobs == false` when changing automation behavior.

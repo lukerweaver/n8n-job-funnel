@@ -16,7 +16,6 @@ const DEFAULT_FORM = {
   provider_model: "",
   provider_api_key: "",
   auto_process_jobs: true,
-  workflow_owner: "service" as "service" | "external",
   unprocessed_jobs_threshold: "5",
   minutes_since_last_run_threshold: "60",
   resume_strategy: "default_fallback" as "classification_first" | "default_only" | "default_fallback",
@@ -42,7 +41,6 @@ function toForm(settings: AppSettings) {
     provider_model: settings.provider.provider_model ?? "",
     provider_api_key: "",
     auto_process_jobs: automation.auto_process_jobs !== false,
-    workflow_owner: (automation.workflow_owner ?? "service") as "service" | "external",
     unprocessed_jobs_threshold: String(automation.unprocessed_jobs_threshold ?? "5"),
     minutes_since_last_run_threshold: String(automation.minutes_since_last_run_threshold ?? "60"),
     resume_strategy: (automation.resume_strategy ?? "default_fallback") as "classification_first" | "default_only" | "default_fallback",
@@ -105,7 +103,6 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
         },
         automation_settings: {
           auto_process_jobs: form.auto_process_jobs,
-          workflow_owner: form.workflow_owner,
           unprocessed_jobs_threshold: Number(form.unprocessed_jobs_threshold || "5"),
           minutes_since_last_run_threshold: Number(form.minutes_since_last_run_threshold || "60"),
           resume_strategy: form.resume_strategy,
@@ -130,7 +127,7 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
         <div>
           <p className="eyebrow">Settings</p>
           <h2>Profile and AI provider</h2>
-          <p className="page-subtitle">Keep the simple path ready. Advanced controls stay collapsed by default.</p>
+          <p className="page-subtitle">Update the profile, AI provider, and background processing behavior.</p>
         </div>
         {settings ? <div className="stat-chip">{settings.provider.has_api_key ? "API key saved" : "No API key saved"}</div> : null}
       </div>
@@ -202,28 +199,22 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
                   />
                   Auto-process saved jobs
                 </label>
-                <label>
-                  Workflow Owner
-                  <select
-                    value={form.workflow_owner}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, workflow_owner: event.target.value as "service" | "external" }))
-                    }
-                  >
-                    <option value="service">Service-managed</option>
-                    <option value="external">External / n8n</option>
-                  </select>
-                </label>
+                <p className="settings-help-text">
+                  When this is on, the service queues classification for saved jobs and then queues scoring after classification completes. Turn it off if n8n or another tool manages those runs.
+                </p>
                 <label>
                   Unprocessed Jobs Threshold
+                  <span className="field-help-text">Start a classification run when at least this many saved jobs are waiting.</span>
                   <input type="number" value={form.unprocessed_jobs_threshold} onChange={(event) => setForm((current) => ({ ...current, unprocessed_jobs_threshold: event.target.value }))} />
                 </label>
                 <label>
                   Minutes Since Last Run
+                  <span className="field-help-text">Start a run after this many minutes even if the job count threshold has not been reached.</span>
                   <input type="number" value={form.minutes_since_last_run_threshold} onChange={(event) => setForm((current) => ({ ...current, minutes_since_last_run_threshold: event.target.value }))} />
                 </label>
                 <label>
                   Resume Strategy
+                  <span className="field-help-text">Choose which resume the automatic scoring step uses after a job is classified.</span>
                   <select
                     value={form.resume_strategy}
                     onChange={(event) =>

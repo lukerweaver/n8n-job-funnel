@@ -64,7 +64,6 @@ DEFAULT_SCORING_PREFERENCES = {
 
 DEFAULT_AUTOMATION_SETTINGS = {
     "auto_process_jobs": True,
-    "workflow_owner": "service",
     "unprocessed_jobs_threshold": 5,
     "minutes_since_last_run_threshold": 60,
     "opportunistic_trigger_enabled": True,

@@ -36,7 +36,6 @@ export interface JobApplication {
   source: string | null;
   company_name: string | null;
   title: string | null;
-  location: string | null;
   yearly_min_compensation: number | null;
   yearly_max_compensation: number | null;
   apply_url: string | null;
@@ -96,7 +95,6 @@ export interface JobPosting {
   source: string;
   company_name: string | null;
   title: string | null;
-  location: string | null;
   yearly_min_compensation: number | null;
   yearly_max_compensation: number | null;
   apply_url: string | null;

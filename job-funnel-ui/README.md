@@ -13,7 +13,7 @@ Current operator pages:
 - `/statistics` - ingest trend table/chart and scored-job distribution
 - `/resumes` - resume inventory with modal-based create/edit flows
 - `/prompts` - prompt library table with modal-based create/edit flows
-- `/settings` - provider, prompt, automation, workflow-owner, and n8n settings
+- `/settings` - provider, prompt, automation, resume strategy, and n8n handoff settings
 
 ## Requirements
 
@@ -120,10 +120,10 @@ That is correct for local browser access to the published API port. If you deplo
 
 ## Workflow Settings
 
-Settings exposes two workflow modes:
+Settings exposes the automatic processing controls:
 
-- `Service-managed`: the backend worker can queue classification, generate applications with the configured resume strategy, and queue scoring.
-- `External / n8n`: the backend still exposes the same run endpoints, but n8n or another orchestrator owns the sequence.
+- `Auto-process saved jobs`: when on, the backend worker can queue classification, generate applications with the configured resume strategy, and queue scoring.
+- When `Auto-process saved jobs` is off, the backend still exposes the same run endpoints, but n8n or another orchestrator owns the sequence.
 
 The resume strategy options are:
 

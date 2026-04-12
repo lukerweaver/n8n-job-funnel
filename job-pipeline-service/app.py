@@ -175,7 +175,6 @@ def apply_job_updates(job: JobPosting, payload: JobIngestItem) -> None:
     job.source = payload.source
     job.company_name = payload.company_name
     job.title = payload.title
-    job.location = payload.location
     job.yearly_min_compensation = payload.yearly_min_compensation
     job.yearly_max_compensation = payload.yearly_max_compensation
     job.apply_url = payload.apply_url
@@ -434,7 +433,6 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         source=job.source if job is not None else None,
         company_name=job.company_name if job is not None else None,
         title=job.title if job is not None else None,
-        location=job.location if job is not None else None,
         yearly_min_compensation=job.yearly_min_compensation if job is not None else None,
         yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
         apply_url=job.apply_url if job is not None else None,
@@ -759,7 +757,6 @@ def ensure_job_postings_schema() -> None:
     columns = {column["name"] for column in inspector.get_columns("job_postings")}
 
     type_map = {
-        "location": "VARCHAR(255)",
         "classification_key": "VARCHAR(100)",
         "classification_prompt_version": "INTEGER",
         "classification_provider": "VARCHAR(100)",
@@ -1153,7 +1150,6 @@ def paste_job(payload: PasteJobRequest, session: Session = Depends(get_session))
     job.source = "manual-entry"
     job.company_name = payload.company_name.strip() if payload.company_name else None
     job.title = payload.title.strip() if payload.title else None
-    job.location = payload.location.strip() if payload.location else None
     job.apply_url = payload.url.strip() if payload.url else None
     job.description = description
     job.raw_payload = {

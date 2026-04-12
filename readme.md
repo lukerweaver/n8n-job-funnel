@@ -95,7 +95,7 @@ After onboarding:
 
 1. Go to **Paste Job**.
 2. Paste the job description.
-3. Add the job URL, company, role title, and location if you have them.
+3. Add the job URL, company, and role title if you have them.
 4. Click **Get Recommendation**.
 
 The app saves the job, creates an application record for your default resume, and processes classification/scoring in the background. When the score is ready, the result includes:
@@ -114,7 +114,6 @@ Advanced users can open **Settings** and enable advanced navigation for:
 - AI provider and model details
 - Prompt editing
 - Scoring and automation thresholds
-- Service-managed or external workflow ownership
 - Resume strategy for automated scoring
 - Batch runs
 
@@ -175,11 +174,11 @@ Runs page
 
 Optional advanced orchestration:
 n8n
-    -> owns run sequence when workflow_owner is external
+    -> owns run sequence when auto_process_jobs is false
     -> run and callback endpoints
 
 Service-managed automation:
-    -> workflow_owner = service
+    -> auto_process_jobs = true
     -> backend worker queues classification when thresholds are met
     -> classification completion generates applications by resume_strategy
     -> backend worker queues scoring for new applications
@@ -351,9 +350,9 @@ The internal operator UI lives in [`job-funnel-ui/`](job-funnel-ui/). It current
 
 Details are in [job-funnel-ui/README.md](job-funnel-ui/README.md).
 
-## Workflow Ownership
+## Auto-Processing
 
-By default, the backend service owns the main workflow. When `automation_settings.workflow_owner` is `service` and an AI provider is configured, the worker can:
+By default, the backend service owns the main workflow. When `automation_settings.auto_process_jobs` is true and an AI provider is configured, the worker can:
 
 1. queue classification for unclassified jobs when thresholds are met
 2. generate applications after the classification run completes
@@ -365,13 +364,13 @@ The automated application generation step uses `automation_settings.resume_strat
 - `classification_first`: only use resumes matching the classification key
 - `default_only`: only use the default resume
 
-Set `automation_settings.workflow_owner` to `external` when n8n or another orchestrator should own that sequence. In that mode, the service still exposes the run endpoints, but it does not opportunistically queue classification and scoring workflows for you.
+Set `automation_settings.auto_process_jobs` to false when n8n or another orchestrator should own that sequence. In that mode, the service still exposes the run endpoints, but it does not opportunistically queue classification and scoring workflows for you.
 
 ## n8n Workflows
 
 Bundled n8n workflow exports are no longer part of the repository. The backend still supports external orchestration for users who want to keep their own n8n flow.
 
-When `workflow_owner` is `external`, the intended n8n sequence is:
+When `auto_process_jobs` is false, the intended n8n sequence is:
 
 1. queue `POST /jobs/classify/run`
 2. on callback, run `POST /applications/generate/run`

@@ -68,7 +68,6 @@ class JobPosting(Base):
     source: Mapped[str] = mapped_column(String(100), default="unknown", index=True)
     company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     yearly_min_compensation: Mapped[float | None] = mapped_column(Float, nullable=True)
     yearly_max_compensation: Mapped[float | None] = mapped_column(Float, nullable=True)
     apply_url: Mapped[str | None] = mapped_column(Text, nullable=True)

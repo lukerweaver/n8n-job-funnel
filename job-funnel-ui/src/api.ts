@@ -124,7 +124,6 @@ export function pasteJob(payload: {
   description?: string | null;
   title?: string | null;
   company_name?: string | null;
-  location?: string | null;
   process_now: boolean;
   mode?: "async" | "sync";
 }) {

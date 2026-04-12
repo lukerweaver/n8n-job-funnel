@@ -32,4 +32,4 @@ CI enforces this in `.github/workflows/job-pipeline-service-tests.yml`.
 - For endpoint-level tests, prioritize behavior and response contract validation.
 - Keep `services/run_service.py` focused on run enqueueing, worker polling, and run-item execution.
 - Put service-managed workflow orchestration in `services/automation_service.py`, including auto classification triggers and classification-complete scoring handoff.
-- Preserve n8n/external ownership by checking `automation_settings.workflow_owner` before adding automatic workflow behavior.
+- Preserve n8n/external ownership by checking `automation_settings.auto_process_jobs` before adding automatic workflow behavior.
