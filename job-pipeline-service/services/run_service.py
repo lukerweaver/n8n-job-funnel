@@ -90,6 +90,7 @@ def enqueue_application_score_run(
                 status="queued",
             )
         )
+    session.flush()
 
     return run
 
@@ -140,6 +141,7 @@ def enqueue_classification_run(
                 status="queued",
             )
         )
+    session.flush()
 
     return run
 
@@ -298,7 +300,9 @@ def process_next_run() -> bool:
             .limit(1)
         )
         if run is None:
-            return False
+            from services.automation_service import maybe_enqueue_next_service_managed_run
+
+            return maybe_enqueue_next_service_managed_run(session)
 
         run.status = "running"
         run.started_at = utcnow()
@@ -402,6 +406,9 @@ def process_next_run() -> bool:
         if run is not None:
             run.status = "completed"
             run.finished_at = utcnow()
+            from services.automation_service import handle_classification_run_completed
+
+            handle_classification_run_completed(session, run)
             _commit_scoring_progress(session)
             if run.callback_url:
                 _deliver_callback(run.id)

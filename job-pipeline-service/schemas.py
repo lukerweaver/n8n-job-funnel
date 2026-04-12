@@ -48,9 +48,6 @@ class AppSettingsRead(BaseModel):
     default_user_id: int | None = None
     profile_name: str | None = None
     target_roles: list[str] | None = None
-    keywords: list[str] | None = None
-    location_preference: str | None = None
-    salary_preference: str | None = None
     provider: ProviderSettingsRead
     default_prompt_key: str
     scoring_preferences: dict[str, Any] | None = None
@@ -62,9 +59,6 @@ class AppSettingsRead(BaseModel):
 class AppSettingsUpdate(BaseModel):
     profile_name: str | None = None
     target_roles: list[str] | None = None
-    keywords: list[str] | None = None
-    location_preference: str | None = None
-    salary_preference: str | None = None
     provider: ProviderSettingsWrite | None = None
     default_prompt_key: str | None = None
     scoring_preferences: dict[str, Any] | None = None
@@ -85,14 +79,11 @@ class OnboardingCompleteRequest(BaseModel):
     resume_name: str | None = None
     resume_content: str
     target_roles: list[str]
-    keywords: list[str] | None = None
-    location_preference: str | None = None
-    salary_preference: str | None = None
     provider: ProviderSettingsWrite = ProviderSettingsWrite()
 
 
 class PasteJobRequest(BaseModel):
-    input_type: Literal["url", "description"]
+    input_type: Literal["url", "description"] = "description"
     url: str | None = None
     description: str | None = None
     title: str | None = None

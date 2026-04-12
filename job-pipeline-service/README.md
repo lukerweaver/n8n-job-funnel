@@ -7,11 +7,13 @@ FastAPI backend for:
 3. generating resume-specific applications
 4. scoring applications with an LLM
 5. tracking notification, lifecycle, and interview state
-6. exposing async run status for backend-managed processing
+6. managing the default classification-to-scoring workflow
+7. exposing async run status for external orchestration such as n8n
 
 The current operator UI consumes this service directly for:
 
 - application review across all, active, and historical views
+- paste-job recommendations
 - run inspection plus direct classification/scoring run launch
 - statistics for ingest volume and score spread
 - resume management
@@ -80,6 +82,16 @@ Provider resolution rules:
 
 There is intentionally no default `OLLAMA_BASE_URL`. This prevents installs from silently assuming a local Ollama instance exists.
 
+Settings can also store workflow controls in `automation_settings`:
+
+- `auto_process_jobs`: when false, disables service-managed automatic processing
+- `workflow_owner`: `service` by default, or `external` when n8n owns the workflow
+- `unprocessed_jobs_threshold`: minimum pending unclassified jobs before automatic classification runs
+- `minutes_since_last_run_threshold`: time-based fallback for automatic classification runs
+- `resume_strategy`: `default_fallback`, `classification_first`, or `default_only`
+
+The backend reads these settings from the database, not only from environment variables, so they can be updated through `/settings` and the operator UI.
+
 ### LLM configuration examples
 
 Ollama:
@@ -133,6 +145,12 @@ Resume contract:
 - targeted resumes use a non-null `classification_key`
 - fallback resumes can use `is_default = true`
 - generation routes choose resumes with `resume_strategy`
+
+Current `resume_strategy` values:
+
+- `classification_first`: use only resumes whose `classification_key` matches the job
+- `default_only`: use only the default resume
+- `default_fallback`: use matching resumes first, then fall back to the default resume
 
 ## Local Run
 
@@ -260,6 +278,7 @@ Optional threshold gate:
 
 ### Jobs
 
+- `POST /jobs/paste`
 - `POST /jobs/ingest`
 - `GET /jobs`
 - `GET /jobs/{job_id}`
@@ -320,7 +339,14 @@ Two job identifiers exist:
 - `job_id`: external string identifier used at ingest time
 - `id`: internal integer primary key used by most route paths and relationships
 
-Preferred automation sequence:
+Default service-managed automation:
+
+1. The run worker checks for queued/running work.
+2. If there is no active classification or scoring run, `workflow_owner` is `service`, `auto_process_jobs` is enabled, and an AI provider is configured, the service may queue `POST /jobs/classify/run` behavior internally.
+3. When that classification run completes, the service generates missing applications for classified jobs using `resume_strategy`.
+4. The service queues scoring for the generated applications.
+
+External automation sequence:
 
 1. `POST /jobs/classify/run`
 2. callback fetches `/runs/{run_id}` or `/runs/{run_id}/items`
@@ -328,7 +354,49 @@ Preferred automation sequence:
 4. `POST /applications/score/run`
 5. downstream notification or tracking writes
 
+Set `automation_settings.workflow_owner` to `external` if n8n or another tool should own that sequence. The run endpoints remain available in both modes.
+
 ## Selected Route Notes
+
+### `GET /settings` and `PUT /settings`
+
+Reads and updates operator settings, including provider configuration, default prompt key, scoring preferences, and automation settings.
+
+Example automation payload:
+
+```json
+{
+  "automation_settings": {
+    "auto_process_jobs": true,
+    "workflow_owner": "service",
+    "unprocessed_jobs_threshold": 5,
+    "minutes_since_last_run_threshold": 60,
+    "opportunistic_trigger_enabled": true,
+    "resume_strategy": "default_fallback"
+  }
+}
+```
+
+Use `"workflow_owner": "external"` for n8n-managed workflows.
+
+### `POST /jobs/paste`
+
+Creates or updates a manual job posting, creates an application for the selected user's resume, and optionally queues classification and scoring immediately.
+
+The current UI sends a job description and an optional job URL. The API still accepts `input_type`, which defaults to `description`.
+
+Example:
+
+```json
+{
+  "description": "Full job description",
+  "url": "https://example.com/jobs/123",
+  "company_name": "Example Co",
+  "title": "Product Manager",
+  "process_now": true,
+  "mode": "async"
+}
+```
 
 ### `POST /jobs/ingest`
 

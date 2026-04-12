@@ -53,9 +53,6 @@ def test_score_application_includes_user_preferences(db_session):
     application = seed_application(db_session, user=user, job=job, resume=resume)
     settings = get_or_create_app_settings(db_session)
     settings.target_roles = ["Product Marketing", "Growth"]
-    settings.keywords = ["B2B", "Lifecycle"]
-    settings.location_preference = "Remote"
-    settings.salary_preference = "$150k+"
     db_session.commit()
     client = FakeClient(_valid_response(27))
 
@@ -64,8 +61,6 @@ def test_score_application_includes_user_preferences(db_session):
     assert result.outcome == "scored"
     assert client.user_prompt is not None
     assert "Target roles: Product Marketing, Growth" in client.user_prompt
-    assert "Preferred keywords or signals: B2B, Lifecycle" in client.user_prompt
-    assert "Location / remote preference: Remote" in client.user_prompt
 
 
 def test_score_application_skips_for_status_and_missing_content(db_session):

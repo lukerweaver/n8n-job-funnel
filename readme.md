@@ -8,14 +8,14 @@ This repository combines:
 - `exports/`: prompt seed data
 - `docs/`: lightweight architecture artifacts
 
-The active flow is:
+The default flow is:
 
 1. open the Job Funnel UI
 2. complete first-run onboarding
 3. paste a resume
 4. paste a job description, with an optional job URL
 5. receive a job fit score and recommendation
-6. optionally use advanced automation or the Chrome extension
+6. optionally use advanced automation, the Chrome extension, or external n8n workflows
 
 ## Quick Start for Non-Technical Users
 
@@ -80,9 +80,6 @@ The first screen asks for:
 
 - Profile name
 - Target roles
-- Optional keywords
-- Location / remote preference
-- Optional salary preference
 - Resume text
 - AI provider
 
@@ -117,6 +114,8 @@ Advanced users can open **Settings** and enable advanced navigation for:
 - AI provider and model details
 - Prompt editing
 - Scoring and automation thresholds
+- Service-managed or external workflow ownership
+- Resume strategy for automated scoring
 - Batch runs
 
 The Chrome extension remains optional. Use it only if you want browser-based job capture from LinkedIn or Hiring Cafe.
@@ -136,9 +135,9 @@ There are now three practical ways to run this project:
 1. Backend only
    Run `job-pipeline-service/` directly or with its local compose file.
 2. Backend + UX + Postgres
-   Run the repository root [`docker-compose-example.yml`](/home/lrw5016/projects/n8n-job-funnel/docker-compose-example.yml).
+   Run the repository root [`docker-compose-example.yml`](docker-compose-example.yml).
 3. Separately deployed UX service
-   Build and deploy [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui) as its own container and point it at a browser-visible API URL.
+   Build and deploy [`job-funnel-ui/`](job-funnel-ui/) as its own container and point it at a browser-visible API URL.
 
 ## Repo Layout
 
@@ -173,11 +172,22 @@ Optional advanced processing:
 Runs page
     -> backend run worker
     -> classification and scoring batches
+
+Optional advanced orchestration:
+n8n
+    -> owns run sequence when workflow_owner is external
+    -> run and callback endpoints
+
+Service-managed automation:
+    -> workflow_owner = service
+    -> backend worker queues classification when thresholds are met
+    -> classification completion generates applications by resume_strategy
+    -> backend worker queues scoring for new applications
 ```
 
 ## Backend Overview
 
-The backend lives in [job-pipeline-service/README.md](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/README.md).
+The backend lives in [job-pipeline-service/README.md](job-pipeline-service/README.md).
 
 The current backend centers on these tables:
 
@@ -229,7 +239,7 @@ Database behavior:
 
 - default: SQLite at `job-pipeline-service/data/jobs.db`
 - override: set `DATABASE_URL` to use Postgres or another SQLAlchemy-supported database
-- LLM calls require explicit configuration through either `OLLAMA_BASE_URL` or the generic hosted-provider variables described in [`job-pipeline-service/README.md`](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/README.md).
+- LLM calls require explicit configuration through either `OLLAMA_BASE_URL` or the generic hosted-provider variables described in [`job-pipeline-service/README.md`](job-pipeline-service/README.md).
 
 ### UX only
 
@@ -293,7 +303,7 @@ Published ports:
 
 ### UX service as a standalone container
 
-Build from [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui):
+Build from [`job-funnel-ui/`](job-funnel-ui/):
 
 ```bash
 docker build -t job-funnel-ui:latest .
@@ -327,11 +337,11 @@ Setup:
 4. enable Developer mode
 5. load `job-scraper-chrome/` as an unpacked extension
 
-Details are in [job-scraper-chrome/README.md](/home/lrw5016/projects/n8n-job-funnel/job-scraper-chrome/README.md).
+Details are in [job-scraper-chrome/README.md](job-scraper-chrome/README.md).
 
 ## Internal UI
 
-The internal operator UI lives in [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui). It currently provides:
+The internal operator UI lives in [`job-funnel-ui/`](job-funnel-ui/). It currently provides:
 
 - All Applications, Active Applications, and Historical Applications views
 - run history and run results drill-down
@@ -339,7 +349,35 @@ The internal operator UI lives in [`job-funnel-ui/`](/home/lrw5016/projects/n8n-
 - statistics for job ingest and score distribution
 - resume and prompt library management
 
-Details are in [job-funnel-ui/README.md](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui/README.md).
+Details are in [job-funnel-ui/README.md](job-funnel-ui/README.md).
+
+## Workflow Ownership
+
+By default, the backend service owns the main workflow. When `automation_settings.workflow_owner` is `service` and an AI provider is configured, the worker can:
+
+1. queue classification for unclassified jobs when thresholds are met
+2. generate applications after the classification run completes
+3. queue scoring for the generated new applications
+
+The automated application generation step uses `automation_settings.resume_strategy`:
+
+- `default_fallback`: use resumes matching the classification key, or the default resume if none match
+- `classification_first`: only use resumes matching the classification key
+- `default_only`: only use the default resume
+
+Set `automation_settings.workflow_owner` to `external` when n8n or another orchestrator should own that sequence. In that mode, the service still exposes the run endpoints, but it does not opportunistically queue classification and scoring workflows for you.
+
+## n8n Workflows
+
+Bundled n8n workflow exports are no longer part of the repository. The backend still supports external orchestration for users who want to keep their own n8n flow.
+
+When `workflow_owner` is `external`, the intended n8n sequence is:
+
+1. queue `POST /jobs/classify/run`
+2. on callback, run `POST /applications/generate/run`
+3. queue `POST /applications/score/run`
+4. on callback, fetch `/runs/{run_id}/items`
+5. notify or update downstream systems
 
 ## Testing
 

@@ -109,14 +109,6 @@ export interface JobPosting {
   updated_at: string;
 }
 
-export interface JobIngestResponse {
-  received: number;
-  created: number;
-  updated: number;
-  skipped: number;
-  jobs: string[];
-}
-
 export interface ProviderSettingsRead {
   provider_mode: string;
   provider_name: string | null;
@@ -130,9 +122,6 @@ export interface AppSettings {
   default_user_id: number | null;
   profile_name: string | null;
   target_roles: string[] | null;
-  keywords: string[] | null;
-  location_preference: string | null;
-  salary_preference: string | null;
   provider: ProviderSettingsRead;
   default_prompt_key: string;
   scoring_preferences: Record<string, unknown> | null;

@@ -10,17 +10,16 @@ interface SettingsPageProps {
 const DEFAULT_FORM = {
   profile_name: "",
   target_roles: "",
-  keywords: "",
-  location_preference: "",
-  salary_preference: "",
   provider_mode: "configure_later" as "ollama" | "hosted" | "configure_later",
   provider_name: "",
   provider_base_url: "",
   provider_model: "",
   provider_api_key: "",
   auto_process_jobs: true,
+  workflow_owner: "service" as "service" | "external",
   unprocessed_jobs_threshold: "5",
   minutes_since_last_run_threshold: "60",
+  resume_strategy: "default_fallback" as "classification_first" | "default_only" | "default_fallback",
   advanced_mode_enabled: false,
 };
 
@@ -37,17 +36,16 @@ function toForm(settings: AppSettings) {
   return {
     profile_name: settings.profile_name ?? "",
     target_roles: listToText(settings.target_roles),
-    keywords: listToText(settings.keywords),
-    location_preference: settings.location_preference ?? "",
-    salary_preference: settings.salary_preference ?? "",
     provider_mode: settings.provider.provider_mode as "ollama" | "hosted" | "configure_later",
     provider_name: settings.provider.provider_name ?? "",
     provider_base_url: settings.provider.provider_base_url ?? "",
     provider_model: settings.provider.provider_model ?? "",
     provider_api_key: "",
     auto_process_jobs: automation.auto_process_jobs !== false,
+    workflow_owner: (automation.workflow_owner ?? "service") as "service" | "external",
     unprocessed_jobs_threshold: String(automation.unprocessed_jobs_threshold ?? "5"),
     minutes_since_last_run_threshold: String(automation.minutes_since_last_run_threshold ?? "60"),
+    resume_strategy: (automation.resume_strategy ?? "default_fallback") as "classification_first" | "default_only" | "default_fallback",
     advanced_mode_enabled: settings.advanced_mode_enabled,
   };
 }
@@ -98,9 +96,6 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
       const updated = await updateSettings({
         profile_name: form.profile_name.trim() || null,
         target_roles: splitList(form.target_roles),
-        keywords: splitList(form.keywords),
-        location_preference: form.location_preference.trim() || null,
-        salary_preference: form.salary_preference.trim() || null,
         provider: {
           provider_mode: form.provider_mode,
           provider_name: form.provider_name.trim() || (form.provider_mode === "hosted" ? "openai_compatible" : null),
@@ -110,8 +105,10 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
         },
         automation_settings: {
           auto_process_jobs: form.auto_process_jobs,
+          workflow_owner: form.workflow_owner,
           unprocessed_jobs_threshold: Number(form.unprocessed_jobs_threshold || "5"),
           minutes_since_last_run_threshold: Number(form.minutes_since_last_run_threshold || "60"),
+          resume_strategy: form.resume_strategy,
           opportunistic_trigger_enabled: true,
         },
         advanced_mode_enabled: form.advanced_mode_enabled,
@@ -153,18 +150,6 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
               <label>
                 Target Roles
                 <input value={form.target_roles} onChange={(event) => setForm((current) => ({ ...current, target_roles: event.target.value }))} />
-              </label>
-              <label>
-                Keywords
-                <input value={form.keywords} onChange={(event) => setForm((current) => ({ ...current, keywords: event.target.value }))} />
-              </label>
-              <label>
-                Location / Remote
-                <input value={form.location_preference} onChange={(event) => setForm((current) => ({ ...current, location_preference: event.target.value }))} />
-              </label>
-              <label>
-                Salary Preference
-                <input value={form.salary_preference} onChange={(event) => setForm((current) => ({ ...current, salary_preference: event.target.value }))} />
               </label>
               <label>
                 AI Provider
@@ -218,12 +203,40 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
                   Auto-process saved jobs
                 </label>
                 <label>
+                  Workflow Owner
+                  <select
+                    value={form.workflow_owner}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, workflow_owner: event.target.value as "service" | "external" }))
+                    }
+                  >
+                    <option value="service">Service-managed</option>
+                    <option value="external">External / n8n</option>
+                  </select>
+                </label>
+                <label>
                   Unprocessed Jobs Threshold
                   <input type="number" value={form.unprocessed_jobs_threshold} onChange={(event) => setForm((current) => ({ ...current, unprocessed_jobs_threshold: event.target.value }))} />
                 </label>
                 <label>
                   Minutes Since Last Run
                   <input type="number" value={form.minutes_since_last_run_threshold} onChange={(event) => setForm((current) => ({ ...current, minutes_since_last_run_threshold: event.target.value }))} />
+                </label>
+                <label>
+                  Resume Strategy
+                  <select
+                    value={form.resume_strategy}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        resume_strategy: event.target.value as "classification_first" | "default_only" | "default_fallback",
+                      }))
+                    }
+                  >
+                    <option value="default_fallback">Default fallback</option>
+                    <option value="classification_first">Classification first</option>
+                    <option value="default_only">Default only</option>
+                  </select>
                 </label>
                 <label className="checkbox-field">
                   <input

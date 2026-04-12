@@ -37,9 +37,6 @@ class AppSettings(Base):
     default_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     profile_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     target_roles: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    keywords: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    location_preference: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    salary_preference: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     provider_mode: Mapped[str] = mapped_column(String(50), default="configure_later", nullable=False)
     provider_name: Mapped[str | None] = mapped_column(String(100), nullable=True)

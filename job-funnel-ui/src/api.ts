@@ -8,7 +8,6 @@ import type {
   InterviewRoundListResponse,
   JobApplicationListResponse,
   JobApplication,
-  JobIngestResponse,
   AppSettings,
   OnboardingStatusResponse,
   PasteJobResponse,
@@ -86,9 +85,6 @@ export function completeOnboarding(payload: {
   resume_name?: string | null;
   resume_content: string;
   target_roles: string[];
-  keywords?: string[] | null;
-  location_preference?: string | null;
-  salary_preference?: string | null;
   provider: {
     provider_mode: "ollama" | "hosted" | "configure_later";
     provider_name?: string | null;
@@ -107,9 +103,6 @@ export function getSettings() {
 export function updateSettings(payload: {
   profile_name?: string | null;
   target_roles?: string[] | null;
-  keywords?: string[] | null;
-  location_preference?: string | null;
-  salary_preference?: string | null;
   provider?: {
     provider_mode: "ollama" | "hosted" | "configure_later";
     provider_name?: string | null;
@@ -126,7 +119,7 @@ export function updateSettings(payload: {
 }
 
 export function pasteJob(payload: {
-  input_type: "url" | "description";
+  input_type?: "url" | "description";
   url?: string | null;
   description?: string | null;
   title?: string | null;
@@ -225,17 +218,6 @@ export function deleteInterviewRound(applicationId: number, interviewRoundId: nu
     `/applications/${applicationId}/interview-rounds/${interviewRoundId}`,
     "DELETE",
   );
-}
-
-export function createJobDescription(payload: {
-  job_id: string;
-  company_name?: string | null;
-  title?: string | null;
-  apply_url?: string | null;
-  description: string;
-  source?: string;
-}) {
-  return sendJson<JobIngestResponse>("/jobs/ingest", "POST", payload);
 }
 
 export function getRuns(params: URLSearchParams) {

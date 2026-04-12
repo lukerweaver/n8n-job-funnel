@@ -49,7 +49,6 @@ export function PasteJobPage({ onboardingStatus }: PasteJobPageProps) {
 
     try {
       const result = await pasteJob({
-        input_type: form.url.trim() ? "url" : "description",
         url: form.url.trim() || null,
         company_name: form.company_name.trim() || null,
         title: form.title.trim() || null,

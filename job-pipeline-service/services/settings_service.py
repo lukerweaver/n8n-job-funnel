@@ -64,9 +64,11 @@ DEFAULT_SCORING_PREFERENCES = {
 
 DEFAULT_AUTOMATION_SETTINGS = {
     "auto_process_jobs": True,
+    "workflow_owner": "service",
     "unprocessed_jobs_threshold": 5,
     "minutes_since_last_run_threshold": 60,
     "opportunistic_trigger_enabled": True,
+    "resume_strategy": "default_fallback",
 }
 
 DEFAULT_CLASSIFICATION_KEYS = [
@@ -167,9 +169,6 @@ def serialize_settings(settings: AppSettings) -> dict:
         "default_user_id": settings.default_user_id,
         "profile_name": settings.profile_name,
         "target_roles": settings.target_roles,
-        "keywords": settings.keywords,
-        "location_preference": settings.location_preference,
-        "salary_preference": settings.salary_preference,
         "provider": {
             "provider_mode": settings.provider_mode,
             "provider_name": settings.provider_name,
@@ -213,12 +212,6 @@ def apply_settings_update(settings: AppSettings, payload) -> None:
         settings.profile_name = _clean_string(payload.profile_name)
     if payload.target_roles is not None:
         settings.target_roles = _clean_string_list(payload.target_roles)
-    if payload.keywords is not None:
-        settings.keywords = _clean_string_list(payload.keywords)
-    if payload.location_preference is not None:
-        settings.location_preference = _clean_string(payload.location_preference)
-    if payload.salary_preference is not None:
-        settings.salary_preference = _clean_string(payload.salary_preference)
     if payload.provider is not None:
         apply_provider_settings(settings, payload.provider)
     if payload.default_prompt_key is not None:
@@ -253,15 +246,8 @@ def build_classification_system_prompt(system_prompt: str, settings: AppSettings
 def build_scoring_preference_context(settings: AppSettings) -> str:
     lines: list[str] = []
     target_roles = _clean_string_list(settings.target_roles if isinstance(settings.target_roles, list) else None)
-    keywords = _clean_string_list(settings.keywords if isinstance(settings.keywords, list) else None)
     if target_roles:
         lines.append(f"Target roles: {', '.join(target_roles)}")
-    if keywords:
-        lines.append(f"Preferred keywords or signals: {', '.join(keywords)}")
-    if settings.location_preference:
-        lines.append(f"Location / remote preference: {settings.location_preference}")
-    if settings.salary_preference:
-        lines.append(f"Salary preference: {settings.salary_preference}")
     if not lines:
         return ""
     return "CANDIDATE PREFERENCES:\n" + "\n".join(f"- {line}" for line in lines)

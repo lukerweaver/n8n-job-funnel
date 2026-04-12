@@ -11,9 +11,6 @@ const DEFAULT_FORM = {
   profile_name: "",
   resume_content: "",
   target_roles: "",
-  keywords: "",
-  location_preference: "",
-  salary_preference: "",
   provider_mode: "configure_later" as "ollama" | "hosted" | "configure_later",
   provider_base_url: "",
   provider_api_key: "",
@@ -43,9 +40,6 @@ export function OnboardingPage({ onCompleted }: OnboardingPageProps) {
         resume_name: "Default Resume",
         resume_content: form.resume_content,
         target_roles: splitList(form.target_roles),
-        keywords: splitList(form.keywords),
-        location_preference: form.location_preference.trim() || null,
-        salary_preference: form.salary_preference.trim() || null,
         provider: {
           provider_mode: form.provider_mode,
           provider_name: form.provider_mode === "hosted" ? "openai_compatible" : null,
@@ -94,36 +88,6 @@ export function OnboardingPage({ onCompleted }: OnboardingPageProps) {
                 onChange={(event) => setForm((current) => ({ ...current, target_roles: event.target.value }))}
                 placeholder="Product marketing, growth, lifecycle"
                 required
-              />
-            </label>
-
-            <label>
-              Keywords
-              <input
-                type="text"
-                value={form.keywords}
-                onChange={(event) => setForm((current) => ({ ...current, keywords: event.target.value }))}
-                placeholder="B2B, lifecycle, PLG"
-              />
-            </label>
-
-            <label>
-              Location / Remote
-              <input
-                type="text"
-                value={form.location_preference}
-                onChange={(event) => setForm((current) => ({ ...current, location_preference: event.target.value }))}
-                placeholder="Remote, New York, hybrid"
-              />
-            </label>
-
-            <label>
-              Salary Preference
-              <input
-                type="text"
-                value={form.salary_preference}
-                onChange={(event) => setForm((current) => ({ ...current, salary_preference: event.target.value }))}
-                placeholder="$140k+"
               />
             </label>
 
