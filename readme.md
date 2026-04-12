@@ -5,7 +5,7 @@ This repository combines:
 - `job-pipeline-service/`: the FastAPI backend and current source of truth
 - `job-funnel-ui/`: the internal operator UI for applications, runs, statistics, resumes, and prompts
 - `job-scraper-chrome/`: the Chrome extension used to ingest jobs
-- `exports/`: sanitized n8n workflow exports and prompt seed data
+- `exports/`: prompt seed data
 - `docs/`: lightweight architecture artifacts
 
 The active flow is:
@@ -13,13 +13,13 @@ The active flow is:
 1. open the Job Funnel UI
 2. complete first-run onboarding
 3. paste a resume
-4. paste a job description or job URL
+4. paste a job description, with an optional job URL
 5. receive a job fit score and recommendation
-6. optionally use advanced automation, the Chrome extension, or n8n workflows
+6. optionally use advanced automation or the Chrome extension
 
 ## Quick Start for Non-Technical Users
 
-This path does not require editing prompts, configuring n8n, or installing the Chrome extension.
+This path does not require editing prompts or installing the Chrome extension.
 
 ### 1. Install the basics
 
@@ -97,8 +97,8 @@ Recommended AI provider choices:
 After onboarding:
 
 1. Go to **Paste Job**.
-2. Paste a job description or job URL.
-3. Add the company and role title if you have them.
+2. Paste the job description.
+3. Add the job URL, company, role title, and location if you have them.
 4. Click **Get Recommendation**.
 
 The app saves the job, creates an application record for your default resume, and processes classification/scoring in the background. When the score is ready, the result includes:
@@ -118,7 +118,6 @@ Advanced users can open **Settings** and enable advanced navigation for:
 - Prompt editing
 - Scoring and automation thresholds
 - Batch runs
-- n8n integration
 
 The Chrome extension remains optional. Use it only if you want browser-based job capture from LinkedIn or Hiring Cafe.
 
@@ -146,7 +145,6 @@ There are now three practical ways to run this project:
 - `job-pipeline-service/` - FastAPI app, SQLAlchemy models, async run worker, tests, Docker assets
 - `job-funnel-ui/` - Vite/React internal UI for scored applications, runs, and run results
 - `job-scraper-chrome/` - unpacked Chrome extension for LinkedIn and Hiring Cafe capture
-- `exports/workflows/` - sanitized n8n workflow exports for callback-driven orchestration
 - `exports/data/` - example prompt library seed data
 - `docs/architecture.mmd` - simple architecture diagram source
 
@@ -156,7 +154,7 @@ There are now three practical ways to run this project:
 Job Funnel UI
     -> first-run onboarding
         -> users / resumes / app_settings / prompt_library
-    -> paste job description or URL
+    -> paste job description and optional URL
         -> POST /jobs/paste
             -> job-pipeline-service
                 -> job_postings
@@ -171,9 +169,10 @@ LinkedIn / Hiring Cafe
     -> job-scraper-chrome
         -> POST /jobs/ingest
 
-Optional advanced orchestration:
-n8n
-    -> run and callback endpoints
+Optional advanced processing:
+Runs page
+    -> backend run worker
+    -> classification and scoring batches
 ```
 
 ## Backend Overview
@@ -341,24 +340,6 @@ The internal operator UI lives in [`job-funnel-ui/`](/home/lrw5016/projects/n8n-
 - resume and prompt library management
 
 Details are in [job-funnel-ui/README.md](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui/README.md).
-
-## n8n Workflows
-
-The workflow exports in `exports/workflows/` are sanitized templates. After import, you need to reconfigure:
-
-- API base URLs
-- webhook URLs
-- credential IDs
-- recipient addresses
-- any external document or storage IDs
-
-The current intended sequence is:
-
-1. queue `POST /jobs/classify/run`
-2. on callback, run `POST /applications/generate/run`
-3. queue `POST /applications/score/run`
-4. on callback, fetch `/runs/{run_id}/items`
-5. notify or update downstream systems
 
 ## Testing
 

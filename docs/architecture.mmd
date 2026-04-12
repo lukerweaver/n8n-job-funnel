@@ -1,31 +1,23 @@
 flowchart TD
-  A[LinkedIn job page] --> B[job-scraper-chrome]
-  A2[Hiring Cafe search page] --> C[page-hook.js captures /api/search-jobs]
-  C --> B
+  A[Job Funnel UI] --> B[First-run onboarding]
+  B --> C[(users / resumes / app_settings)]
+  B --> D[(prompt_library defaults)]
 
-  B --> D[POST /jobs/ingest]
-  D --> E[job-pipeline-service]
+  A --> E[Paste job URL and description]
+  E --> F[POST /jobs/paste]
+  F --> G[job-pipeline-service]
+  G --> H[(job_postings)]
+  G --> I[(job_applications)]
 
-  E --> F[(job_postings)]
-  E --> G[(prompt_library)]
+  G --> J[backend run worker]
+  J --> K[classify job posting]
+  K --> H
+  J --> L[score application]
+  L --> I
+  I --> M[Recommendation and job fit result]
 
-  F --> H[n8n classification workflow]
-  H --> I[POST /jobs/classify/run]
-  I --> E
+  N[Optional Chrome extension] --> O[POST /jobs/ingest]
+  O --> G
 
-  E --> J[job_postings.classification_key]
-  J --> K[n8n application generation workflow]
-  K --> L[POST /applications/generate]
-  L --> M[(job_applications)]
-
-  M --> N[n8n application scoring workflow]
-  N --> O[POST /applications/score/run]
-  O --> E
-
-  E --> P{Application score passes threshold?}
-  P -- Yes --> Q[Tracker sync]
-  P -- Yes --> R[POST /applications/{id}/notify]
-  R --> E
-  P -- No --> S[Remain scored only]
-
-  T[Legacy GET /jobs/hiringcafe route\nPlaywright capture] -. optional / fallback .-> E
+  P[Advanced Runs page] --> Q[manual batch classification / scoring]
+  Q --> J

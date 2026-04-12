@@ -10,9 +10,9 @@ DEFAULT_PROMPT_KEY = "default"
 DEFAULT_CLASSIFICATION_SYSTEM_PROMPT = """You classify job descriptions for resume matching.
 
 Return only valid JSON with this shape:
-{"classification_key":"product|marketing|sales|operations|engineering|design|finance|people|other"}
+{"classification_key":"Product|Marketing|Sales|Operations|Engineering|Design|Finance|People|Other"}
 
-Choose the closest category based on job responsibilities. Use "other" only when no category is a reasonable fit."""
+Choose the closest category based on job responsibilities. Use "Other" only when no category is a reasonable fit."""
 
 DEFAULT_CLASSIFICATION_USER_PROMPT = """JOB DESCRIPTION:
 <<<
@@ -68,6 +68,17 @@ DEFAULT_AUTOMATION_SETTINGS = {
     "minutes_since_last_run_threshold": 60,
     "opportunistic_trigger_enabled": True,
 }
+
+DEFAULT_CLASSIFICATION_KEYS = [
+    "Product",
+    "Marketing",
+    "Sales",
+    "Operations",
+    "Engineering",
+    "Design",
+    "Finance",
+    "People",
+]
 
 
 def _clean_string(value: str | None) -> str | None:
@@ -171,7 +182,6 @@ def serialize_settings(settings: AppSettings) -> dict:
         "automation_settings": settings.automation_settings,
         "automation_state": settings.automation_state,
         "advanced_mode_enabled": settings.advanced_mode_enabled,
-        "n8n_webhook_url": settings.n8n_webhook_url,
     }
 
 
@@ -219,8 +229,42 @@ def apply_settings_update(settings: AppSettings, payload) -> None:
         settings.automation_settings = payload.automation_settings
     if payload.advanced_mode_enabled is not None:
         settings.advanced_mode_enabled = payload.advanced_mode_enabled
-    if payload.n8n_webhook_url is not None:
-        settings.n8n_webhook_url = _clean_string(payload.n8n_webhook_url)
+
+
+def resolve_classification_keys(settings: AppSettings) -> list[str]:
+    configured_roles = _clean_string_list(settings.target_roles if isinstance(settings.target_roles, list) else None)
+    keys = configured_roles or DEFAULT_CLASSIFICATION_KEYS
+    if not any(key.lower() == "other" for key in keys):
+        keys = [*keys, "Other"]
+    return keys
+
+
+def build_classification_system_prompt(system_prompt: str, settings: AppSettings) -> str:
+    keys = resolve_classification_keys(settings)
+    key_list = " | ".join(keys)
+    return (
+        f"{system_prompt.strip()}\n\n"
+        "Use the user's target roles as the classification labels.\n"
+        f"Set classification_key to exactly one of: {key_list}.\n"
+        'If none fit, set classification_key to "Other".'
+    )
+
+
+def build_scoring_preference_context(settings: AppSettings) -> str:
+    lines: list[str] = []
+    target_roles = _clean_string_list(settings.target_roles if isinstance(settings.target_roles, list) else None)
+    keywords = _clean_string_list(settings.keywords if isinstance(settings.keywords, list) else None)
+    if target_roles:
+        lines.append(f"Target roles: {', '.join(target_roles)}")
+    if keywords:
+        lines.append(f"Preferred keywords or signals: {', '.join(keywords)}")
+    if settings.location_preference:
+        lines.append(f"Location / remote preference: {settings.location_preference}")
+    if settings.salary_preference:
+        lines.append(f"Salary preference: {settings.salary_preference}")
+    if not lines:
+        return ""
+    return "CANDIDATE PREFERENCES:\n" + "\n".join(f"- {line}" for line in lines)
 
 
 def resolve_default_resume(session: Session, settings: AppSettings) -> Resume | None:
@@ -258,4 +302,3 @@ def is_provider_configured(settings: AppSettings) -> bool:
     if settings.provider_mode == "hosted":
         return bool(settings.provider_name and settings.provider_base_url and settings.provider_model and settings.provider_api_key)
     return False
-

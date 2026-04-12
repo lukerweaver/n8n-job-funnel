@@ -2,10 +2,8 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 import hashlib
-import re
 import time
 from urllib.parse import urlparse
-from urllib import error as url_error, request as url_request
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -177,6 +175,7 @@ def apply_job_updates(job: JobPosting, payload: JobIngestItem) -> None:
     job.source = payload.source
     job.company_name = payload.company_name
     job.title = payload.title
+    job.location = payload.location
     job.yearly_min_compensation = payload.yearly_min_compensation
     job.yearly_max_compensation = payload.yearly_max_compensation
     job.apply_url = payload.apply_url
@@ -256,27 +255,6 @@ def _manual_job_id(payload: PasteJobRequest) -> str:
         digest = hashlib.sha256(base.strip().encode("utf-8")).hexdigest()[:16]
         return f"manual-{digest}"
     return f"manual-{int(time.time() * 1000)}"
-
-
-def _fetch_job_description_from_url(url: str) -> str | None:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        return None
-    req = url_request.Request(url, headers={"User-Agent": "job-funnel/1.0"})
-    try:
-        with url_request.urlopen(req, timeout=10) as response:
-            content_type = response.headers.get("content-type", "")
-            if "text" not in content_type and "html" not in content_type and "json" not in content_type:
-                return None
-            body = response.read(750_000).decode("utf-8", errors="replace")
-    except (url_error.HTTPError, url_error.URLError, TimeoutError, ValueError):
-        return None
-
-    text = re.sub(r"<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>", " ", body, flags=re.IGNORECASE)
-    text = re.sub(r"<style\b[^<]*(?:(?!</style>)<[^<]*)*</style>", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:20000] if text else None
 
 
 def _enqueue_single_classification_run(
@@ -456,6 +434,7 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         source=job.source if job is not None else None,
         company_name=job.company_name if job is not None else None,
         title=job.title if job is not None else None,
+        location=job.location if job is not None else None,
         yearly_min_compensation=job.yearly_min_compensation if job is not None else None,
         yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
         apply_url=job.apply_url if job is not None else None,
@@ -780,6 +759,7 @@ def ensure_job_postings_schema() -> None:
     columns = {column["name"] for column in inspector.get_columns("job_postings")}
 
     type_map = {
+        "location": "VARCHAR(255)",
         "classification_key": "VARCHAR(100)",
         "classification_prompt_version": "INTEGER",
         "classification_provider": "VARCHAR(100)",
@@ -1163,11 +1143,9 @@ def paste_job(payload: PasteJobRequest, session: Session = Depends(get_session))
         raise HTTPException(status_code=409, detail="Add a resume before pasting a job")
 
     description = payload.description.strip() if payload.description else None
-    if payload.input_type == "url":
-        if not payload.url or not payload.url.strip():
-            raise HTTPException(status_code=422, detail="Job URL is required")
-        description = description or _fetch_job_description_from_url(payload.url.strip())
-    elif not description:
+    if payload.input_type == "url" and (not payload.url or not payload.url.strip()):
+        raise HTTPException(status_code=422, detail="Job URL is required")
+    if not description:
         raise HTTPException(status_code=422, detail="Job description is required")
 
     job_id = _manual_job_id(payload)
@@ -1178,12 +1156,12 @@ def paste_job(payload: PasteJobRequest, session: Session = Depends(get_session))
     job.source = "manual-entry"
     job.company_name = payload.company_name.strip() if payload.company_name else None
     job.title = payload.title.strip() if payload.title else None
+    job.location = payload.location.strip() if payload.location else None
     job.apply_url = payload.url.strip() if payload.url else None
-    job.description = description or payload.url
+    job.description = description
     job.raw_payload = {
         "input_type": payload.input_type,
         "url": payload.url,
-        "description_was_fetched": bool(payload.input_type == "url" and description),
     }
     session.flush()
 

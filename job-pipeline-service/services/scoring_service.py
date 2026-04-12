@@ -10,7 +10,7 @@ from services.llm_client import LlmClient, LlmRequestError, build_llm_client
 from services.prompt_rendering import render_application_prompt
 from services.prompt_service import resolve_active_prompt, resolve_prompt_selector
 from services.scoring_parser import ParsedScore, ScoringParseError, parse_scoring_response
-from services.settings_service import resolve_llm_config
+from services.settings_service import build_scoring_preference_context, get_or_create_app_settings, resolve_llm_config
 
 
 class JobScoringSkipped(Exception):
@@ -116,6 +116,9 @@ def score_application(
     )
     llm_client = client or build_llm_client(resolve_llm_config(session))
     rendered_prompt = render_application_prompt(application, resolved_prompt)
+    preference_context = build_scoring_preference_context(get_or_create_app_settings(session))
+    if preference_context:
+        rendered_prompt = f"{preference_context}\n\n{rendered_prompt}"
 
     raw_response: str | None = None
     try:

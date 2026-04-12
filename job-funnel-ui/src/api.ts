@@ -121,7 +121,6 @@ export function updateSettings(payload: {
   scoring_preferences?: Record<string, unknown> | null;
   automation_settings?: Record<string, unknown> | null;
   advanced_mode_enabled?: boolean | null;
-  n8n_webhook_url?: string | null;
 }) {
   return sendJson<AppSettings>("/settings", "PUT", payload);
 }
@@ -132,6 +131,7 @@ export function pasteJob(payload: {
   description?: string | null;
   title?: string | null;
   company_name?: string | null;
+  location?: string | null;
   process_now: boolean;
   mode?: "async" | "sync";
 }) {

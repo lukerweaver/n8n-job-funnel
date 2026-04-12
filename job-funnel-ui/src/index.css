@@ -890,15 +890,18 @@ textarea {
 }
 
 .checkbox-field {
-  display: inline-flex;
+  display: flex !important;
   align-items: center;
   gap: 0.55rem;
+  align-self: end;
   font-size: 0.9rem;
   font-weight: 700;
+  min-height: 2.9rem;
 }
 
 .checkbox-field input {
   width: auto;
+  flex: 0 0 auto;
   margin: 0;
 }
 

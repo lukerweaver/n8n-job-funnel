@@ -433,6 +433,7 @@ def test_paste_job_saves_without_provider_and_queues_with_provider(db_session):
             description="A product marketing role",
             title="PMM",
             company_name="Acme",
+            location="Remote",
         ),
         db_session,
     )
@@ -440,6 +441,7 @@ def test_paste_job_saves_without_provider_and_queues_with_provider(db_session):
     assert saved.provider_configured is False
     assert saved.run_ids == []
     assert saved.message is not None
+    assert saved.job.location == "Remote"
 
     settings = app_module.get_or_create_app_settings(db_session)
     settings.provider_mode = "ollama"
@@ -463,7 +465,7 @@ def test_paste_job_saves_without_provider_and_queues_with_provider(db_session):
     assert queued.application.resume_id == completed.default_resume.id
 
 
-def test_paste_job_url_fetch_and_sync_mode(db_session, monkeypatch):
+def test_paste_job_url_requires_description_and_sync_mode(db_session, monkeypatch):
     app_module.complete_onboarding(
         OnboardingCompleteRequest(
             profile_name="URL User",
@@ -475,8 +477,6 @@ def test_paste_job_url_fetch_and_sync_mode(db_session, monkeypatch):
     )
     calls = {"process_next_run": 0}
 
-    monkeypatch.setattr(app_module, "_fetch_job_description_from_url", lambda _url: "Fetched job description")
-
     def _fake_process_next_run():
         calls["process_next_run"] += 1
         return True
@@ -487,6 +487,7 @@ def test_paste_job_url_fetch_and_sync_mode(db_session, monkeypatch):
         PasteJobRequest(
             input_type="url",
             url="https://example.com/jobs/1",
+            description="Pasted job description",
             title="Ops Manager",
             mode="sync",
         ),
@@ -494,8 +495,19 @@ def test_paste_job_url_fetch_and_sync_mode(db_session, monkeypatch):
     )
 
     assert response.job.apply_url == "https://example.com/jobs/1"
-    assert response.job.description == "Fetched job description"
+    assert response.job.description == "Pasted job description"
     assert calls["process_next_run"] == len(response.run_ids)
+
+    with pytest.raises(HTTPException) as missing_description:
+        app_module.paste_job(
+            PasteJobRequest(
+                input_type="url",
+                url="https://example.com/jobs/2",
+                title="Ops Manager",
+            ),
+            db_session,
+        )
+    assert missing_description.value.status_code == 422
 
 
 def test_application_crud_generate_and_status_flow(db_session):
@@ -1759,6 +1771,7 @@ def test_ensure_job_postings_schema_executes_only_missing_columns(monkeypatch):
 
     ensure_job_postings_schema()
 
+    assert any("ADD COLUMN location VARCHAR(255)" in statement for statement in executed)
     assert any("ADD COLUMN classification_prompt_version INTEGER" in statement for statement in executed)
     assert any("ADD COLUMN classification_provider VARCHAR(100)" in statement for statement in executed)
     assert all("ADD COLUMN classification_key" not in statement for statement in executed)
@@ -1775,6 +1788,7 @@ def test_ensure_job_postings_schema_returns_when_no_statements(monkeypatch):
         lambda _engine: SimpleNamespace(
             get_columns=lambda _table: [{"name": name} for name in (
                 "classification_key",
+                "location",
                 "classification_prompt_version",
                 "classification_provider",
                 "classification_model",

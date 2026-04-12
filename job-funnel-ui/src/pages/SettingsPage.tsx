@@ -22,7 +22,6 @@ const DEFAULT_FORM = {
   unprocessed_jobs_threshold: "5",
   minutes_since_last_run_threshold: "60",
   advanced_mode_enabled: false,
-  n8n_webhook_url: "",
 };
 
 function listToText(value: string[] | null) {
@@ -50,7 +49,6 @@ function toForm(settings: AppSettings) {
     unprocessed_jobs_threshold: String(automation.unprocessed_jobs_threshold ?? "5"),
     minutes_since_last_run_threshold: String(automation.minutes_since_last_run_threshold ?? "60"),
     advanced_mode_enabled: settings.advanced_mode_enabled,
-    n8n_webhook_url: settings.n8n_webhook_url ?? "",
   };
 }
 
@@ -117,7 +115,6 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
           opportunistic_trigger_enabled: true,
         },
         advanced_mode_enabled: form.advanced_mode_enabled,
-        n8n_webhook_url: form.n8n_webhook_url.trim() || null,
       });
       setSettings(updated);
       setForm(toForm(updated));
@@ -218,7 +215,7 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
                     checked={form.auto_process_jobs}
                     onChange={(event) => setForm((current) => ({ ...current, auto_process_jobs: event.target.checked }))}
                   />
-                  Auto-process jobs
+                  Auto-process saved jobs
                 </label>
                 <label>
                   Unprocessed Jobs Threshold
@@ -227,10 +224,6 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
                 <label>
                   Minutes Since Last Run
                   <input type="number" value={form.minutes_since_last_run_threshold} onChange={(event) => setForm((current) => ({ ...current, minutes_since_last_run_threshold: event.target.value }))} />
-                </label>
-                <label>
-                  n8n Webhook URL
-                  <input value={form.n8n_webhook_url} onChange={(event) => setForm((current) => ({ ...current, n8n_webhook_url: event.target.value }))} />
                 </label>
                 <label className="checkbox-field">
                   <input

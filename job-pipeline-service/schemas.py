@@ -10,6 +10,7 @@ class JobIngestItem(BaseModel):
     job_id: str
     company_name: str | None = None
     title: str | None = None
+    location: str | None = None
     yearly_min_compensation: float | None = None
     yearly_max_compensation: float | None = None
     apply_url: str | None = None
@@ -56,7 +57,6 @@ class AppSettingsRead(BaseModel):
     automation_settings: dict[str, Any] | None = None
     automation_state: dict[str, Any] | None = None
     advanced_mode_enabled: bool
-    n8n_webhook_url: str | None = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -70,7 +70,6 @@ class AppSettingsUpdate(BaseModel):
     scoring_preferences: dict[str, Any] | None = None
     automation_settings: dict[str, Any] | None = None
     advanced_mode_enabled: bool | None = None
-    n8n_webhook_url: str | None = None
 
 
 class OnboardingStatusResponse(BaseModel):
@@ -98,6 +97,7 @@ class PasteJobRequest(BaseModel):
     description: str | None = None
     title: str | None = None
     company_name: str | None = None
+    location: str | None = None
     user_id: int | None = None
     process_now: bool = True
     mode: Literal["async", "sync"] = "async"
@@ -119,6 +119,7 @@ class JobRead(BaseModel):
     source: str
     company_name: str | None
     title: str | None
+    location: str | None
     yearly_min_compensation: float | None
     yearly_max_compensation: float | None
     apply_url: str | None
@@ -469,6 +470,7 @@ class JobApplicationRead(BaseModel):
     source: str | None = None
     company_name: str | None = None
     title: str | None = None
+    location: str | None = None
     yearly_min_compensation: float | None = None
     yearly_max_compensation: float | None = None
     apply_url: str | None = None

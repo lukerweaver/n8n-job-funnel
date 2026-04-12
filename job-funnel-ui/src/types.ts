@@ -36,6 +36,7 @@ export interface JobApplication {
   source: string | null;
   company_name: string | null;
   title: string | null;
+  location: string | null;
   yearly_min_compensation: number | null;
   yearly_max_compensation: number | null;
   apply_url: string | null;
@@ -95,6 +96,7 @@ export interface JobPosting {
   source: string;
   company_name: string | null;
   title: string | null;
+  location: string | null;
   yearly_min_compensation: number | null;
   yearly_max_compensation: number | null;
   apply_url: string | null;
@@ -137,7 +139,6 @@ export interface AppSettings {
   automation_settings: Record<string, unknown> | null;
   automation_state: Record<string, unknown> | null;
   advanced_mode_enabled: boolean;
-  n8n_webhook_url: string | null;
 }
 
 export interface User {

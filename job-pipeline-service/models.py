@@ -52,7 +52,6 @@ class AppSettings(Base):
     automation_settings: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     automation_state: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     advanced_mode_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    n8n_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -72,6 +71,7 @@ class JobPosting(Base):
     source: Mapped[str] = mapped_column(String(100), default="unknown", index=True)
     company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     yearly_min_compensation: Mapped[float | None] = mapped_column(Float, nullable=True)
     yearly_max_compensation: Mapped[float | None] = mapped_column(Float, nullable=True)
     apply_url: Mapped[str | None] = mapped_column(Text, nullable=True)

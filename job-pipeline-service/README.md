@@ -7,7 +7,7 @@ FastAPI backend for:
 3. generating resume-specific applications
 4. scoring applications with an LLM
 5. tracking notification, lifecycle, and interview state
-6. exposing async run status for n8n-style orchestration
+6. exposing async run status for backend-managed processing
 
 The current operator UI consumes this service directly for:
 
@@ -373,8 +373,7 @@ Example:
   "limit": 100,
   "source": "linkedin",
   "classification_key": "product_classification",
-  "force": false,
-  "callback_url": "https://<n8n-host>/webhook/job-classification-complete"
+  "force": false
 }
 ```
 
@@ -420,8 +419,7 @@ Example:
 {
   "limit": 100,
   "status": "new",
-  "force": false,
-  "callback_url": "https://<n8n-host>/webhook/application-score-complete"
+  "force": false
 }
 ```
 
