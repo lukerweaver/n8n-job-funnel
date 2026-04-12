@@ -32,7 +32,7 @@ def test_classify_job_uses_target_roles_as_classification_keys(db_session):
     settings = get_or_create_app_settings(db_session)
     settings.target_roles = ["Product Marketing", "Growth"]
     db_session.commit()
-    client = FakeClient('{"classification_key":"Product Marketing"}')
+    client = FakeClient('{"role_type":"Product Marketing","classification_flags":[],"classification_reason":"matches prompt"}')
 
     result = classify_job(db_session, job, prompt=prompt, client=client)
 
@@ -40,3 +40,5 @@ def test_classify_job_uses_target_roles_as_classification_keys(db_session):
     assert job.classification_key == "Product Marketing"
     assert client.system_prompt is not None
     assert "Product Marketing | Growth | Other" in client.system_prompt
+    assert "Set role_type to exactly one of" in client.system_prompt
+    assert "classification_key is also accepted" in client.system_prompt

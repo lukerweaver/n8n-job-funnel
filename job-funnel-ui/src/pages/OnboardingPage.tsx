@@ -63,7 +63,7 @@ export function OnboardingPage({ onCompleted }: OnboardingPageProps) {
           <div>
             <p className="eyebrow">First run</p>
             <h1>Set up job fit</h1>
-            <p className="stats-page-subtitle">Add your resume, target roles, and AI provider. You can change these later.</p>
+            <p className="stats-page-subtitle">Add your resume, classification labels, and AI provider. You can change these later.</p>
           </div>
         </div>
 
@@ -82,11 +82,12 @@ export function OnboardingPage({ onCompleted }: OnboardingPageProps) {
 
             <label>
               Target Roles
+              <span className="field-help-text">Used as classification labels, with Other added automatically.</span>
               <input
                 type="text"
                 value={form.target_roles}
                 onChange={(event) => setForm((current) => ({ ...current, target_roles: event.target.value }))}
-                placeholder="Product marketing, growth, lifecycle"
+                placeholder="Product Manager, Product Owner, Program Manager"
                 required
               />
             </label>

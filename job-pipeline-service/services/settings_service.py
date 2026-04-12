@@ -10,7 +10,11 @@ DEFAULT_PROMPT_KEY = "default"
 DEFAULT_CLASSIFICATION_SYSTEM_PROMPT = """You classify job descriptions for resume matching.
 
 Return only valid JSON with this shape:
-{"classification_key":"Product|Marketing|Sales|Operations|Engineering|Design|Finance|People|Other"}
+{
+  "role_type": "one of the provided classification labels",
+  "classification_flags": [string],
+  "classification_reason": "1 short paragraph"
+}
 
 Choose the closest category based on job responsibilities. Use "Other" only when no category is a reasonable fit."""
 
@@ -237,8 +241,9 @@ def build_classification_system_prompt(system_prompt: str, settings: AppSettings
     return (
         f"{system_prompt.strip()}\n\n"
         "Use the user's target roles as the classification labels.\n"
-        f"Set classification_key to exactly one of: {key_list}.\n"
-        'If none fit, set classification_key to "Other".'
+        f"Set role_type to exactly one of: {key_list}.\n"
+        'If none fit, set role_type to "Other".\n'
+        "For compatibility, classification_key is also accepted, but role_type is preferred."
     )
 
 

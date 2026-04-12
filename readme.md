@@ -79,7 +79,7 @@ http://localhost:8080
 The first screen asks for:
 
 - Profile name
-- Target roles
+- Target roles, used as classification labels
 - Resume text
 - AI provider
 

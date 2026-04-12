@@ -135,6 +135,8 @@ Prompt types in current use:
 Current routing contract:
 
 - `classification_key` is the business/domain key used to match jobs to resumes
+- classification prompts should return `role_type`; the parser also accepts `classification_key` for older prompts
+- target roles from onboarding/settings are injected as the allowed classification labels, with `Other` added automatically
 - `prompt_key` is the prompt-family selector used to load an active prompt
 - classify and score routes may derive the prompt selector from the passed `classification_key`
 - explicit `prompt_key` still overrides derived prompt selection

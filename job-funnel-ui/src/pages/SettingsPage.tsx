@@ -146,6 +146,7 @@ export function SettingsPage({ onSettingsUpdated }: SettingsPageProps) {
               </label>
               <label>
                 Target Roles
+                <span className="field-help-text">Used as classification labels, with Other added automatically.</span>
                 <input value={form.target_roles} onChange={(event) => setForm((current) => ({ ...current, target_roles: event.target.value }))} />
               </label>
               <label>
