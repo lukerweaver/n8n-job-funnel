@@ -2110,7 +2110,7 @@ def update_resume(resume_id: int, payload: ResumeUpdate, session: Session = Depe
         resume.name = payload.name
     if payload.prompt_key is not None:
         resume.prompt_key = payload.prompt_key
-    if payload.classification_key is not None:
+    if "classification_key" in payload.model_fields_set:
         resume.classification_key = payload.classification_key
     if payload.content is not None:
         resume.content = payload.content

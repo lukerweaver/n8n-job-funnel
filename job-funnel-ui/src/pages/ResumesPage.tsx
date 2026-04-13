@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { createResume, getResumes, updateResume } from "../api";
+import { createResume, getResumes, getSettings, updateResume, updateSettings } from "../api";
 import { DetailModal } from "../components/DetailModal";
 import { PaginationControls } from "../components/PaginationControls";
-import type { Resume } from "../types";
+import type { AppSettings, Resume } from "../types";
 import { formatDate } from "../utils";
 
 const DEFAULT_LIMIT = 25;
@@ -53,6 +53,9 @@ export function ResumesPage() {
   const [form, setForm] = useState<ResumeFormState>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [updatingStrategy, setUpdatingStrategy] = useState(false);
 
   const params = useMemo(() => {
     const next = new URLSearchParams(searchParams);
@@ -94,19 +97,43 @@ export function ResumesPage() {
   }, [params]);
 
   useEffect(() => {
+    let cancelled = false;
+    setSettingsError(null);
+
+    getSettings()
+      .then((response) => {
+        if (!cancelled) {
+          setSettings(response);
+        }
+      })
+      .catch((requestError: Error) => {
+        if (!cancelled) {
+          setSettingsError(requestError.message);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (editing) {
       setForm(toFormState(editing));
       setSubmitError(null);
       return;
     }
     if (isCreating) {
-      setForm(EMPTY_FORM);
+      setForm({
+        ...EMPTY_FORM,
+        user_id: settings?.default_user_id ? String(settings.default_user_id) : EMPTY_FORM.user_id,
+      });
       setSubmitError(null);
       return;
     }
     setForm(EMPTY_FORM);
     setSubmitError(null);
-  }, [editing, isCreating]);
+  }, [editing, isCreating, settings?.default_user_id]);
 
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -131,7 +158,33 @@ export function ResumesPage() {
   function startNewResume() {
     setEditing(null);
     setIsCreating(true);
-    setForm(EMPTY_FORM);
+    setForm({
+      ...EMPTY_FORM,
+      user_id: settings?.default_user_id ? String(settings.default_user_id) : EMPTY_FORM.user_id,
+    });
+  }
+
+  async function useTargetedResumeStrategy() {
+    if (!settings) {
+      return;
+    }
+
+    setUpdatingStrategy(true);
+    setSettingsError(null);
+
+    try {
+      const updated = await updateSettings({
+        automation_settings: {
+          ...(settings.automation_settings ?? {}),
+          resume_strategy: "default_fallback",
+        },
+      });
+      setSettings(updated);
+    } catch (requestError) {
+      setSettingsError(requestError instanceof Error ? requestError.message : "Unable to update resume strategy.");
+    } finally {
+      setUpdatingStrategy(false);
+    }
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -139,11 +192,13 @@ export function ResumesPage() {
     setSubmitting(true);
     setSubmitError(null);
 
+    const classificationKey = form.classification_key.trim();
+    const resolvedPromptKey = form.prompt_key.trim() || classificationKey || settings?.default_prompt_key || "default";
     const payload = {
       user_id: Number(form.user_id),
       name: form.name.trim(),
-      prompt_key: form.prompt_key.trim() || null,
-      classification_key: form.classification_key.trim() || null,
+      prompt_key: resolvedPromptKey,
+      classification_key: classificationKey || null,
       content: form.content,
       is_active: form.is_active,
       is_default: form.is_default,
@@ -177,6 +232,10 @@ export function ResumesPage() {
   const limit = Number(params.get("limit") ?? String(DEFAULT_LIMIT));
   const offset = Number(params.get("offset") ?? "0");
   const selectedIndex = selected ? data.findIndex((item) => item.id === selected.id) : -1;
+  const targetRoles = settings?.target_roles ?? [];
+  const showAdvancedResumeFields = settings?.advanced_mode_enabled ?? false;
+  const resumeStrategy = String(settings?.automation_settings?.resume_strategy ?? "default_fallback");
+  const targetedResumesDisabled = resumeStrategy === "default_only";
 
   useEffect(() => {
     if (!selected) {
@@ -210,10 +269,21 @@ export function ResumesPage() {
         <div className="page-actions">
           <div className="stat-chip">{total} visible resumes</div>
           <button type="button" className="primary-button" onClick={startNewResume}>
-            New Resume
+            New Targeted Resume
           </button>
         </div>
       </div>
+
+      {targetedResumesDisabled ? (
+        <div className="warning-callout">
+          <p>Targeted resumes will not be used automatically while Resume Strategy is Default only.</p>
+          <button type="button" className="secondary-button" onClick={useTargetedResumeStrategy} disabled={updatingStrategy}>
+            {updatingStrategy ? "Updating..." : "Use targeted resumes"}
+          </button>
+        </div>
+      ) : null}
+
+      {settingsError ? <p className="error-callout">{settingsError}</p> : null}
 
       <div className="panel filter-panel">
         <div className="filter-grid">
@@ -228,12 +298,12 @@ export function ResumesPage() {
           </label>
 
           <label>
-            Classification
+            Target Role
             <input
               type="text"
               value={params.get("classification_key") ?? ""}
               onChange={(event) => updateParam("classification_key", event.target.value)}
-              placeholder="product_manager"
+              placeholder="Product Manager"
             />
           </label>
 
@@ -276,7 +346,7 @@ export function ResumesPage() {
                   <th>Name</th>
                   <th>User</th>
                   <th>Prompt</th>
-                  <th>Classification</th>
+                  <th>Target Role</th>
                   <th>Default</th>
                   <th>State</th>
                   <th>Updated</th>
@@ -342,7 +412,7 @@ export function ResumesPage() {
                 <dd>{selected.prompt_key}</dd>
               </div>
               <div>
-                <dt>Classification</dt>
+                <dt>Target Role</dt>
                 <dd>{selected.classification_key ?? "N/A"}</dd>
               </div>
               <div>
@@ -369,8 +439,8 @@ export function ResumesPage() {
 
       {editing || isCreating ? (
         <DetailModal
-          title={editing ? `Edit ${editing.name}` : "New Resume"}
-          subtitle={editing ? `Resume #${editing.id}` : "Create a new resume variant"}
+          title={editing ? `Edit ${editing.name}` : "New Targeted Resume"}
+          subtitle={editing ? `Resume #${editing.id}` : "Create a resume for a target role"}
           onClose={() => {
             setEditing(null);
             setIsCreating(false);
@@ -399,25 +469,48 @@ export function ResumesPage() {
               </label>
 
               <label>
-                Prompt Key
-                <input
-                  type="text"
-                  value={form.prompt_key}
-                  onChange={(event) => setForm((current) => ({ ...current, prompt_key: event.target.value }))}
-                  placeholder="default_resume"
-                />
-              </label>
-
-              <label>
-                Classification Key
-                <input
-                  type="text"
-                  value={form.classification_key}
-                  onChange={(event) => setForm((current) => ({ ...current, classification_key: event.target.value }))}
-                  placeholder="product_manager"
-                />
+                Use this resume for
+                <span className="field-help-text">Jobs classified with this target role can use this resume automatically.</span>
+                {targetRoles.length > 0 ? (
+                  <select
+                    value={form.classification_key}
+                    onChange={(event) => setForm((current) => ({ ...current, classification_key: event.target.value }))}
+                  >
+                    <option value="">Default fallback only</option>
+                    {targetRoles.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={form.classification_key}
+                    onChange={(event) => setForm((current) => ({ ...current, classification_key: event.target.value }))}
+                    placeholder="Product Manager"
+                  />
+                )}
               </label>
             </div>
+
+            {showAdvancedResumeFields ? (
+              <details className="advanced-details">
+                <summary>Advanced resume settings</summary>
+                <div className="inline-form-grid">
+                  <label>
+                    Prompt Key
+                    <span className="field-help-text">Leave blank to use the selected target role as the prompt key.</span>
+                    <input
+                      type="text"
+                      value={form.prompt_key}
+                      onChange={(event) => setForm((current) => ({ ...current, prompt_key: event.target.value }))}
+                      placeholder="default_resume"
+                    />
+                  </label>
+                </div>
+              </details>
+            ) : null}
 
             <label>
               Resume Content

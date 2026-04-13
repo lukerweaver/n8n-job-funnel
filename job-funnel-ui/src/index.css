@@ -767,6 +767,22 @@ textarea {
   font-weight: 600;
 }
 
+.warning-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.warning-callout p {
+  margin: 0;
+}
+
 .active-page-subtitle {
   color: rgba(21, 33, 27, 0.72);
 }

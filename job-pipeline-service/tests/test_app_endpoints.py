@@ -327,6 +327,11 @@ def test_user_and_resume_crud(db_session):
         ResumeUpdate(prompt_key="pm-custom", content="Updated resume body", is_active=False),
         db_session,
     )
+    cleared_resume = update_resume(
+        resume.id,
+        ResumeUpdate(classification_key=None),
+        db_session,
+    )
 
     assert listed_users.total == 1
     assert listed_resumes.total == 1
@@ -336,6 +341,7 @@ def test_user_and_resume_crud(db_session):
     assert updated_resume.content == "Updated resume body"
     assert updated_resume.is_active is False
     assert updated_resume.prompt_key == "pm-custom"
+    assert cleared_resume.classification_key is None
 
     with pytest.raises(HTTPException):
         create_resume(
