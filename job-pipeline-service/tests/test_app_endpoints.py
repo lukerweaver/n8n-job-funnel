@@ -54,7 +54,7 @@ from app import (
     update_resume,
     update_prompt_library,
 )
-from models import InterviewRound, JobApplication, JobPosting, Resume, User
+from models import InterviewRound, JobApplication, JobPosting, PromptLibrary, Resume, User
 from schemas import (
     ApplicationCreate,
     ApplicationErrorWrite,
@@ -396,6 +396,27 @@ def test_onboarding_status_complete_and_settings_redact_provider_key(db_session)
     assert updated.provider.provider_name == "ollama"
     assert updated.provider.provider_base_url == "http://localhost:11434"
     assert updated.provider.has_api_key is False
+
+
+def test_deleted_default_prompts_are_not_recreated_on_settings_load(db_session):
+    app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="Prompt User",
+            resume_content="Resume body",
+            target_roles=["Product"],
+            provider=ProviderSettingsWrite(provider_mode="configure_later"),
+        ),
+        db_session,
+    )
+    assert db_session.scalar(select(PromptLibrary.id).limit(1)) is not None
+
+    for prompt in db_session.scalars(select(PromptLibrary)).all():
+        db_session.delete(prompt)
+    db_session.commit()
+
+    app_module.get_settings(db_session)
+
+    assert db_session.scalar(select(PromptLibrary.id).limit(1)) is None
 
 
 def test_paste_job_requires_onboarding_and_resume(db_session):

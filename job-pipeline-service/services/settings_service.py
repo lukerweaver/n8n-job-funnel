@@ -85,6 +85,8 @@ DEFAULT_CLASSIFICATION_KEYS = [
     "People",
 ]
 
+DEFAULT_PROMPTS_SEEDED_KEY = "default_prompts_seeded"
+
 
 def _clean_string(value: str | None) -> str | None:
     if value is None:
@@ -120,7 +122,16 @@ def get_or_create_app_settings(session: Session) -> AppSettings:
     return settings
 
 
-def seed_default_prompts(session: Session) -> None:
+def _settings_state(settings: AppSettings) -> dict:
+    return dict(settings.automation_state) if isinstance(settings.automation_state, dict) else {}
+
+
+def seed_default_prompts(session: Session, *, settings: AppSettings | None = None) -> None:
+    if settings is not None:
+        state = _settings_state(settings)
+        if state.get(DEFAULT_PROMPTS_SEEDED_KEY) is True:
+            return
+
     existing_classification = session.scalar(
         select(PromptLibrary.id)
         .where(
@@ -164,6 +175,12 @@ def seed_default_prompts(session: Session) -> None:
                 is_active=True,
             )
         )
+
+    if settings is not None:
+        settings.automation_state = {
+            **_settings_state(settings),
+            DEFAULT_PROMPTS_SEEDED_KEY: True,
+        }
 
 
 def serialize_settings(settings: AppSettings) -> dict:

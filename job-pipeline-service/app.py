@@ -1042,8 +1042,8 @@ def _backfill_resume_defaults(session: Session) -> None:
 def run_startup_backfill(session: Session) -> None:
     _backfill_resume_classification_keys(session)
     _backfill_resume_defaults(session)
-    seed_default_prompts(session)
     settings = get_or_create_app_settings(session)
+    seed_default_prompts(session, settings=settings)
     if settings.default_user_id is None:
         settings.default_user_id = session.scalar(select(User.id).order_by(User.id.asc()).limit(1))
     session.commit()
@@ -1100,7 +1100,6 @@ async def health():
 @app.get("/onboarding/status", response_model=OnboardingStatusResponse, tags=["onboarding"])
 def get_onboarding_status(session: Session = Depends(get_session)):
     settings = get_or_create_app_settings(session)
-    seed_default_prompts(session)
     _commit_or_fail(session)
     return _serialize_onboarding_status(session, settings)
 
@@ -1108,7 +1107,7 @@ def get_onboarding_status(session: Session = Depends(get_session)):
 @app.post("/onboarding/complete", response_model=OnboardingStatusResponse, tags=["onboarding"])
 def complete_onboarding(payload: OnboardingCompleteRequest, session: Session = Depends(get_session)):
     settings = get_or_create_app_settings(session)
-    seed_default_prompts(session)
+    seed_default_prompts(session, settings=settings)
 
     user = session.get(User, settings.default_user_id) if settings.default_user_id is not None else None
     if user is None:
@@ -1160,7 +1159,6 @@ def complete_onboarding(payload: OnboardingCompleteRequest, session: Session = D
 @app.get("/settings", response_model=AppSettingsRead, tags=["settings"])
 def get_settings(session: Session = Depends(get_session)):
     settings = get_or_create_app_settings(session)
-    seed_default_prompts(session)
     _commit_or_fail(session)
     return AppSettingsRead(**serialize_settings(settings))
 
@@ -1176,7 +1174,7 @@ def update_settings(payload: AppSettingsUpdate, session: Session = Depends(get_s
 @app.post("/jobs/paste", response_model=PasteJobResponse, tags=["jobs"])
 def paste_job(payload: PasteJobRequest, session: Session = Depends(get_session)):
     settings = get_or_create_app_settings(session)
-    seed_default_prompts(session)
+    seed_default_prompts(session, settings=settings)
     user_id = payload.user_id or settings.default_user_id
     if user_id is None:
         raise HTTPException(status_code=409, detail="Complete onboarding before pasting a job")
