@@ -88,7 +88,7 @@ from services.run_service import (
     RunWorker,
     enqueue_application_score_run,
     enqueue_classification_run,
-    process_next_run,
+    process_run,
     serialize_application_score_run,
     serialize_classification_run,
     serialize_run,
@@ -313,6 +313,46 @@ def _enqueue_single_scoring_run(
         )
     )
     return run
+
+
+def _clear_job_classification(job: JobPosting) -> None:
+    job.classification_key = None
+    job.classification_prompt_version = None
+    job.classification_provider = None
+    job.classification_model = None
+    job.classification_error = None
+    job.classification_raw_response = None
+    job.classified_at = None
+
+
+def _clear_application_ai_outputs(application: JobApplication) -> None:
+    application.status = "new"
+    application.score = None
+    application.recommendation = None
+    application.justification = None
+    application.screening_likelihood = None
+    application.dimension_scores = None
+    application.gating_flags = None
+    application.strengths = None
+    application.gaps = None
+    application.missing_from_jd = None
+    application.scoring_prompt_key = None
+    application.scoring_prompt_version = None
+    application.score_provider = None
+    application.score_model = None
+    application.score_raw_response = None
+    application.score_error = None
+    application.score_attempts = 0
+    application.scored_at = None
+    application.tailored_resume_content = None
+    application.tailoring_prompt_key = None
+    application.tailoring_prompt_version = None
+    application.tailoring_provider = None
+    application.tailoring_model = None
+    application.tailoring_raw_response = None
+    application.tailoring_error = None
+    application.tailored_at = None
+    application.last_error_at = None
 
 
 def _select_resumes_for_job_generation(
@@ -1147,6 +1187,9 @@ def paste_job(payload: PasteJobRequest, session: Session = Depends(get_session))
     if job is None:
         job = JobPosting(job_id=job_id)
         session.add(job)
+    description_changed = job.id is not None and (job.description or "") != description
+    if description_changed:
+        _clear_job_classification(job)
     job.source = "manual-entry"
     job.company_name = payload.company_name.strip() if payload.company_name else None
     job.title = payload.title.strip() if payload.title else None
@@ -1176,6 +1219,8 @@ def paste_job(payload: PasteJobRequest, session: Session = Depends(get_session))
     else:
         application.user_id = user.id
         application.status = "new" if application.status in {"error"} else application.status
+    if description_changed:
+        _clear_application_ai_outputs(application)
 
     run_ids: list[int] = []
     provider_configured = is_provider_configured(settings)
@@ -1205,8 +1250,8 @@ def paste_job(payload: PasteJobRequest, session: Session = Depends(get_session))
     _commit_or_fail(session)
 
     if payload.mode == "sync" and run_ids:
-        for _run_id in run_ids:
-            process_next_run()
+        for run_id in run_ids:
+            process_run(run_id)
         session.refresh(job)
         session.refresh(application)
 

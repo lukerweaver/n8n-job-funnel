@@ -54,7 +54,7 @@ from app import (
     update_resume,
     update_prompt_library,
 )
-from models import InterviewRound, JobApplication, Resume, User
+from models import InterviewRound, JobApplication, JobPosting, Resume, User
 from schemas import (
     ApplicationCreate,
     ApplicationErrorWrite,
@@ -463,6 +463,67 @@ def test_paste_job_saves_without_provider_and_queues_with_provider(db_session):
     assert queued.application.resume_id == completed.default_resume.id
 
 
+def test_paste_job_resets_stale_ai_outputs_when_description_changes(db_session):
+    app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="Paste User",
+            resume_content="Resume body",
+            target_roles=["Marketing"],
+            provider=ProviderSettingsWrite(provider_mode="configure_later"),
+        ),
+        db_session,
+    )
+
+    first = app_module.paste_job(
+        PasteJobRequest(
+            description="Original job description",
+            url="https://example.com/jobs/product-marketing",
+        ),
+        db_session,
+    )
+    job = db_session.get(JobPosting, first.job.id)
+    application = db_session.get(JobApplication, first.application.id)
+    assert job is not None
+    assert application is not None
+    job.classification_key = "Product Marketing"
+    job.classification_prompt_version = 2
+    job.classification_provider = "ollama"
+    job.classification_model = "model"
+    job.classification_raw_response = "{}"
+    job.classified_at = datetime.now(timezone.utc)
+    application.status = "scored"
+    application.score = 85
+    application.recommendation = "Strong Apply"
+    application.score_raw_response = "{}"
+    application.scored_at = datetime.now(timezone.utc)
+    application.tailored_resume_content = "Tailored resume"
+    application.tailored_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    updated = app_module.paste_job(
+        PasteJobRequest(
+            description="Updated job description",
+            url="https://example.com/jobs/product-marketing",
+        ),
+        db_session,
+    )
+
+    db_session.refresh(job)
+    db_session.refresh(application)
+    assert updated.status == "saved"
+    assert job.description == "Updated job description"
+    assert job.classification_key is None
+    assert job.classification_prompt_version is None
+    assert job.classified_at is None
+    assert application.status == "new"
+    assert application.score is None
+    assert application.recommendation is None
+    assert application.score_raw_response is None
+    assert application.scored_at is None
+    assert application.tailored_resume_content is None
+    assert application.tailored_at is None
+
+
 def test_paste_job_url_requires_description_and_sync_mode(db_session, monkeypatch):
     app_module.complete_onboarding(
         OnboardingCompleteRequest(
@@ -473,13 +534,13 @@ def test_paste_job_url_requires_description_and_sync_mode(db_session, monkeypatc
         ),
         db_session,
     )
-    calls = {"process_next_run": 0}
+    calls = []
 
-    def _fake_process_next_run():
-        calls["process_next_run"] += 1
+    def _fake_process_run(run_id):
+        calls.append(run_id)
         return True
 
-    monkeypatch.setattr(app_module, "process_next_run", _fake_process_next_run)
+    monkeypatch.setattr(app_module, "process_run", _fake_process_run)
 
     response = app_module.paste_job(
         PasteJobRequest(
@@ -494,7 +555,7 @@ def test_paste_job_url_requires_description_and_sync_mode(db_session, monkeypatc
 
     assert response.job.apply_url == "https://example.com/jobs/1"
     assert response.job.description == "Pasted job description"
-    assert calls["process_next_run"] == len(response.run_ids)
+    assert calls == response.run_ids
 
     with pytest.raises(HTTPException) as missing_description:
         app_module.paste_job(

@@ -291,25 +291,15 @@ def _deliver_callback(run_id: int) -> None:
         _commit_scoring_progress(session)
 
 
-def process_next_run() -> bool:
-    with SessionLocal() as session:
-        run = session.scalar(
-            select(Run)
-            .where(Run.status == "queued")
-            .order_by(Run.created_at.asc())
-            .limit(1)
-        )
-        if run is None:
-            from services.automation_service import maybe_enqueue_next_service_managed_run
+def _claim_run(session, run: Run) -> int:
+    run.status = "running"
+    run.started_at = utcnow()
+    run.last_error = None
+    _commit_scoring_progress(session)
+    return run.id
 
-            return maybe_enqueue_next_service_managed_run(session)
 
-        run.status = "running"
-        run.started_at = utcnow()
-        run.last_error = None
-        _commit_scoring_progress(session)
-        run_id = run.id
-
+def _execute_run(run_id: int) -> bool:
     with SessionLocal() as session:
         run = session.get(Run, run_id)
         if run is None:
@@ -414,6 +404,33 @@ def process_next_run() -> bool:
                 _deliver_callback(run.id)
 
     return True
+
+
+def process_run(run_id: int) -> bool:
+    with SessionLocal() as session:
+        run = session.get(Run, run_id)
+        if run is None or run.status != "queued":
+            return False
+        claimed_run_id = _claim_run(session, run)
+
+    return _execute_run(claimed_run_id)
+
+
+def process_next_run() -> bool:
+    with SessionLocal() as session:
+        run = session.scalar(
+            select(Run)
+            .where(Run.status == "queued")
+            .order_by(Run.created_at.asc(), Run.id.asc())
+            .limit(1)
+        )
+        if run is None:
+            from services.automation_service import maybe_enqueue_next_service_managed_run
+
+            return maybe_enqueue_next_service_managed_run(session)
+        run_id = _claim_run(session, run)
+
+    return _execute_run(run_id)
 
 
 class RunWorker:
