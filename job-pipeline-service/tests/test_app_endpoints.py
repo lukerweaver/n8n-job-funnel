@@ -661,6 +661,15 @@ def test_auto_classification_completion_enqueues_scoring_run(db_session):
     )
     first_job = seed_job(db_session, job_id="auto-classified-1", description="First classified job")
     second_job = seed_job(db_session, job_id="auto-classified-2", description="Second classified job")
+    retry_job = seed_job(db_session, job_id="auto-retry-1", description="Previously failed scoring job")
+    retry_job.classification_key = "marketing"
+    retry_application = seed_application(
+        db_session,
+        user=user,
+        job=retry_job,
+        resume=classified_resume,
+        status="new",
+    )
     settings = app_module.get_or_create_app_settings(db_session)
     settings.provider_mode = "ollama"
     settings.provider_name = "ollama"
@@ -680,7 +689,7 @@ def test_auto_classification_completion_enqueues_scoring_run(db_session):
     assert scoring_run is not None
     assert scoring_run.type == "application_scoring"
     assert scoring_run.status == "queued"
-    assert scoring_run.selected_count == 2
+    assert scoring_run.selected_count == 3
     assert settings.automation_state[automation_service.AUTO_LAST_SCORING_RUN_STATE_KEY] == scoring_run.id
     generated_applications = db_session.scalars(
         select(JobApplication).where(JobApplication.job_posting_id.in_([first_job.id, second_job.id])).order_by(JobApplication.id.asc())
@@ -690,7 +699,8 @@ def test_auto_classification_completion_enqueues_scoring_run(db_session):
     scoring_items = db_session.scalars(
         select(app_module.RunItem).where(app_module.RunItem.run_id == scoring_run.id).order_by(app_module.RunItem.id.asc())
     ).all()
-    assert [item.job_posting_id for item in scoring_items] == [first_job.id, second_job.id]
+    assert [item.job_posting_id for item in scoring_items] == [retry_job.id, first_job.id, second_job.id]
+    assert retry_application.id in [item.job_application_id for item in scoring_items]
 
 
 def test_application_crud_generate_and_status_flow(db_session):

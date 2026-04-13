@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
 from models import JobApplication, JobPosting, Resume, Run, RunItem
-from services.prompt_service import resolve_prompt_selector
 from services.scoring_service import _commit_scoring_progress
 from services.settings_service import DEFAULT_PROMPT_KEY, get_or_create_app_settings, is_provider_configured
 
@@ -125,41 +124,6 @@ def maybe_enqueue_next_service_managed_run(session) -> bool:
     return True
 
 
-def _enqueue_scoring_run_for_applications(
-    session,
-    *,
-    applications: list[JobApplication],
-    prompt_key: str | None,
-) -> Run:
-    run = Run(
-        type="application_scoring",
-        status="queued",
-        requested_status="new",
-        requested_source=None,
-        classification_key=None,
-        prompt_key=resolve_prompt_selector(prompt_key=prompt_key, classification_key=None),
-        force=False,
-        callback_url=None,
-        selected_count=len(applications),
-    )
-    session.add(run)
-    session.flush()
-
-    for application in applications:
-        session.add(
-            RunItem(
-                run_id=run.id,
-                type="application_scoring",
-                job_posting_id=application.job_posting_id,
-                job_application_id=application.id,
-                status="queued",
-            )
-        )
-    session.flush()
-
-    return run
-
-
 def _select_resumes_for_job_generation(
     session,
     *,
@@ -233,7 +197,17 @@ def _applications_for_auto_scoring(
     return applications
 
 
+def _new_application_count(session, settings) -> int:
+    query = select(func.count()).select_from(JobApplication).where(JobApplication.status == "new")
+    user_id = _automation_user_id(settings)
+    if user_id is not None:
+        query = query.where(JobApplication.user_id == user_id)
+    return session.scalar(query) or 0
+
+
 def handle_classification_run_completed(session, run: Run) -> Run | None:
+    from services.run_service import EmptyRunSelectionError, enqueue_application_score_run
+
     if run.type != "classification":
         return None
 
@@ -254,15 +228,23 @@ def handle_classification_run_completed(session, run: Run) -> Run | None:
         return None
 
     applications = _applications_for_auto_scoring(session, job_ids=list(classified_job_ids), settings=settings)
-    if not applications:
+    scoring_count = _new_application_count(session, settings)
+    if not applications and scoring_count <= 0:
         settings.automation_state = {key: value for key, value in automation_state.items() if key != AUTO_CLASSIFICATION_RUN_STATE_KEY}
         return None
 
-    scoring_run = _enqueue_scoring_run_for_applications(
-        session,
-        applications=list(applications),
-        prompt_key=run.prompt_key or settings.default_prompt_key or DEFAULT_PROMPT_KEY,
-    )
+    try:
+        scoring_run = enqueue_application_score_run(
+            session,
+            limit=scoring_count,
+            status="new",
+            user_id=_automation_user_id(settings),
+            prompt_key=run.prompt_key or settings.default_prompt_key or DEFAULT_PROMPT_KEY,
+        )
+    except EmptyRunSelectionError:
+        settings.automation_state = {key: value for key, value in automation_state.items() if key != AUTO_CLASSIFICATION_RUN_STATE_KEY}
+        return None
+
     settings.automation_state = {
         **automation_state,
         AUTO_LAST_SCORING_RUN_STATE_KEY: scoring_run.id,
