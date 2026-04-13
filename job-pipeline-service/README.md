@@ -357,6 +357,8 @@ External automation sequence:
 
 Set `automation_settings.auto_process_jobs` to false if n8n or another tool should own that sequence. The run endpoints remain available in both modes.
 
+For agent CLI usage with Codex, Claude Code, or another terminal assistant, see `../docs/agent-cli-playbook.md`. It includes safe operating rules, prompts, and PowerShell examples for this sequence.
+
 ## Selected Route Notes
 
 ### `GET /settings` and `PUT /settings`

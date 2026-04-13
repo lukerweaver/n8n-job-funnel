@@ -177,6 +177,10 @@ n8n
     -> owns run sequence when auto_process_jobs is false
     -> run and callback endpoints
 
+Agent CLI
+    -> uses the API-first workflow in docs/agent-cli-playbook.md
+    -> reviews, ingests, classifies, generates, and scores through HTTP routes
+
 Service-managed automation:
     -> auto_process_jobs = true
     -> backend worker queues classification when thresholds are met
@@ -377,6 +381,10 @@ When `auto_process_jobs` is false, the intended n8n sequence is:
 3. queue `POST /applications/score/run`
 4. on callback, fetch `/runs/{run_id}/items`
 5. notify or update downstream systems
+
+## Agent CLI Workflows
+
+Codex, Claude Code, and other terminal agents should use the HTTP API instead of editing the database directly. The recommended prompts, PowerShell examples, and safe run sequence are in [docs/agent-cli-playbook.md](docs/agent-cli-playbook.md).
 
 ## Testing
 
