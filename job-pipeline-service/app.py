@@ -823,6 +823,11 @@ def ensure_job_postings_schema() -> None:
 def ensure_prompt_library_schema() -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("prompt_library")}
+    try:
+        unique_constraints = inspector.get_unique_constraints("prompt_library")
+    except (AttributeError, NotImplementedError):
+        unique_constraints = []
+    unique_constraint_names = {constraint["name"] for constraint in unique_constraints if constraint.get("name")}
 
     float_type = "DOUBLE PRECISION" if engine.dialect.name == "postgresql" else "REAL"
     type_map = {
@@ -840,7 +845,20 @@ def ensure_prompt_library_schema() -> None:
         if column_name not in columns
     ]
 
-    if not statements:
+    constraint_statements: list[str] = []
+    if engine.dialect.name == "postgresql":
+        if "uq_prompt_library_key_version" in unique_constraint_names:
+            constraint_statements.append(
+                "ALTER TABLE prompt_library DROP CONSTRAINT IF EXISTS uq_prompt_library_key_version"
+            )
+        if "uq_prompt_library_key_version_type" not in unique_constraint_names:
+            constraint_statements.append(
+                "ALTER TABLE prompt_library "
+                "ADD CONSTRAINT uq_prompt_library_key_version_type "
+                "UNIQUE (prompt_key, prompt_version, prompt_type)"
+            )
+
+    if not statements and not constraint_statements:
         return
 
     with engine.begin() as connection:
@@ -860,6 +878,8 @@ def ensure_prompt_library_schema() -> None:
                     "UPDATE prompt_library SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"
                 )
             )
+        for statement in constraint_statements:
+            connection.execute(text(statement))
 
 
 def ensure_resumes_schema() -> None:
