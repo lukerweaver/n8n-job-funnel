@@ -3,13 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LinkedIn Job Scraper</title>
+    <title>Job Scraper</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main class="popup">
-      <h1>LinkedIn Job Scraper</h1>
-      <p class="muted">Open a LinkedIn job page and click the button.</p>
+      <h1>Job Scraper</h1>
+      <p class="muted">Collect jobs from LinkedIn and Hiring Cafe.</p>
+
+      <section class="settings-panel" aria-label="API settings">
+        <label for="apiBaseUrl">App API URL</label>
+        <input id="apiBaseUrl" type="url" placeholder="http://localhost:8000" />
+        <div class="button-row">
+          <button id="saveConfigBtn" type="button" class="secondary-button">Save</button>
+          <button id="testConnectionBtn" type="button" class="secondary-button">Test</button>
+        </div>
+        <p id="configStatus" class="muted status-line" aria-live="polite"></p>
+      </section>
+
       <button id="scrapeBtn" type="button">Scrape this job</button>
       <pre id="status" class="status" aria-live="polite"></pre>
     </main>

@@ -331,12 +331,12 @@ The extension lives in `job-scraper-chrome/`.
 Setup:
 
 1. start the API
-2. update `POST_ENDPOINT` in `job-scraper-chrome/background.js` if needed
-3. open `chrome://extensions`
-4. enable Developer mode
-5. load `job-scraper-chrome/` as an unpacked extension
+2. open `chrome://extensions`
+3. enable Developer mode
+4. load `job-scraper-chrome/` as an unpacked extension
+5. open the extension popup and select Test
 
-Details are in [job-scraper-chrome/README.md](job-scraper-chrome/README.md).
+Details are in [job-scraper-chrome/README.md](job-scraper-chrome/README.md) and [docs/chrome-extension-setup.md](docs/chrome-extension-setup.md).
 
 ## Internal UI
 

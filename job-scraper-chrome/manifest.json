@@ -3,13 +3,15 @@
   "name": "Job Scraper",
   "description": "Scrape job details from LinkedIn and hiring.cafe and post them to a JSON endpoint.",
   "version": "0.1.0",
-  "permissions": ["activeTab", "tabs"],
+  "permissions": ["activeTab", "tabs", "storage"],
   "host_permissions": [
     "https://www.linkedin.com/*",
     "https://hiring.cafe/*",
     "http://hiring.cafe/*",
     "https://*.hiring.cafe/*",
     "http://*.hiring.cafe/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*",
     "https://your-endpoint.example.com/*"
   ],
   "background": {

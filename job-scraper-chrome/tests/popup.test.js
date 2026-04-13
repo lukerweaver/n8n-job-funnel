@@ -3,6 +3,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { createDom, evalScript, flushPromises } from './test-helpers.js';
 
 describe('popup.js', () => {
+  const configHtml = `
+    <!doctype html>
+    <input id="apiBaseUrl" />
+    <button id="saveConfigBtn">Save</button>
+    <button id="testConnectionBtn">Test</button>
+    <p id="configStatus"></p>
+    <button id="scrapeBtn">Scrape</button>
+    <pre id="status"></pre>
+  `;
+
   it('shows a success state after scraping and sending payload', async () => {
     const chrome = {
       tabs: {
@@ -82,5 +92,62 @@ describe('popup.js', () => {
 
     expect(dom.window.document.getElementById('status').textContent).toContain('Failed to send.');
     expect(dom.window.document.getElementById('status').textContent).toContain('503');
+  });
+
+  it('loads, saves, and tests the API URL', async () => {
+    const chrome = {
+      tabs: {
+        query: vi.fn(),
+        sendMessage: vi.fn()
+      },
+      runtime: {
+        sendMessage: vi.fn((message) => {
+          if (message.type === 'getConfig') {
+            return Promise.resolve({ ok: true, apiBaseUrl: 'http://localhost:8000' });
+          }
+          if (message.type === 'saveConfig') {
+            return Promise.resolve({ ok: true, apiBaseUrl: message.apiBaseUrl.replace(/\/+$/, '') });
+          }
+          if (message.type === 'testConnection') {
+            return Promise.resolve({ ok: true, status: 200, apiBaseUrl: message.apiBaseUrl.replace(/\/+$/, '') });
+          }
+          return Promise.resolve({ ok: false });
+        })
+      }
+    };
+    const dom = createDom({
+      html: configHtml,
+      beforeParse(window) {
+        window.chrome = chrome;
+      }
+    });
+
+    evalScript(dom, 'popup.js');
+    await flushPromises();
+
+    const apiBaseUrlInput = dom.window.document.getElementById('apiBaseUrl');
+    const configStatus = dom.window.document.getElementById('configStatus');
+    expect(apiBaseUrlInput.value).toBe('http://localhost:8000');
+    expect(configStatus.textContent).toContain('Using http://localhost:8000');
+
+    apiBaseUrlInput.value = 'http://127.0.0.1:8000/';
+    dom.window.document.getElementById('saveConfigBtn').click();
+    await flushPromises();
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'saveConfig',
+      apiBaseUrl: 'http://127.0.0.1:8000/'
+    });
+    expect(apiBaseUrlInput.value).toBe('http://127.0.0.1:8000');
+    expect(configStatus.textContent).toContain('Saved http://127.0.0.1:8000');
+
+    dom.window.document.getElementById('testConnectionBtn').click();
+    await flushPromises();
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'testConnection',
+      apiBaseUrl: 'http://127.0.0.1:8000'
+    });
+    expect(configStatus.textContent).toContain('Connected to http://127.0.0.1:8000');
   });
 });
