@@ -127,6 +127,37 @@ From the repository root:
 docker compose -f docker-compose-example.yml down
 ```
 
+## Quick Start with Claude Code or Codex
+
+Start the app first:
+
+```bash
+docker compose -f docker-compose-example.yml up --build -d
+```
+
+Then check the API:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Claude Code:
+
+1. Open Claude Code in the repository root.
+2. Run `/job-funnel-onboarding` for first-time setup guidance.
+3. Run `/job-funnel-review` for read-only application summaries.
+4. Run `/job-funnel-ingest`, `/job-funnel-process`, or `/job-funnel-status` only when you want the agent to make changes.
+
+Codex:
+
+1. Open Codex in the repository root.
+2. Ask it to use `docs/agent-cli-playbook.md` and the repo guidance in `AGENTS.md`.
+3. For onboarding, ask it to use `.codex/skills/job-funnel-onboarding/SKILL.md`.
+4. For ongoing operations, ask it to use `.codex/skills/job-funnel-operator/SKILL.md`.
+5. If your Codex install does not auto-discover repo-local skills, copy or symlink the relevant folder from `.codex/skills/` into your personal Codex skills directory.
+
+Agent rule of thumb: review is safe by default; ingestion, classification, scoring, status updates, notifications, prompt edits, provider edits, and automation changes should be explicit.
+
 ## Deployment Modes
 
 There are now three practical ways to run this project:
@@ -388,6 +419,7 @@ Codex, Claude Code, and other terminal agents should use the HTTP API instead of
 
 Claude Code project skills are included under `.claude/skills/`:
 
+- `/job-funnel-onboarding`
 - `/job-funnel-review`
 - `/job-funnel-ingest`
 - `/job-funnel-process`
@@ -395,7 +427,12 @@ Claude Code project skills are included under `.claude/skills/`:
 
 Codex should follow the repo-level agent guidance in [AGENTS.md](AGENTS.md) and use the same playbook for API operations.
 
-A portable Codex skill is included at `.codex/skills/job-funnel-operator/SKILL.md`. If your Codex install does not auto-discover repo-local skills, copy or symlink that folder into your personal Codex skills directory.
+Portable Codex skills are included under `.codex/skills/`:
+
+- `job-funnel-onboarding`
+- `job-funnel-operator`
+
+If your Codex install does not auto-discover repo-local skills, copy or symlink the relevant folder into your personal Codex skills directory.
 
 ## Testing
 

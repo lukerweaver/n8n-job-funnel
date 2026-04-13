@@ -50,4 +50,4 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Ask before changing application statuses, lifecycle dates, interview rounds, notification state, prompts, provider settings, or automation settings.
 - If an external agent owns classification/generation/scoring, set or confirm `automation_settings.auto_process_jobs == false` before queueing runs so the service worker and agent do not compete.
 - Claude Code project skills live under `.claude/skills/` and point at the same playbook. Keep those skills thin wrappers over `docs/agent-cli-playbook.md` rather than duplicating full API examples.
-- A portable Codex skill lives at `.codex/skills/job-funnel-operator/SKILL.md`; keep it aligned with this section and the playbook when agent workflows change.
+- Portable Codex skills live at `.codex/skills/job-funnel-onboarding/SKILL.md` and `.codex/skills/job-funnel-operator/SKILL.md`; keep them aligned with this section and the playbook when agent workflows change.

@@ -11,11 +11,12 @@ Codex:
 - Read `AGENTS.md` for repo-wide operating rules.
 - Use this playbook for HTTP API workflows.
 - Prefer the read-only review flow unless the user explicitly asks for writes.
-- A portable Codex skill is included at `.codex/skills/job-funnel-operator/SKILL.md`. If your Codex install does not auto-discover repo-local skills, copy or symlink that folder into your personal Codex skills directory.
+- Portable Codex skills are included at `.codex/skills/job-funnel-onboarding/SKILL.md` and `.codex/skills/job-funnel-operator/SKILL.md`. If your Codex install does not auto-discover repo-local skills, copy or symlink the relevant folder into your personal Codex skills directory.
 
 Claude Code:
 
 - Project skills live under `.claude/skills/`.
+- Invoke `/job-funnel-onboarding` for first-time setup guidance.
 - Invoke `/job-funnel-review` for read-only application summaries.
 - Invoke `/job-funnel-ingest` to add pasted or normalized jobs.
 - Invoke `/job-funnel-process` to run classification, application generation, and scoring.
