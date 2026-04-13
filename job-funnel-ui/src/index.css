@@ -121,6 +121,24 @@ textarea {
   padding: 2rem;
 }
 
+.onboarding-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.onboarding-panel {
+  width: min(1100px, 100%);
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  border-radius: 8px;
+}
+
 .page-grid {
   display: grid;
   gap: 1.5rem;
@@ -167,6 +185,24 @@ textarea {
 .table-panel,
 .detail-panel {
   padding: 1rem;
+}
+
+.result-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.advanced-details {
+  border: 1px solid rgba(21, 33, 27, 0.15);
+  border-radius: 8px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.advanced-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--accent);
 }
 
 .filter-grid {
@@ -854,16 +890,32 @@ textarea {
 }
 
 .checkbox-field {
-  display: inline-flex;
+  display: flex !important;
   align-items: center;
   gap: 0.55rem;
+  align-self: end;
   font-size: 0.9rem;
   font-weight: 700;
+  min-height: 2.9rem;
 }
 
 .checkbox-field input {
   width: auto;
+  flex: 0 0 auto;
   margin: 0;
+}
+
+.settings-help-text,
+.field-help-text {
+  margin: 0;
+  color: rgba(21, 33, 27, 0.68);
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.settings-help-text {
+  align-self: center;
 }
 
 .form-actions {

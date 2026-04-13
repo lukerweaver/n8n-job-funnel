@@ -7,11 +7,13 @@ FastAPI backend for:
 3. generating resume-specific applications
 4. scoring applications with an LLM
 5. tracking notification, lifecycle, and interview state
-6. exposing async run status for n8n-style orchestration
+6. managing the default classification-to-scoring workflow
+7. exposing async run status for external orchestration such as n8n
 
 The current operator UI consumes this service directly for:
 
 - application review across all, active, and historical views
+- paste-job recommendations
 - run inspection plus direct classification/scoring run launch
 - statistics for ingest volume and score spread
 - resume management
@@ -80,6 +82,15 @@ Provider resolution rules:
 
 There is intentionally no default `OLLAMA_BASE_URL`. This prevents installs from silently assuming a local Ollama instance exists.
 
+Settings can also store workflow controls in `automation_settings`:
+
+- `auto_process_jobs`: when false, disables service-managed automatic processing so n8n or another orchestrator can own the workflow
+- `unprocessed_jobs_threshold`: minimum pending unclassified jobs before automatic classification runs
+- `minutes_since_last_run_threshold`: time-based fallback for automatic classification runs
+- `resume_strategy`: `default_fallback`, `classification_first`, or `default_only`
+
+The backend reads these settings from the database, not only from environment variables, so they can be updated through `/settings` and the operator UI.
+
 ### LLM configuration examples
 
 Ollama:
@@ -124,6 +135,8 @@ Prompt types in current use:
 Current routing contract:
 
 - `classification_key` is the business/domain key used to match jobs to resumes
+- classification prompts should return `role_type`; the parser also accepts `classification_key` for older prompts
+- target roles from onboarding/settings are injected as the allowed classification labels, with `Other` added automatically
 - `prompt_key` is the prompt-family selector used to load an active prompt
 - classify and score routes may derive the prompt selector from the passed `classification_key`
 - explicit `prompt_key` still overrides derived prompt selection
@@ -133,6 +146,12 @@ Resume contract:
 - targeted resumes use a non-null `classification_key`
 - fallback resumes can use `is_default = true`
 - generation routes choose resumes with `resume_strategy`
+
+Current `resume_strategy` values:
+
+- `classification_first`: use only resumes whose `classification_key` matches the job
+- `default_only`: use only the default resume
+- `default_fallback`: use matching resumes first, then fall back to the default resume
 
 ## Local Run
 
@@ -260,6 +279,7 @@ Optional threshold gate:
 
 ### Jobs
 
+- `POST /jobs/paste`
 - `POST /jobs/ingest`
 - `GET /jobs`
 - `GET /jobs/{job_id}`
@@ -320,7 +340,14 @@ Two job identifiers exist:
 - `job_id`: external string identifier used at ingest time
 - `id`: internal integer primary key used by most route paths and relationships
 
-Preferred automation sequence:
+Default service-managed automation:
+
+1. The run worker checks for queued/running work.
+2. If there is no active classification or scoring run, `auto_process_jobs` is enabled, and an AI provider is configured, the service may queue `POST /jobs/classify/run` behavior internally.
+3. When that classification run completes, the service generates missing applications for classified jobs using `resume_strategy`.
+4. The service queues scoring for the generated applications.
+
+External automation sequence:
 
 1. `POST /jobs/classify/run`
 2. callback fetches `/runs/{run_id}` or `/runs/{run_id}/items`
@@ -328,7 +355,48 @@ Preferred automation sequence:
 4. `POST /applications/score/run`
 5. downstream notification or tracking writes
 
+Set `automation_settings.auto_process_jobs` to false if n8n or another tool should own that sequence. The run endpoints remain available in both modes.
+
 ## Selected Route Notes
+
+### `GET /settings` and `PUT /settings`
+
+Reads and updates operator settings, including provider configuration, default prompt key, scoring preferences, and automation settings.
+
+Example automation payload:
+
+```json
+{
+  "automation_settings": {
+    "auto_process_jobs": true,
+    "unprocessed_jobs_threshold": 5,
+    "minutes_since_last_run_threshold": 60,
+    "opportunistic_trigger_enabled": true,
+    "resume_strategy": "default_fallback"
+  }
+}
+```
+
+Use `"auto_process_jobs": false` for n8n-managed workflows.
+
+### `POST /jobs/paste`
+
+Creates or updates a manual job posting, creates an application for the selected user's resume, and optionally queues classification and scoring immediately.
+
+The current UI sends a job description and an optional job URL. The API still accepts `input_type`, which defaults to `description`.
+
+Example:
+
+```json
+{
+  "description": "Full job description",
+  "url": "https://example.com/jobs/123",
+  "company_name": "Example Co",
+  "title": "Product Manager",
+  "process_now": true,
+  "mode": "async"
+}
+```
 
 ### `POST /jobs/ingest`
 
@@ -373,8 +441,7 @@ Example:
   "limit": 100,
   "source": "linkedin",
   "classification_key": "product_classification",
-  "force": false,
-  "callback_url": "https://<n8n-host>/webhook/job-classification-complete"
+  "force": false
 }
 ```
 
@@ -420,8 +487,7 @@ Example:
 {
   "limit": 100,
   "status": "new",
-  "force": false,
-  "callback_url": "https://<n8n-host>/webhook/application-score-complete"
+  "force": false
 }
 ```
 

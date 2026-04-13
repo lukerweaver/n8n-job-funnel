@@ -7,6 +7,7 @@ from services.scoring_service import (
     _commit_scoring_progress,
     score_application,
 )
+from services.settings_service import get_or_create_app_settings
 from tests.helpers import seed_application, seed_job, seed_prompt, seed_resume, seed_user
 
 
@@ -14,8 +15,12 @@ class FakeClient(LlmClient):
     def __init__(self, response: str | Exception):
         super().__init__(provider="fake", model="fake-model")
         self._response = response
+        self.system_prompt: str | None = None
+        self.user_prompt: str | None = None
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        self.system_prompt = system_prompt
+        self.user_prompt = user_prompt
         if isinstance(self._response, Exception):
             raise self._response
         return self._response
@@ -38,6 +43,24 @@ def test_score_application_success_path(db_session):
     assert application.score == 27
     assert application.status == "scored"
     assert application.score_attempts == 1
+
+
+def test_score_application_includes_user_preferences(db_session):
+    prompt = seed_prompt(db_session)
+    user = seed_user(db_session, email="preferences@example.com")
+    job = seed_job(db_session, job_id="job-preferences")
+    resume = seed_resume(db_session, user=user, content="Resume body")
+    application = seed_application(db_session, user=user, job=job, resume=resume)
+    settings = get_or_create_app_settings(db_session)
+    settings.target_roles = ["Product Marketing", "Growth"]
+    db_session.commit()
+    client = FakeClient(_valid_response(27))
+
+    result = score_application(db_session, application, prompt=prompt, client=client)
+
+    assert result.outcome == "scored"
+    assert client.user_prompt is not None
+    assert "Target roles: Product Marketing, Growth" in client.user_prompt
 
 
 def test_score_application_skips_for_status_and_missing_content(db_session):

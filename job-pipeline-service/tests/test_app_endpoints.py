@@ -9,6 +9,8 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy import select, text
 
 import app as app_module
+import services.automation_service as automation_service
+import services.run_service as run_service
 from app import (
     _commit_or_fail,
     create_application,
@@ -52,7 +54,7 @@ from app import (
     update_resume,
     update_prompt_library,
 )
-from models import InterviewRound, JobApplication, Resume, User
+from models import InterviewRound, JobApplication, JobPosting, Resume, User
 from schemas import (
     ApplicationCreate,
     ApplicationErrorWrite,
@@ -64,10 +66,14 @@ from schemas import (
     ApplicationsGenerateRunRequest,
     ApplicationsScoreRunRequest,
     ApplicationStatusWrite,
+    AppSettingsUpdate,
     InterviewRoundCreate,
     InterviewRoundUpdate,
     JobClassificationRunRequest,
     JobIngestItem,
+    OnboardingCompleteRequest,
+    PasteJobRequest,
+    ProviderSettingsWrite,
     ResumeCreate,
     ResumeUpdate,
     JobsClassificationRunRequest,
@@ -345,6 +351,325 @@ def test_user_and_resume_crud(db_session):
         )
     with pytest.raises(HTTPException):
         create_user(UserCreate(name="Alice 2", email="alice@example.com"), db_session)
+
+
+def test_onboarding_status_complete_and_settings_redact_provider_key(db_session):
+    initial = app_module.get_onboarding_status(db_session)
+
+    assert initial.completed is False
+    assert "profile" in initial.missing_steps
+    assert "resume" in initial.missing_steps
+    assert initial.settings.provider.has_api_key is False
+
+    completed = app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="Marketing User",
+            resume_content="Resume body",
+            target_roles=["Product Marketing", "Growth"],
+            provider=ProviderSettingsWrite(
+                provider_mode="hosted",
+                provider_name="openai_compatible",
+                provider_base_url="https://api.example.com/v1",
+                provider_api_key="secret-key",
+                provider_model="model-1",
+            ),
+        ),
+        db_session,
+    )
+
+    assert completed.completed is True
+    assert completed.default_user is not None
+    assert completed.default_user.name == "Marketing User"
+    assert completed.default_resume is not None
+    assert completed.default_resume.content == "Resume body"
+    assert completed.settings.provider.has_api_key is True
+    assert not hasattr(completed.settings.provider, "provider_api_key")
+
+    updated = app_module.update_settings(
+        AppSettingsUpdate(
+            advanced_mode_enabled=True,
+            provider=ProviderSettingsWrite(provider_mode="ollama"),
+        ),
+        db_session,
+    )
+    assert updated.advanced_mode_enabled is True
+    assert updated.provider.provider_name == "ollama"
+    assert updated.provider.provider_base_url == "http://localhost:11434"
+    assert updated.provider.has_api_key is False
+
+
+def test_paste_job_requires_onboarding_and_resume(db_session):
+    with pytest.raises(HTTPException) as missing_onboarding:
+        app_module.paste_job(PasteJobRequest(input_type="description", description="JD"), db_session)
+    assert missing_onboarding.value.status_code == 409
+
+    user = seed_user(db_session, name="No Resume", email="no-resume@example.com")
+    settings = app_module.get_or_create_app_settings(db_session)
+    settings.default_user_id = user.id
+    settings.onboarding_completed = True
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as missing_resume:
+        app_module.paste_job(PasteJobRequest(input_type="description", description="JD"), db_session)
+    assert missing_resume.value.status_code == 409
+
+
+def test_paste_job_saves_without_provider_and_queues_with_provider(db_session):
+    completed = app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="Paste User",
+            resume_content="Resume body",
+            target_roles=["Marketing"],
+            provider=ProviderSettingsWrite(provider_mode="configure_later"),
+        ),
+        db_session,
+    )
+    assert completed.default_resume is not None
+
+    saved = app_module.paste_job(
+        PasteJobRequest(
+            description="A product marketing role",
+            url="https://example.com/jobs/product-marketing",
+            title="PMM",
+            company_name="Acme",
+        ),
+        db_session,
+    )
+    assert saved.status == "saved"
+    assert saved.job.apply_url == "https://example.com/jobs/product-marketing"
+    assert saved.provider_configured is False
+    assert saved.run_ids == []
+    assert saved.message is not None
+
+    settings = app_module.get_or_create_app_settings(db_session)
+    settings.provider_mode = "ollama"
+    settings.provider_name = "ollama"
+    settings.provider_base_url = "http://localhost:11434"
+    settings.provider_model = "test-model"
+    db_session.commit()
+
+    queued = app_module.paste_job(
+        PasteJobRequest(
+            input_type="description",
+            description="A lifecycle marketing role",
+            title="Lifecycle Marketer",
+            company_name="Beta",
+        ),
+        db_session,
+    )
+    assert queued.status == "queued"
+    assert queued.provider_configured is True
+    assert len(queued.run_ids) == 2
+    assert queued.application.resume_id == completed.default_resume.id
+
+
+def test_paste_job_resets_stale_ai_outputs_when_description_changes(db_session):
+    app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="Paste User",
+            resume_content="Resume body",
+            target_roles=["Marketing"],
+            provider=ProviderSettingsWrite(provider_mode="configure_later"),
+        ),
+        db_session,
+    )
+
+    first = app_module.paste_job(
+        PasteJobRequest(
+            description="Original job description",
+            url="https://example.com/jobs/product-marketing",
+        ),
+        db_session,
+    )
+    job = db_session.get(JobPosting, first.job.id)
+    application = db_session.get(JobApplication, first.application.id)
+    assert job is not None
+    assert application is not None
+    job.classification_key = "Product Marketing"
+    job.classification_prompt_version = 2
+    job.classification_provider = "ollama"
+    job.classification_model = "model"
+    job.classification_raw_response = "{}"
+    job.classified_at = datetime.now(timezone.utc)
+    application.status = "scored"
+    application.score = 85
+    application.recommendation = "Strong Apply"
+    application.score_raw_response = "{}"
+    application.scored_at = datetime.now(timezone.utc)
+    application.tailored_resume_content = "Tailored resume"
+    application.tailored_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    updated = app_module.paste_job(
+        PasteJobRequest(
+            description="Updated job description",
+            url="https://example.com/jobs/product-marketing",
+        ),
+        db_session,
+    )
+
+    db_session.refresh(job)
+    db_session.refresh(application)
+    assert updated.status == "saved"
+    assert job.description == "Updated job description"
+    assert job.classification_key is None
+    assert job.classification_prompt_version is None
+    assert job.classified_at is None
+    assert application.status == "new"
+    assert application.score is None
+    assert application.recommendation is None
+    assert application.score_raw_response is None
+    assert application.scored_at is None
+    assert application.tailored_resume_content is None
+    assert application.tailored_at is None
+
+
+def test_paste_job_url_requires_description_and_sync_mode(db_session, monkeypatch):
+    app_module.complete_onboarding(
+        OnboardingCompleteRequest(
+            profile_name="URL User",
+            resume_content="Resume body",
+            target_roles=["Operations"],
+            provider=ProviderSettingsWrite(provider_mode="ollama"),
+        ),
+        db_session,
+    )
+    calls = []
+
+    def _fake_process_run(run_id):
+        calls.append(run_id)
+        return True
+
+    monkeypatch.setattr(app_module, "process_run", _fake_process_run)
+
+    response = app_module.paste_job(
+        PasteJobRequest(
+            input_type="url",
+            url="https://example.com/jobs/1",
+            description="Pasted job description",
+            title="Ops Manager",
+            mode="sync",
+        ),
+        db_session,
+    )
+
+    assert response.job.apply_url == "https://example.com/jobs/1"
+    assert response.job.description == "Pasted job description"
+    assert calls == response.run_ids
+
+    with pytest.raises(HTTPException) as missing_description:
+        app_module.paste_job(
+            PasteJobRequest(
+                input_type="url",
+                url="https://example.com/jobs/2",
+                title="Ops Manager",
+            ),
+            db_session,
+        )
+    assert missing_description.value.status_code == 422
+
+
+def test_auto_process_enqueues_classification_run_when_idle(db_session):
+    settings = app_module.get_or_create_app_settings(db_session)
+    settings.provider_mode = "ollama"
+    settings.provider_name = "ollama"
+    settings.provider_base_url = "http://localhost:11434"
+    settings.provider_model = "test-model"
+    settings.automation_settings = {
+        "auto_process_jobs": True,
+        "unprocessed_jobs_threshold": 2,
+        "minutes_since_last_run_threshold": 60,
+    }
+    seed_job(db_session, job_id="auto-job-1", description="First auto job")
+    seed_job(db_session, job_id="auto-job-2", description="Second auto job")
+    db_session.commit()
+
+    enqueued = automation_service.maybe_enqueue_next_service_managed_run(db_session)
+
+    assert enqueued is True
+    run = db_session.scalar(select(app_module.Run).where(app_module.Run.type == "classification"))
+    assert run is not None
+    assert run.status == "queued"
+    assert run.selected_count == 2
+    assert settings.automation_state[automation_service.AUTO_CLASSIFICATION_RUN_STATE_KEY] == run.id
+    assert len(db_session.scalars(select(app_module.RunItem).where(app_module.RunItem.run_id == run.id)).all()) == 2
+
+
+def test_auto_process_disabled_does_not_auto_enqueue_classification(db_session):
+    settings = app_module.get_or_create_app_settings(db_session)
+    settings.provider_mode = "ollama"
+    settings.provider_name = "ollama"
+    settings.provider_base_url = "http://localhost:11434"
+    settings.provider_model = "test-model"
+    settings.automation_settings = {
+        "auto_process_jobs": False,
+        "unprocessed_jobs_threshold": 1,
+    }
+    seed_job(db_session, job_id="external-job-1", description="Externally managed job")
+    db_session.commit()
+
+    enqueued = automation_service.maybe_enqueue_next_service_managed_run(db_session)
+
+    assert enqueued is False
+    assert db_session.scalar(select(app_module.Run).where(app_module.Run.type == "classification")) is None
+
+
+def test_auto_classification_completion_enqueues_scoring_run(db_session):
+    settings = app_module.get_or_create_app_settings(db_session)
+    settings.provider_mode = "ollama"
+    settings.provider_name = "ollama"
+    settings.provider_base_url = "http://localhost:11434"
+    settings.provider_model = "test-model"
+    settings.automation_settings = {"auto_process_jobs": True, "resume_strategy": "default_fallback"}
+    user = seed_user(db_session, name="Auto User", email="auto@example.com")
+    default_resume = seed_resume(
+        db_session,
+        user=user,
+        name="Default Resume",
+        prompt_key="default",
+        classification_key=None,
+        is_default=True,
+    )
+    classified_resume = seed_resume(
+        db_session,
+        user=user,
+        name="Marketing Resume",
+        prompt_key="marketing",
+        classification_key="marketing",
+        is_default=False,
+    )
+    first_job = seed_job(db_session, job_id="auto-classified-1", description="First classified job")
+    second_job = seed_job(db_session, job_id="auto-classified-2", description="Second classified job")
+    settings = app_module.get_or_create_app_settings(db_session)
+    settings.provider_mode = "ollama"
+    settings.provider_name = "ollama"
+    settings.provider_base_url = "http://localhost:11434"
+    settings.provider_model = "test-model"
+    settings.automation_settings = {"auto_process_jobs": True, "resume_strategy": "default_fallback"}
+    run = run_service.enqueue_classification_run(db_session, limit=2, prompt_key="default")
+    settings.automation_state = {automation_service.AUTO_CLASSIFICATION_RUN_STATE_KEY: run.id}
+    for item in db_session.scalars(select(app_module.RunItem).where(app_module.RunItem.run_id == run.id)).all():
+        item.status = "classified"
+    first_job.classification_key = "marketing"
+    second_job.classification_key = "marketing"
+    db_session.commit()
+
+    scoring_run = automation_service.handle_classification_run_completed(db_session, run)
+
+    assert scoring_run is not None
+    assert scoring_run.type == "application_scoring"
+    assert scoring_run.status == "queued"
+    assert scoring_run.selected_count == 2
+    assert settings.automation_state[automation_service.AUTO_LAST_SCORING_RUN_STATE_KEY] == scoring_run.id
+    generated_applications = db_session.scalars(
+        select(JobApplication).where(JobApplication.job_posting_id.in_([first_job.id, second_job.id])).order_by(JobApplication.id.asc())
+    ).all()
+    assert [application.resume_id for application in generated_applications] == [classified_resume.id, classified_resume.id]
+    assert default_resume.id not in [application.resume_id for application in generated_applications]
+    scoring_items = db_session.scalars(
+        select(app_module.RunItem).where(app_module.RunItem.run_id == scoring_run.id).order_by(app_module.RunItem.id.asc())
+    ).all()
+    assert [item.job_posting_id for item in scoring_items] == [first_job.id, second_job.id]
 
 
 def test_application_crud_generate_and_status_flow(db_session):

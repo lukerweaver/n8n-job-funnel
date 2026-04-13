@@ -5,17 +5,127 @@ This repository combines:
 - `job-pipeline-service/`: the FastAPI backend and current source of truth
 - `job-funnel-ui/`: the internal operator UI for applications, runs, statistics, resumes, and prompts
 - `job-scraper-chrome/`: the Chrome extension used to ingest jobs
-- `exports/`: sanitized n8n workflow exports and prompt seed data
+- `exports/`: prompt seed data
 - `docs/`: lightweight architecture artifacts
 
-The active flow is:
+The default flow is:
 
-1. scrape jobs in the browser
-2. ingest them into `job_postings`
-3. classify postings
-4. generate user-owned `job_applications` from matching resumes
-5. score applications
-6. track notifications, lifecycle status, and interview rounds
+1. open the Job Funnel UI
+2. complete first-run onboarding
+3. paste a resume
+4. paste a job description, with an optional job URL
+5. receive a job fit score and recommendation
+6. optionally use advanced automation, the Chrome extension, or external n8n workflows
+
+## Quick Start for Non-Technical Users
+
+This path does not require editing prompts or installing the Chrome extension.
+
+### 1. Install the basics
+
+Install:
+
+- [Git](https://git-scm.com/downloads)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or another Docker runtime
+
+Optional:
+
+- A hosted AI provider API key, such as an OpenAI-compatible API key
+- Ollama, if you prefer to run a local model
+
+### 2. Download the app
+
+From a terminal:
+
+```bash
+git clone https://github.com/lukerweaver/n8n-job-funnel.git
+cd n8n-job-funnel
+```
+
+### 3. Start the app
+
+From the repository root:
+
+```bash
+docker compose -f docker-compose-example.yml up --build -d
+```
+
+This starts:
+
+- Job Funnel UI: `http://localhost:8080`
+- Backend API: `http://localhost:8000`
+- Postgres database: `localhost:5432`
+
+Check that it started:
+
+```bash
+curl http://localhost:8000/health
+```
+
+The expected response is:
+
+```json
+{"ok":true}
+```
+
+### 4. Complete onboarding
+
+Open:
+
+```text
+http://localhost:8080
+```
+
+The first screen asks for:
+
+- Profile name
+- Target roles, used as classification labels
+- Resume text
+- AI provider
+
+Recommended AI provider choices:
+
+- Hosted: choose this if you have an API key. Use an OpenAI-compatible base URL such as `https://api.openai.com/v1`, enter the model, and paste the API key.
+- Local (Ollama): choose this if you already run Ollama. If the backend is running in Docker, the provider URL may need to be `http://host.docker.internal:11434` instead of `http://localhost:11434`.
+- Configure later: choose this to explore the app first. Jobs will be saved, but scoring will wait until an AI provider is configured in Settings.
+
+### 5. Paste a job and get a recommendation
+
+After onboarding:
+
+1. Go to **Paste Job**.
+2. Paste the job description.
+3. Add the job URL, company, and role title if you have them.
+4. Click **Get Recommendation**.
+
+The app saves the job, creates an application record for your default resume, and processes classification/scoring in the background. When the score is ready, the result includes:
+
+- Role classification
+- Job fit score
+- Screening likelihood
+- Recommendation
+- Strengths
+- Gaps
+
+### 6. Optional advanced setup
+
+Advanced users can open **Settings** and enable advanced navigation for:
+
+- AI provider and model details
+- Prompt editing
+- Scoring and automation thresholds
+- Resume strategy for automated scoring
+- Batch runs
+
+The Chrome extension remains optional. Use it only if you want browser-based job capture from LinkedIn or Hiring Cafe.
+
+### Stop the app
+
+From the repository root:
+
+```bash
+docker compose -f docker-compose-example.yml down
+```
 
 ## Deployment Modes
 
@@ -24,37 +134,59 @@ There are now three practical ways to run this project:
 1. Backend only
    Run `job-pipeline-service/` directly or with its local compose file.
 2. Backend + UX + Postgres
-   Run the repository root [`docker-compose-example.yml`](/home/lrw5016/projects/n8n-job-funnel/docker-compose-example.yml).
+   Run the repository root [`docker-compose-example.yml`](docker-compose-example.yml).
 3. Separately deployed UX service
-   Build and deploy [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui) as its own container and point it at a browser-visible API URL.
+   Build and deploy [`job-funnel-ui/`](job-funnel-ui/) as its own container and point it at a browser-visible API URL.
 
 ## Repo Layout
 
 - `job-pipeline-service/` - FastAPI app, SQLAlchemy models, async run worker, tests, Docker assets
 - `job-funnel-ui/` - Vite/React internal UI for scored applications, runs, and run results
 - `job-scraper-chrome/` - unpacked Chrome extension for LinkedIn and Hiring Cafe capture
-- `exports/workflows/` - sanitized n8n workflow exports for callback-driven orchestration
 - `exports/data/` - example prompt library seed data
 - `docs/architecture.mmd` - simple architecture diagram source
 
 ## Current Architecture
 
 ```text
+Job Funnel UI
+    -> first-run onboarding
+        -> users / resumes / app_settings / prompt_library
+    -> paste job description and optional URL
+        -> POST /jobs/paste
+            -> job-pipeline-service
+                -> job_postings
+                -> job_applications
+                -> backend run worker
+                -> classify postings
+                -> score applications with LLM prompts
+                -> return job fit score and recommendation
+
+Optional advanced ingestion:
 LinkedIn / Hiring Cafe
     -> job-scraper-chrome
         -> POST /jobs/ingest
-            -> job-pipeline-service
-                -> job_postings
-                -> classify postings
-                -> generate applications from resumes
-                -> score applications with LLM prompts
-                -> persist lifecycle + notification state
-                -> expose run status to n8n callbacks
+
+Optional advanced processing:
+Runs page
+    -> backend run worker
+    -> classification and scoring batches
+
+Optional advanced orchestration:
+n8n
+    -> owns run sequence when auto_process_jobs is false
+    -> run and callback endpoints
+
+Service-managed automation:
+    -> auto_process_jobs = true
+    -> backend worker queues classification when thresholds are met
+    -> classification completion generates applications by resume_strategy
+    -> backend worker queues scoring for new applications
 ```
 
 ## Backend Overview
 
-The backend lives in [job-pipeline-service/README.md](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/README.md).
+The backend lives in [job-pipeline-service/README.md](job-pipeline-service/README.md).
 
 The current backend centers on these tables:
 
@@ -76,6 +208,9 @@ Two identifier types matter:
 
 High-value route groups:
 
+- Onboarding: `/onboarding/status`, `/onboarding/complete`
+- Settings: `/settings`
+- Paste job: `/jobs/paste`
 - Jobs: `/jobs/ingest`, `/jobs`, `/jobs/{id}`, `/jobs/{id}/classify/run`, `/jobs/classify/run`
 - Runs: `/runs`, `/runs/{run_id}`, `/runs/{run_id}/items`, `/runs/{run_id}/applications`
 - Statistics: `/statistics`
@@ -103,7 +238,7 @@ Database behavior:
 
 - default: SQLite at `job-pipeline-service/data/jobs.db`
 - override: set `DATABASE_URL` to use Postgres or another SQLAlchemy-supported database
-- LLM calls require explicit configuration through either `OLLAMA_BASE_URL` or the generic hosted-provider variables described in [`job-pipeline-service/README.md`](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/README.md).
+- LLM calls require explicit configuration through either `OLLAMA_BASE_URL` or the generic hosted-provider variables described in [`job-pipeline-service/README.md`](job-pipeline-service/README.md).
 
 ### UX only
 
@@ -167,7 +302,7 @@ Published ports:
 
 ### UX service as a standalone container
 
-Build from [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui):
+Build from [`job-funnel-ui/`](job-funnel-ui/):
 
 ```bash
 docker build -t job-funnel-ui:latest .
@@ -201,11 +336,11 @@ Setup:
 4. enable Developer mode
 5. load `job-scraper-chrome/` as an unpacked extension
 
-Details are in [job-scraper-chrome/README.md](/home/lrw5016/projects/n8n-job-funnel/job-scraper-chrome/README.md).
+Details are in [job-scraper-chrome/README.md](job-scraper-chrome/README.md).
 
 ## Internal UI
 
-The internal operator UI lives in [`job-funnel-ui/`](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui). It currently provides:
+The internal operator UI lives in [`job-funnel-ui/`](job-funnel-ui/). It currently provides:
 
 - All Applications, Active Applications, and Historical Applications views
 - run history and run results drill-down
@@ -213,19 +348,29 @@ The internal operator UI lives in [`job-funnel-ui/`](/home/lrw5016/projects/n8n-
 - statistics for job ingest and score distribution
 - resume and prompt library management
 
-Details are in [job-funnel-ui/README.md](/home/lrw5016/projects/n8n-job-funnel/job-funnel-ui/README.md).
+Details are in [job-funnel-ui/README.md](job-funnel-ui/README.md).
+
+## Auto-Processing
+
+By default, the backend service owns the main workflow. When `automation_settings.auto_process_jobs` is true and an AI provider is configured, the worker can:
+
+1. queue classification for unclassified jobs when thresholds are met
+2. generate applications after the classification run completes
+3. queue scoring for the generated new applications
+
+The automated application generation step uses `automation_settings.resume_strategy`:
+
+- `default_fallback`: use resumes matching the classification key, or the default resume if none match
+- `classification_first`: only use resumes matching the classification key
+- `default_only`: only use the default resume
+
+Set `automation_settings.auto_process_jobs` to false when n8n or another orchestrator should own that sequence. In that mode, the service still exposes the run endpoints, but it does not opportunistically queue classification and scoring workflows for you.
 
 ## n8n Workflows
 
-The workflow exports in `exports/workflows/` are sanitized templates. After import, you need to reconfigure:
+Bundled n8n workflow exports are no longer part of the repository. The backend still supports external orchestration for users who want to keep their own n8n flow.
 
-- API base URLs
-- webhook URLs
-- credential IDs
-- recipient addresses
-- any external document or storage IDs
-
-The current intended sequence is:
+When `auto_process_jobs` is false, the intended n8n sequence is:
 
 1. queue `POST /jobs/classify/run`
 2. on callback, run `POST /applications/generate/run`

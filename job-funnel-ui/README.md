@@ -4,7 +4,8 @@ Internal React/Vite UI for the job funnel backend.
 
 Current operator pages:
 
-- `/applications` - All Applications table with detail modal and manual job-posting workflow
+- `/paste-job` - manual job description entry with optional job URL, recommendation polling, and detail modal
+- `/applications` - All Applications table with detail modal
 - `/active-applications` - active lifecycle states with interview visibility
 - `/historical-applications` - applied and terminal-state review
 - `/runs` - run history table plus launch actions for classification and scoring runs
@@ -12,11 +13,12 @@ Current operator pages:
 - `/statistics` - ingest trend table/chart and scored-job distribution
 - `/resumes` - resume inventory with modal-based create/edit flows
 - `/prompts` - prompt library table with modal-based create/edit flows
+- `/settings` - provider, prompt, automation, resume strategy, and n8n handoff settings
 
 ## Requirements
 
 - Node 18+
-- a running FastAPI backend from [`job-pipeline-service/`](/home/lrw5016/projects/n8n-job-funnel/job-pipeline-service/)
+- a running FastAPI backend from [`job-pipeline-service/`](../job-pipeline-service/)
 
 ## Local Run
 
@@ -112,8 +114,22 @@ That is correct for local browser access to the published API port. If you deplo
 - The UI is intentionally server-driven and reads directly from FastAPI list and action endpoints.
 - Filter state is stored in the URL query string so refresh and navigation preserve the current view.
 - Primary list pages follow the pattern `filters -> dense table -> modal detail`.
+- Paste Job is the manual job-entry path. It asks for a job description, with job URL, company, and role as optional context.
 - The Runs page can queue classification and scoring runs directly from the UI.
 - The Statistics page combines lightweight charts with tables rather than a dashboard-card layout.
+
+## Workflow Settings
+
+Settings exposes the automatic processing controls:
+
+- `Auto-process saved jobs`: when on, the backend worker can queue classification, generate applications with the configured resume strategy, and queue scoring.
+- When `Auto-process saved jobs` is off, the backend still exposes the same run endpoints, but n8n or another orchestrator owns the sequence.
+
+The resume strategy options are:
+
+- `Default fallback`
+- `Classification first`
+- `Default only`
 
 ## What the UX Service Does
 

@@ -13,6 +13,7 @@ from services.classification_service import classify_job
 from services.llm_client import build_llm_client
 from services.prompt_service import resolve_active_prompt, resolve_prompt_selector
 from services.scoring_service import JobScoringSkipped, _commit_scoring_progress, score_application
+from services.settings_service import resolve_llm_config
 
 
 def utcnow() -> datetime:
@@ -89,6 +90,7 @@ def enqueue_application_score_run(
                 status="queued",
             )
         )
+    session.flush()
 
     return run
 
@@ -139,6 +141,7 @@ def enqueue_classification_run(
                 status="queued",
             )
         )
+    session.flush()
 
     return run
 
@@ -288,23 +291,15 @@ def _deliver_callback(run_id: int) -> None:
         _commit_scoring_progress(session)
 
 
-def process_next_run() -> bool:
-    with SessionLocal() as session:
-        run = session.scalar(
-            select(Run)
-            .where(Run.status == "queued")
-            .order_by(Run.created_at.asc())
-            .limit(1)
-        )
-        if run is None:
-            return False
+def _claim_run(session, run: Run) -> int:
+    run.status = "running"
+    run.started_at = utcnow()
+    run.last_error = None
+    _commit_scoring_progress(session)
+    return run.id
 
-        run.status = "running"
-        run.started_at = utcnow()
-        run.last_error = None
-        _commit_scoring_progress(session)
-        run_id = run.id
 
+def _execute_run(run_id: int) -> bool:
     with SessionLocal() as session:
         run = session.get(Run, run_id)
         if run is None:
@@ -316,7 +311,7 @@ def process_next_run() -> bool:
                 run.prompt_key,
                 prompt_type="classification" if run.type == "classification" else "scoring",
             )
-            client = build_llm_client()
+            client = build_llm_client(resolve_llm_config(session))
         except Exception as exc:
             _mark_run_failed(session, run, str(exc))
             if run.callback_url:
@@ -401,11 +396,41 @@ def process_next_run() -> bool:
         if run is not None:
             run.status = "completed"
             run.finished_at = utcnow()
+            from services.automation_service import handle_classification_run_completed
+
+            handle_classification_run_completed(session, run)
             _commit_scoring_progress(session)
             if run.callback_url:
                 _deliver_callback(run.id)
 
     return True
+
+
+def process_run(run_id: int) -> bool:
+    with SessionLocal() as session:
+        run = session.get(Run, run_id)
+        if run is None or run.status != "queued":
+            return False
+        claimed_run_id = _claim_run(session, run)
+
+    return _execute_run(claimed_run_id)
+
+
+def process_next_run() -> bool:
+    with SessionLocal() as session:
+        run = session.scalar(
+            select(Run)
+            .where(Run.status == "queued")
+            .order_by(Run.created_at.asc(), Run.id.asc())
+            .limit(1)
+        )
+        if run is None:
+            from services.automation_service import maybe_enqueue_next_service_managed_run
+
+            return maybe_enqueue_next_service_managed_run(session)
+        run_id = _claim_run(session, run)
+
+    return _execute_run(run_id)
 
 
 class RunWorker:

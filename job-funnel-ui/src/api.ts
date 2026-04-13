@@ -8,7 +8,9 @@ import type {
   InterviewRoundListResponse,
   JobApplicationListResponse,
   JobApplication,
-  JobIngestResponse,
+  AppSettings,
+  OnboardingStatusResponse,
+  PasteJobResponse,
   PromptLibrary,
   PromptLibraryListResponse,
   Resume,
@@ -72,6 +74,60 @@ async function sendJson<T>(path: string, method: "POST" | "PUT" | "DELETE", body
 
 export function getApplications(params: URLSearchParams) {
   return fetchJson<JobApplicationListResponse>("/applications", params);
+}
+
+export function getOnboardingStatus() {
+  return fetchJson<OnboardingStatusResponse>("/onboarding/status");
+}
+
+export function completeOnboarding(payload: {
+  profile_name: string;
+  resume_name?: string | null;
+  resume_content: string;
+  target_roles: string[];
+  provider: {
+    provider_mode: "ollama" | "hosted" | "configure_later";
+    provider_name?: string | null;
+    provider_base_url?: string | null;
+    provider_api_key?: string | null;
+    provider_model?: string | null;
+  };
+}) {
+  return sendJson<OnboardingStatusResponse>("/onboarding/complete", "POST", payload);
+}
+
+export function getSettings() {
+  return fetchJson<AppSettings>("/settings");
+}
+
+export function updateSettings(payload: {
+  profile_name?: string | null;
+  target_roles?: string[] | null;
+  provider?: {
+    provider_mode: "ollama" | "hosted" | "configure_later";
+    provider_name?: string | null;
+    provider_base_url?: string | null;
+    provider_api_key?: string | null;
+    provider_model?: string | null;
+  } | null;
+  default_prompt_key?: string | null;
+  scoring_preferences?: Record<string, unknown> | null;
+  automation_settings?: Record<string, unknown> | null;
+  advanced_mode_enabled?: boolean | null;
+}) {
+  return sendJson<AppSettings>("/settings", "PUT", payload);
+}
+
+export function pasteJob(payload: {
+  input_type?: "url" | "description";
+  url?: string | null;
+  description?: string | null;
+  title?: string | null;
+  company_name?: string | null;
+  process_now: boolean;
+  mode?: "async" | "sync";
+}) {
+  return sendJson<PasteJobResponse>("/jobs/paste", "POST", payload);
 }
 
 export function getApplication(applicationId: number) {
@@ -161,17 +217,6 @@ export function deleteInterviewRound(applicationId: number, interviewRoundId: nu
     `/applications/${applicationId}/interview-rounds/${interviewRoundId}`,
     "DELETE",
   );
-}
-
-export function createJobDescription(payload: {
-  job_id: string;
-  company_name?: string | null;
-  title?: string | null;
-  apply_url?: string | null;
-  description: string;
-  source?: string;
-}) {
-  return sendJson<JobIngestResponse>("/jobs/ingest", "POST", payload);
 }
 
 export function getRuns(params: URLSearchParams) {
