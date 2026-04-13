@@ -1,6 +1,6 @@
 body {
   margin: 0;
-  width: 300px;
+  width: 340px;
   font-family: "Segoe UI", Arial, sans-serif;
   color: #111;
 }
@@ -20,6 +20,38 @@ h1 {
   font-size: 12px;
 }
 
+.settings-panel {
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid #dce3e8;
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #bbc7d1;
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 button {
   width: 100%;
   border: 0;
@@ -30,8 +62,22 @@ button {
   cursor: pointer;
 }
 
+.secondary-button {
+  background: #eef3f8;
+  color: #111;
+  border: 1px solid #c8d3dc;
+}
+
 button:disabled {
   background: #999;
+  color: white;
+  border-color: #999;
+  cursor: default;
+}
+
+.status-line {
+  margin: 8px 0 0;
+  min-height: 16px;
 }
 
 .status {

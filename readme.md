@@ -127,6 +127,37 @@ From the repository root:
 docker compose -f docker-compose-example.yml down
 ```
 
+## Quick Start with Claude Code or Codex
+
+Start the app first:
+
+```bash
+docker compose -f docker-compose-example.yml up --build -d
+```
+
+Then check the API:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Claude Code:
+
+1. Open Claude Code in the repository root.
+2. Run `/job-funnel-onboarding` for first-time setup guidance.
+3. Run `/job-funnel-review` for read-only application summaries.
+4. Run `/job-funnel-ingest`, `/job-funnel-process`, or `/job-funnel-status` only when you want the agent to make changes.
+
+Codex:
+
+1. Open Codex in the repository root.
+2. Ask it to use `docs/agent-cli-playbook.md` and the repo guidance in `AGENTS.md`.
+3. For onboarding, ask it to use `.codex/skills/job-funnel-onboarding/SKILL.md`.
+4. For ongoing operations, ask it to use `.codex/skills/job-funnel-operator/SKILL.md`.
+5. If your Codex install does not auto-discover repo-local skills, copy or symlink the relevant folder from `.codex/skills/` into your personal Codex skills directory.
+
+Agent rule of thumb: review is safe by default; ingestion, classification, scoring, status updates, notifications, prompt edits, provider edits, and automation changes should be explicit.
+
 ## Deployment Modes
 
 There are now three practical ways to run this project:
@@ -176,6 +207,10 @@ Optional advanced orchestration:
 n8n
     -> owns run sequence when auto_process_jobs is false
     -> run and callback endpoints
+
+Agent CLI
+    -> uses the API-first workflow in docs/agent-cli-playbook.md
+    -> reviews, ingests, classifies, generates, and scores through HTTP routes
 
 Service-managed automation:
     -> auto_process_jobs = true
@@ -331,12 +366,12 @@ The extension lives in `job-scraper-chrome/`.
 Setup:
 
 1. start the API
-2. update `POST_ENDPOINT` in `job-scraper-chrome/background.js` if needed
-3. open `chrome://extensions`
-4. enable Developer mode
-5. load `job-scraper-chrome/` as an unpacked extension
+2. open `chrome://extensions`
+3. enable Developer mode
+4. load `job-scraper-chrome/` as an unpacked extension
+5. open the extension popup and select Test
 
-Details are in [job-scraper-chrome/README.md](job-scraper-chrome/README.md).
+Details are in [job-scraper-chrome/README.md](job-scraper-chrome/README.md) and [docs/chrome-extension-setup.md](docs/chrome-extension-setup.md).
 
 ## Internal UI
 
@@ -377,6 +412,27 @@ When `auto_process_jobs` is false, the intended n8n sequence is:
 3. queue `POST /applications/score/run`
 4. on callback, fetch `/runs/{run_id}/items`
 5. notify or update downstream systems
+
+## Agent CLI Workflows
+
+Codex, Claude Code, and other terminal agents should use the HTTP API instead of editing the database directly. The recommended prompts, PowerShell examples, and safe run sequence are in [docs/agent-cli-playbook.md](docs/agent-cli-playbook.md).
+
+Claude Code project skills are included under `.claude/skills/`:
+
+- `/job-funnel-onboarding`
+- `/job-funnel-review`
+- `/job-funnel-ingest`
+- `/job-funnel-process`
+- `/job-funnel-status`
+
+Codex should follow the repo-level agent guidance in [AGENTS.md](AGENTS.md) and use the same playbook for API operations.
+
+Portable Codex skills are included under `.codex/skills/`:
+
+- `job-funnel-onboarding`
+- `job-funnel-operator`
+
+If your Codex install does not auto-discover repo-local skills, copy or symlink the relevant folder into your personal Codex skills directory.
 
 ## Testing
 

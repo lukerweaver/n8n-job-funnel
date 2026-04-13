@@ -42,3 +42,12 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
   `/paste-job`, `/applications`, `/runs`, `/runs/{run_id}/applications`, `/resumes`, `/prompt-library`, and `/settings`.
 - Keep service-managed workflow orchestration explicit. `job-pipeline-service/services/automation_service.py` owns automatic classification-to-scoring workflow decisions; `run_service.py` should stay focused on run enqueueing and execution.
 - Preserve external/n8n orchestration support by honoring `automation_settings.auto_process_jobs == false` when changing automation behavior.
+
+## Agent operation
+- When operating a running Job Funnel instance with Codex or another agent CLI, use the HTTP API documented in `docs/agent-cli-playbook.md`; do not edit the database directly.
+- Start operational sessions with `GET /health` and `GET /settings`.
+- Treat review/listing workflows as read-only unless the user explicitly asks for ingestion, classification, scoring, status updates, or settings changes.
+- Ask before changing application statuses, lifecycle dates, interview rounds, notification state, prompts, provider settings, or automation settings.
+- If an external agent owns classification/generation/scoring, set or confirm `automation_settings.auto_process_jobs == false` before queueing runs so the service worker and agent do not compete.
+- Claude Code project skills live under `.claude/skills/` and point at the same playbook. Keep those skills thin wrappers over `docs/agent-cli-playbook.md` rather than duplicating full API examples.
+- Portable Codex skills live at `.codex/skills/job-funnel-onboarding/SKILL.md` and `.codex/skills/job-funnel-operator/SKILL.md`; keep them aligned with this section and the playbook when agent workflows change.

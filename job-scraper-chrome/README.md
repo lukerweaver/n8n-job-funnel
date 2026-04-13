@@ -20,25 +20,25 @@ The extension does more than a manual LinkedIn scrape:
 
 ## Endpoint configuration
 
-Edit `POST_ENDPOINT` in `background.js`:
-
-```js
-const POST_ENDPOINT = 'http://localhost:8000/jobs/ingest';
-```
-
 By default the extension posts to a local API on port `8000`.
 
 If you run the stack with the repository root `docker-compose-example.yml`, the API remains available at `http://localhost:8000` and the internal UI is available at `http://localhost:8080`.
 
 The extension only talks to the API. It does not depend on the UX service directly.
 
+To change the API target, open the extension popup and update App API URL. Enter the API base URL, for example `http://127.0.0.1:8000`, not the `/jobs/ingest` route. Select Test to verify the extension can reach `/health`.
+
 ## Setup
 
 1. Start the API.
-2. If needed, update `POST_ENDPOINT` in `background.js`.
-3. Open `chrome://extensions`.
-4. Enable Developer mode.
-5. Load the `job-scraper-chrome/` folder as an unpacked extension.
+2. Open `chrome://extensions`.
+3. Enable Developer mode.
+4. Load the `job-scraper-chrome/` folder as an unpacked extension.
+5. Open the extension popup.
+6. Confirm App API URL is `http://localhost:8000`, or enter the API URL you are using.
+7. Select Test.
+
+For a user-facing walkthrough, see `../docs/chrome-extension-setup.md`.
 
 ## Testing
 
@@ -99,9 +99,10 @@ The manifest currently includes:
 
 - LinkedIn host permissions
 - Hiring Cafe host permissions
+- local API host permissions for `http://localhost:8000/*` and `http://127.0.0.1:8000/*`
 - a placeholder host permission for `https://your-endpoint.example.com/*`
 
-If your API is not local, update both the endpoint in `background.js` and the relevant host permissions in `manifest.json`.
+If your API is not local, update the API URL in the popup and add the relevant host permission in `manifest.json`.
 
 ## Notes
 
