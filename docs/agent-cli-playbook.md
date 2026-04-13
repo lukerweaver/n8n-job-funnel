@@ -4,6 +4,24 @@ Use this guide when operating Job Funnel from an agent CLI such as Codex, Claude
 
 The safest pattern is API-first: call the FastAPI service on `http://localhost:8000`, avoid direct database edits, and ask before bulk actions that change application state or send notifications.
 
+## Tool Entry Points
+
+Codex:
+
+- Read `AGENTS.md` for repo-wide operating rules.
+- Use this playbook for HTTP API workflows.
+- Prefer the read-only review flow unless the user explicitly asks for writes.
+- A portable Codex skill is included at `.codex/skills/job-funnel-operator/SKILL.md`. If your Codex install does not auto-discover repo-local skills, copy or symlink that folder into your personal Codex skills directory.
+
+Claude Code:
+
+- Project skills live under `.claude/skills/`.
+- Invoke `/job-funnel-review` for read-only application summaries.
+- Invoke `/job-funnel-ingest` to add pasted or normalized jobs.
+- Invoke `/job-funnel-process` to run classification, application generation, and scoring.
+- Invoke `/job-funnel-status` to update application status, lifecycle notes, or interview rounds.
+- The write-oriented skills are intentionally manual-invocation workflows.
+
 ## Operator Rules
 
 - Start with `GET /health`.

@@ -386,6 +386,17 @@ When `auto_process_jobs` is false, the intended n8n sequence is:
 
 Codex, Claude Code, and other terminal agents should use the HTTP API instead of editing the database directly. The recommended prompts, PowerShell examples, and safe run sequence are in [docs/agent-cli-playbook.md](docs/agent-cli-playbook.md).
 
+Claude Code project skills are included under `.claude/skills/`:
+
+- `/job-funnel-review`
+- `/job-funnel-ingest`
+- `/job-funnel-process`
+- `/job-funnel-status`
+
+Codex should follow the repo-level agent guidance in [AGENTS.md](AGENTS.md) and use the same playbook for API operations.
+
+A portable Codex skill is included at `.codex/skills/job-funnel-operator/SKILL.md`. If your Codex install does not auto-discover repo-local skills, copy or symlink that folder into your personal Codex skills directory.
+
 ## Testing
 
 Backend:
