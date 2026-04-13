@@ -14,6 +14,8 @@ class JobIngestItem(BaseModel):
     yearly_max_compensation: float | None = None
     apply_url: str | None = None
     description: str | None = None
+    posted_at: datetime | None = None
+    posted_at_raw: str | None = None
     source: str = "job-scraper-chrome"
     raw_payload: dict[str, Any] | list[Any] | None = None
 
@@ -112,6 +114,8 @@ class JobRead(BaseModel):
     yearly_max_compensation: float | None
     apply_url: str | None
     description: str | None
+    posted_at: datetime | None
+    posted_at_raw: str | None
     classification_key: str | None
     classification_prompt_version: int | None
     classification_error: str | None
@@ -188,6 +192,8 @@ class RunApplicationRead(BaseModel):
     apply_url: str | None = None
     yearly_min_compensation: float | None = None
     yearly_max_compensation: float | None = None
+    posted_at: datetime | None = None
+    posted_at_raw: str | None = None
     recommendation: str | None = None
     resume_name: str | None = None
     classified_at: datetime | None = None
@@ -464,6 +470,8 @@ class JobApplicationRead(BaseModel):
     yearly_max_compensation: float | None = None
     apply_url: str | None = None
     description: str | None = None
+    posted_at: datetime | None = None
+    posted_at_raw: str | None = None
     classification_key: str | None = None
     resume_name: str | None = None
     status: str

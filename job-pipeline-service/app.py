@@ -179,7 +179,20 @@ def apply_job_updates(job: JobPosting, payload: JobIngestItem) -> None:
     job.yearly_max_compensation = payload.yearly_max_compensation
     job.apply_url = payload.apply_url
     job.description = payload.description
+    job.posted_at = payload.posted_at
+    job.posted_at_raw = payload.posted_at_raw
     job.raw_payload = payload.raw_payload
+
+
+def backfill_job_posted_metadata(job: JobPosting, payload: JobIngestItem) -> bool:
+    changed = False
+    if job.posted_at is None and payload.posted_at is not None:
+        job.posted_at = payload.posted_at
+        changed = True
+    if job.posted_at_raw is None and payload.posted_at_raw:
+        job.posted_at_raw = payload.posted_at_raw
+        changed = True
+    return changed
 
 
 def _get_job_by_id(session: Session, job_pk: int) -> JobPosting | None:
@@ -477,6 +490,8 @@ def _serialize_application(application: JobApplication) -> JobApplicationRead:
         yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
         apply_url=job.apply_url if job is not None else None,
         description=job.description if job is not None else None,
+        posted_at=job.posted_at if job is not None else None,
+        posted_at_raw=job.posted_at_raw if job is not None else None,
         classification_key=job.classification_key if job is not None else None,
         resume_name=resume.name if resume is not None else None,
         status=application.status,
@@ -805,6 +820,8 @@ def ensure_job_postings_schema() -> None:
         "classification_error": "TEXT",
         "classification_raw_response": "TEXT",
         "classified_at": "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME",
+        "posted_at": "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "DATETIME",
+        "posted_at_raw": "TEXT",
     }
 
     statements = [
@@ -1307,7 +1324,10 @@ def ingest_jobs(
             job_ids.append(item.job_id)
             continue
 
-        skipped += 1
+        if backfill_job_posted_metadata(job, item):
+            updated += 1
+        else:
+            skipped += 1
 
     _commit_or_fail(session)
 
@@ -1556,6 +1576,8 @@ def list_run_applications(
                 apply_url=job.apply_url if job is not None else None,
                 yearly_min_compensation=job.yearly_min_compensation if job is not None else None,
                 yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
+                posted_at=job.posted_at if job is not None else None,
+                posted_at_raw=job.posted_at_raw if job is not None else None,
                 recommendation=application.recommendation if application is not None else None,
                 resume_name=resume.name if resume is not None else None,
                 classified_at=job.classified_at if job is not None else None,

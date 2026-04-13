@@ -66,6 +66,7 @@ The tests use `jsdom` and small script-evaluation helpers rather than a bundler 
 
 - Designed for LinkedIn job pages
 - Extracts company, title, description, compensation hints, and apply URL
+- Extracts posted date metadata when the page/API exposes it in a recognizable field
 - Uses the current page URL to derive a stable external `job_id`
 - Auto-sends when the LinkedIn job page changes or re-renders, with duplicate suppression to avoid rapid re-posts
 
@@ -80,6 +81,8 @@ Example normalized payload:
   "yearly_max_compensation": 180000,
   "apply_url": "https://example.com/jobs/123",
   "description": "Full job description",
+  "posted_at": "2026-04-10T00:00:00.000Z",
+  "posted_at_raw": "3 days ago",
   "source": "linkedin",
   "source_url": "https://www.linkedin.com/jobs/view/1234567890/"
 }

@@ -682,6 +682,10 @@ export function ApplicationDetailModal({
                 <dt>Applied At</dt>
                 <dd>{formatDateOnly(application.applied_at)}</dd>
               </div>
+              <div>
+                <dt>Posted At</dt>
+                <dd>{application.posted_at ? formatDateOnly(application.posted_at) : application.posted_at_raw ?? "N/A"}</dd>
+              </div>
             </dl>
             <div className="detail-actions">
               <button type="button" className="action-button" onClick={handleRescore} disabled={rescoring}>
