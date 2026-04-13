@@ -2698,6 +2698,46 @@ def test_ensure_prompt_library_and_resumes_schema_branches(monkeypatch):
     assert any("ALTER TABLE run_items ADD COLUMN job_application_id INTEGER" in statement for statement in run_executed)
 
 
+def test_ensure_prompt_library_schema_replaces_legacy_unique_constraint(monkeypatch):
+    executed = []
+
+    class FakeConnection:
+        def execute(self, statement):
+            executed.append(statement)
+
+    class FakeBegin:
+        def __enter__(self):
+            return FakeConnection()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeInspector:
+        def get_columns(self, _table):
+            return [
+                {"name": "prompt_type"},
+                {"name": "context"},
+                {"name": "max_tokens"},
+                {"name": "temperature"},
+                {"name": "created_at"},
+                {"name": "updated_at"},
+            ]
+
+        def get_unique_constraints(self, _table):
+            return [{"name": "uq_prompt_library_key_version"}]
+
+    fake_engine = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    monkeypatch.setattr(app_module, "engine", fake_engine)
+    monkeypatch.setattr(app_module, "text", lambda statement: statement)
+    monkeypatch.setattr(app_module, "inspect", lambda _engine: FakeInspector())
+    monkeypatch.setattr(fake_engine, "begin", lambda: FakeBegin(), raising=False)
+
+    app_module.ensure_prompt_library_schema()
+
+    assert any("DROP CONSTRAINT IF EXISTS uq_prompt_library_key_version" in statement for statement in executed)
+    assert any("ADD CONSTRAINT uq_prompt_library_key_version_type" in statement for statement in executed)
+
+
 def test_ensure_application_schema_branches(monkeypatch):
     executed = []
 
