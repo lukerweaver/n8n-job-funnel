@@ -124,16 +124,13 @@ export function ResumesPage() {
       return;
     }
     if (isCreating) {
-      setForm({
-        ...EMPTY_FORM,
-        user_id: settings?.default_user_id ? String(settings.default_user_id) : EMPTY_FORM.user_id,
-      });
+      setForm(EMPTY_FORM);
       setSubmitError(null);
       return;
     }
     setForm(EMPTY_FORM);
     setSubmitError(null);
-  }, [editing, isCreating, settings?.default_user_id]);
+  }, [editing, isCreating]);
 
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(params);
