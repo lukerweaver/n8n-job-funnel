@@ -93,6 +93,10 @@ export function RunResultsPage() {
   const limit = Number(params.get("limit") ?? String(DEFAULT_LIMIT));
   const offset = Number(params.get("offset") ?? "0");
   const selectedIndex = selected ? data.findIndex((item) => item.run_item_id === selected.run_item_id) : -1;
+  const previousApplication =
+    selectedIndex > 0 ? data.slice(0, selectedIndex).reverse().find((item) => item.job_application_id !== null) ?? null : null;
+  const nextApplication =
+    selectedIndex >= 0 ? data.slice(selectedIndex + 1).find((item) => item.job_application_id !== null) ?? null : null;
 
   useEffect(() => {
     if (!selected) {
@@ -103,17 +107,17 @@ export function RunResultsPage() {
       if (event.key === "Escape") {
         setSelected(null);
       }
-      if (event.key === "ArrowLeft" && selectedIndex > 0) {
-        setSelected(data[selectedIndex - 1]);
+      if (event.key === "ArrowLeft" && previousApplication) {
+        setSelected(previousApplication);
       }
-      if (event.key === "ArrowRight" && selectedIndex >= 0 && selectedIndex < data.length - 1) {
-        setSelected(data[selectedIndex + 1]);
+      if (event.key === "ArrowRight" && nextApplication) {
+        setSelected(nextApplication);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [data, selected, selectedIndex]);
+  }, [nextApplication, previousApplication, selected]);
 
   return (
     <section className="page-grid">
@@ -274,10 +278,18 @@ export function RunResultsPage() {
           fallbackTitle={selected.title ?? "Untitled role"}
           fallbackSubtitle={`Run item #${selected.run_item_id} · ${selected.company_name ?? "Unknown company"}`}
           onClose={() => setSelected(null)}
-          onPrevious={() => setSelected(data[selectedIndex - 1])}
-          onNext={() => setSelected(data[selectedIndex + 1])}
-          previousDisabled={selectedIndex <= 0}
-          nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
+          onPrevious={() => {
+            if (previousApplication) {
+              setSelected(previousApplication);
+            }
+          }}
+          onNext={() => {
+            if (nextApplication) {
+              setSelected(nextApplication);
+            }
+          }}
+          previousDisabled={!previousApplication}
+          nextDisabled={!nextApplication}
         />
       ) : null}
     </section>
