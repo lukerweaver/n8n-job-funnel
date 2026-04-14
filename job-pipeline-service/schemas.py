@@ -175,20 +175,22 @@ class RunApplicationRead(BaseModel):
     run_item_id: int
     run_item_status: str
     run_item_error_message: str | None = None
-    job_application_id: int
-    job_posting_id: int
-    resume_id: int
+    job_application_id: int | None = None
+    job_posting_id: int | None = None
+    resume_id: int | None = None
     job_id: str | None = None
     company_name: str | None = None
     title: str | None = None
     score: float | None = None
     screening_likelihood: float | None = None
     classification_key: str | None = None
+    classification_error: str | None = None
     apply_url: str | None = None
     yearly_min_compensation: float | None = None
     yearly_max_compensation: float | None = None
     recommendation: str | None = None
     resume_name: str | None = None
+    classified_at: datetime | None = None
     scored_at: datetime | None = None
 
 

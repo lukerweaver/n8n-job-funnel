@@ -24,7 +24,7 @@ export function RunResultsPage() {
       next.set("limit", String(DEFAULT_LIMIT));
     }
     if (!next.get("sort_by")) {
-      next.set("sort_by", "score");
+      next.set("sort_by", "created_at");
     }
     if (!next.get("sort_order")) {
       next.set("sort_order", "desc");
@@ -84,7 +84,7 @@ export function RunResultsPage() {
   function clearFilters() {
     setSearchParams({
       limit: String(DEFAULT_LIMIT),
-      sort_by: "score",
+      sort_by: "created_at",
       sort_order: "desc",
       offset: "0",
     });
@@ -128,7 +128,7 @@ export function RunResultsPage() {
             {runId ? `Run #${runId}` : ""}
           </p>
         </div>
-        <div className="stat-chip">{total} application-linked rows</div>
+        <div className="stat-chip">{total} run items</div>
       </div>
 
       <div className="panel filter-panel">
@@ -171,13 +171,15 @@ export function RunResultsPage() {
 
           <label>
             Sort By
-            <select value={params.get("sort_by") ?? "score"} onChange={(event) => updateParam("sort_by", event.target.value)}>
+            <select value={params.get("sort_by") ?? "created_at"} onChange={(event) => updateParam("sort_by", event.target.value)}>
               <option value="score">Score</option>
               <option value="screening_likelihood">Screening Likelihood</option>
               <option value="company_name">Company</option>
               <option value="title">Title</option>
               <option value="classification_key">Classification</option>
+              <option value="classified_at">Classified At</option>
               <option value="scored_at">Scored At</option>
+              <option value="created_at">Run Item Created</option>
             </select>
           </label>
 
@@ -210,7 +212,7 @@ export function RunResultsPage() {
         {loading ? <p className="state-message">Loading run results...</p> : null}
         {error ? <p className="state-message error-message">{error}</p> : null}
         {!loading && !error && data.length === 0 ? (
-          <p className="state-message">This run has no scored applications to display for the current filters.</p>
+          <p className="state-message">This run has no items to display for the current filters.</p>
         ) : null}
 
         {!loading && !error && data.length > 0 ? (
@@ -225,12 +227,21 @@ export function RunResultsPage() {
                   <th>Classification</th>
                   <th>Resume</th>
                   <th>Run Item</th>
+                  <th>Issue</th>
                   <th>Compensation</th>
                 </tr>
               </thead>
               <tbody>
                 {data.map((item) => (
-                  <tr key={item.run_item_id} onClick={() => setSelected(item)}>
+                  <tr
+                    key={item.run_item_id}
+                    className={item.job_application_id === null ? "noninteractive-row" : undefined}
+                    onClick={() => {
+                      if (item.job_application_id !== null) {
+                        setSelected(item);
+                      }
+                    }}
+                  >
                     <td>{item.company_name ?? "Unknown"}</td>
                     <td>{item.title ?? "Untitled role"}</td>
                     <td>{item.score ?? "N/A"}</td>
@@ -240,6 +251,7 @@ export function RunResultsPage() {
                     <td>
                       <span className={`status-pill status-${item.run_item_status}`}>{item.run_item_status}</span>
                     </td>
+                    <td>{item.run_item_error_message ?? item.classification_error ?? "N/A"}</td>
                     <td>{moneyRange(item.yearly_min_compensation, item.yearly_max_compensation)}</td>
                   </tr>
                 ))}
@@ -256,7 +268,7 @@ export function RunResultsPage() {
         ) : null}
       </div>
 
-      {selected ? (
+      {selected && selected.job_application_id !== null ? (
         <ApplicationDetailModal
           applicationId={selected.job_application_id}
           fallbackTitle={selected.title ?? "Untitled role"}

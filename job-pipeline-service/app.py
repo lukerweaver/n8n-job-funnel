@@ -765,6 +765,7 @@ def _resolve_run_application_sort(
         "company_name": JobPosting.company_name,
         "title": JobPosting.title,
         "classification_key": JobPosting.classification_key,
+        "classified_at": JobPosting.classified_at,
         "scored_at": JobApplication.scored_at,
         "created_at": RunItem.created_at,
     }
@@ -1506,18 +1507,21 @@ def list_run_applications(
     secondary_order = asc(RunItem.id) if sort_order.lower() == "asc" else desc(RunItem.id)
     query = (
         select(RunItem, JobApplication, JobPosting, Resume)
-        .join(JobApplication, RunItem.job_application_id == JobApplication.id)
-        .join(JobPosting, JobApplication.job_posting_id == JobPosting.id)
-        .join(Resume, JobApplication.resume_id == Resume.id)
+        .outerjoin(JobApplication, RunItem.job_application_id == JobApplication.id)
+        .outerjoin(
+            JobPosting,
+            or_(RunItem.job_posting_id == JobPosting.id, JobApplication.job_posting_id == JobPosting.id),
+        )
+        .outerjoin(Resume, JobApplication.resume_id == Resume.id)
         .where(RunItem.run_id == run_id)
-        .where(JobApplication.status.not_in(HIDDEN_APPLICATION_STATUSES))
+        .where(or_(JobApplication.id.is_(None), JobApplication.status.not_in(HIDDEN_APPLICATION_STATUSES)))
         .order_by(order_by, secondary_order)
     )
     count_query = (
         select(RunItem.id)
-        .join(JobApplication, RunItem.job_application_id == JobApplication.id)
+        .outerjoin(JobApplication, RunItem.job_application_id == JobApplication.id)
         .where(RunItem.run_id == run_id)
-        .where(JobApplication.status.not_in(HIDDEN_APPLICATION_STATUSES))
+        .where(or_(JobApplication.id.is_(None), JobApplication.status.not_in(HIDDEN_APPLICATION_STATUSES)))
     )
 
     if run_item_status:
@@ -1539,21 +1543,23 @@ def list_run_applications(
                 run_item_id=item.id,
                 run_item_status=item.status,
                 run_item_error_message=item.error_message,
-                job_application_id=application.id,
-                job_posting_id=job.id,
-                resume_id=resume.id,
-                job_id=job.job_id,
-                company_name=job.company_name,
-                title=job.title,
-                score=application.score,
-                screening_likelihood=application.screening_likelihood,
-                classification_key=job.classification_key,
-                apply_url=job.apply_url,
-                yearly_min_compensation=job.yearly_min_compensation,
-                yearly_max_compensation=job.yearly_max_compensation,
-                recommendation=application.recommendation,
-                resume_name=resume.name,
-                scored_at=application.scored_at,
+                job_application_id=application.id if application is not None else None,
+                job_posting_id=job.id if job is not None else None,
+                resume_id=resume.id if resume is not None else None,
+                job_id=job.job_id if job is not None else None,
+                company_name=job.company_name if job is not None else None,
+                title=job.title if job is not None else None,
+                score=application.score if application is not None else None,
+                screening_likelihood=application.screening_likelihood if application is not None else None,
+                classification_key=job.classification_key if job is not None else None,
+                classification_error=job.classification_error if job is not None else None,
+                apply_url=job.apply_url if job is not None else None,
+                yearly_min_compensation=job.yearly_min_compensation if job is not None else None,
+                yearly_max_compensation=job.yearly_max_compensation if job is not None else None,
+                recommendation=application.recommendation if application is not None else None,
+                resume_name=resume.name if resume is not None else None,
+                classified_at=job.classified_at if job is not None else None,
+                scored_at=application.scored_at if application is not None else None,
             )
             for item, application, job, resume in rows
         ],
