@@ -6,7 +6,7 @@ API-first: it calls HTTP routes and never edits the database directly.
 
 ## Scope
 
-Phase 1 is read-only. It supports:
+Phase 1 read-only tools:
 
 - `health_check`
 - `get_settings`
@@ -19,9 +19,24 @@ Phase 1 is read-only. It supports:
 - `list_run_items`
 - `list_run_applications`
 
+Phase 2 guarded write tools:
+
+- `ingest_job`
+- `paste_job`
+- `queue_classification_run`
+- `queue_application_generation_run`
+- `queue_scoring_run`
+- `mark_application_status`
+- `mark_application_rejected_from_email`
+- `add_interview_round`
+
 `find_applications_for_email_signal` is designed for workflows where another
 agent tool, such as Gmail, finds an application-related email and needs candidate
-Job Funnel records. It does not update statuses.
+Job Funnel records.
+
+`mark_application_rejected_from_email` is the paired status update helper for
+that workflow. It requires an explicit `application_id`, email evidence fields,
+and `confirm_write=true`.
 
 ## Setup
 
@@ -64,5 +79,27 @@ JSON-RPC messages.
 - Keep list responses compact by default. Full job descriptions are available
   through `get_application` or by explicitly requesting descriptions.
 - Treat email-derived matches as candidates unless exactly one record is found.
-- Add write tools separately, with explicit approval semantics, after the
-  read-only MCP server has been validated.
+- Write tools require `confirm_write=true`.
+- Tools that accept `force=true` also require `confirm_force=true`.
+- Agent-owned processing tools check `automation_settings.auto_process_jobs`.
+  If service-managed automation is enabled, they return a blocked response
+  unless `acknowledge_service_automation=true` is supplied.
+- `paste_job` defaults to `process_now=false`.
+- Status update tools require notes. `mark_application_rejected_from_email`
+  stores a concise evidence note with sender, subject, and received timestamp.
+- Provider settings, prompt-library writes, notification sends, and database
+  access are intentionally not exposed by this MCP server.
+
+## Rejection Email Workflow
+
+When an agent with Gmail access sees a rejection email:
+
+1. Call `find_applications_for_email_signal` with company/title/email-derived
+   search terms.
+2. If multiple candidates are returned, ask the user to choose the application.
+3. Call `mark_application_rejected_from_email` with the chosen `application_id`,
+   `email_from`, `email_subject`, `email_received_at`, optional notes, and
+   `confirm_write=true`.
+
+Do not store full email bodies unless the user explicitly asks for that in a
+future workflow.

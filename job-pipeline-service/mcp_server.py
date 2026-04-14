@@ -25,6 +25,10 @@ class JobFunnelApiError(RuntimeError):
     pass
 
 
+class JobFunnelSafetyError(RuntimeError):
+    pass
+
+
 def _tool(*args: Any, **kwargs: Any):
     if mcp is None:
         def decorator(func):
@@ -113,6 +117,64 @@ async def api_get(path: str, params: dict[str, Any] | None = None) -> dict[str, 
             f"Job Funnel API GET {path} failed with status {response.status_code}: {response.text}"
         ) from exc
     return response.json()
+
+
+async def api_post(path: str, payload: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(api_url(path), json=payload)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise JobFunnelApiError(
+            f"Job Funnel API POST {path} failed with status {response.status_code}: {response.text}"
+        ) from exc
+    return response.json()
+
+
+def require_write_confirmation(action: str, confirm_write: bool) -> None:
+    if not confirm_write:
+        raise JobFunnelSafetyError(f"{action} changes Job Funnel data. Pass confirm_write=true to proceed.")
+
+
+def require_force_confirmation(force: bool, confirm_force: bool) -> None:
+    if force and not confirm_force:
+        raise JobFunnelSafetyError("force=true can reprocess existing work. Pass confirm_force=true to proceed.")
+
+
+async def check_agent_processing_guard(acknowledge_service_automation: bool) -> dict[str, Any] | None:
+    settings = await get_settings()
+    automation_settings = settings.get("automation_settings") or {}
+    auto_process_jobs = automation_settings.get("auto_process_jobs")
+    if auto_process_jobs is True and not acknowledge_service_automation:
+        return {
+            "blocked": True,
+            "reason": "automation_settings.auto_process_jobs is true; service-managed automation may compete with an agent-owned run sequence.",
+            "required_action": "Set auto_process_jobs=false through the Job Funnel UI/API, or pass acknowledge_service_automation=true if this run is intentional.",
+            "automation_settings": automation_settings,
+        }
+    return None
+
+
+def compact_run_response(response: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": response.get("run_id"),
+        "type": response.get("type"),
+        "status": response.get("status"),
+        "selected": response.get("selected"),
+        "processed": response.get("processed"),
+        "created": response.get("created"),
+        "classified": response.get("classified"),
+        "scored": response.get("scored"),
+        "errored": response.get("errored"),
+        "skipped": response.get("skipped"),
+        "jobs": response.get("jobs"),
+        "applications": response.get("applications"),
+        "callback_url": response.get("callback_url"),
+        "created_at": response.get("created_at"),
+        "started_at": response.get("started_at"),
+        "finished_at": response.get("finished_at"),
+        "last_error": response.get("last_error"),
+    }
 
 
 @_tool()
@@ -284,6 +346,240 @@ async def list_run_applications(
         offset=offset,
     )
     return await api_get(f"/runs/{run_id}/applications", params=params)
+
+
+@_tool()
+async def ingest_job(
+    job_id: str,
+    company_name: str | None = None,
+    title: str | None = None,
+    yearly_min_compensation: float | None = None,
+    yearly_max_compensation: float | None = None,
+    apply_url: str | None = None,
+    description: str | None = None,
+    source: str = "agent_mcp",
+    confirm_write: bool = False,
+) -> dict[str, Any]:
+    """Ingest one normalized job posting. This writes data and requires confirm_write=true."""
+    require_write_confirmation("ingest_job", confirm_write)
+    payload = build_query(
+        job_id=job_id,
+        company_name=company_name,
+        title=title,
+        yearly_min_compensation=yearly_min_compensation,
+        yearly_max_compensation=yearly_max_compensation,
+        apply_url=apply_url,
+        description=description,
+        source=source,
+    )
+    return await api_post("/jobs/ingest", payload)
+
+
+@_tool()
+async def paste_job(
+    description: str,
+    url: str | None = None,
+    company_name: str | None = None,
+    title: str | None = None,
+    user_id: int | None = None,
+    process_now: bool = False,
+    mode: str = "async",
+    confirm_write: bool = False,
+) -> dict[str, Any]:
+    """Paste a job description into Job Funnel. Defaults to process_now=false and requires confirm_write=true."""
+    require_write_confirmation("paste_job", confirm_write)
+    payload = build_query(
+        input_type="description",
+        url=url,
+        description=description,
+        title=title,
+        company_name=company_name,
+        user_id=user_id,
+        process_now=process_now,
+        mode=mode,
+    )
+    return await api_post("/jobs/paste", payload)
+
+
+@_tool()
+async def queue_classification_run(
+    limit: int = 25,
+    source: str | None = None,
+    classification_key: str | None = None,
+    prompt_key: str | None = None,
+    force: bool = False,
+    callback_url: str | None = None,
+    confirm_write: bool = False,
+    confirm_force: bool = False,
+    acknowledge_service_automation: bool = False,
+) -> dict[str, Any]:
+    """Queue an async classification run. This writes run data and may compete with service automation."""
+    require_write_confirmation("queue_classification_run", confirm_write)
+    require_force_confirmation(force, confirm_force)
+    blocked = await check_agent_processing_guard(acknowledge_service_automation)
+    if blocked is not None:
+        return blocked
+    payload = build_query(
+        limit=limit,
+        source=source,
+        classification_key=classification_key,
+        prompt_key=prompt_key,
+        force=force,
+        callback_url=callback_url,
+    )
+    return compact_run_response(await api_post("/jobs/classify/run", payload))
+
+
+@_tool()
+async def queue_application_generation_run(
+    user_id: int,
+    limit: int = 100,
+    resume_strategy: str = "default_fallback",
+    confirm_write: bool = False,
+    acknowledge_service_automation: bool = False,
+) -> dict[str, Any]:
+    """Generate missing applications across classified jobs. This writes application data."""
+    require_write_confirmation("queue_application_generation_run", confirm_write)
+    blocked = await check_agent_processing_guard(acknowledge_service_automation)
+    if blocked is not None:
+        return blocked
+    payload = {
+        "user_id": user_id,
+        "limit": limit,
+        "resume_strategy": resume_strategy,
+    }
+    return compact_run_response(await api_post("/applications/generate/run", payload))
+
+
+@_tool()
+async def queue_scoring_run(
+    limit: int = 25,
+    status: str = "new",
+    user_id: int | None = None,
+    resume_id: int | None = None,
+    job_posting_id: int | None = None,
+    classification_key: str | None = None,
+    prompt_key: str | None = None,
+    force: bool = False,
+    callback_url: str | None = None,
+    confirm_write: bool = False,
+    confirm_force: bool = False,
+    acknowledge_service_automation: bool = False,
+) -> dict[str, Any]:
+    """Queue an async scoring run. This writes run data and may compete with service automation."""
+    require_write_confirmation("queue_scoring_run", confirm_write)
+    require_force_confirmation(force, confirm_force)
+    blocked = await check_agent_processing_guard(acknowledge_service_automation)
+    if blocked is not None:
+        return blocked
+    payload = build_query(
+        limit=limit,
+        status=status,
+        user_id=user_id,
+        resume_id=resume_id,
+        job_posting_id=job_posting_id,
+        classification_key=classification_key,
+        prompt_key=prompt_key,
+        force=force,
+        callback_url=callback_url,
+    )
+    return compact_run_response(await api_post("/applications/score/run", payload))
+
+
+@_tool()
+async def mark_application_status(
+    application_id: int,
+    status: str,
+    notes: str,
+    effective_at: str | None = None,
+    confirm_write: bool = False,
+) -> dict[str, Any]:
+    """Update an application status with notes. Terminal statuses require evidence-style notes."""
+    require_write_confirmation("mark_application_status", confirm_write)
+    if not notes.strip():
+        raise JobFunnelSafetyError("notes are required when changing application status.")
+    timestamp_field_by_status = {
+        "applied": "applied_at",
+        "screening": "screening_at",
+        "offer": "offer_at",
+        "rejected": "rejected_at",
+        "ghosted": "ghosted_at",
+        "withdrawn": "withdrawn_at",
+        "pass": "passed_at",
+    }
+    notes_field_by_status = {
+        "applied": "applied_notes",
+        "screening": "screening_notes",
+        "offer": "offer_notes",
+        "rejected": "rejected_notes",
+        "ghosted": "ghosted_notes",
+        "withdrawn": "withdrawn_notes",
+        "pass": "passed_notes",
+    }
+    if status not in notes_field_by_status:
+        raise JobFunnelSafetyError(f"Unsupported status '{status}' for MCP status updates.")
+    current_application = await get_application(application_id, include_description=False)
+    payload: dict[str, Any] = {
+        "status": status,
+        notes_field_by_status[status]: notes,
+    }
+    if effective_at is not None:
+        payload[timestamp_field_by_status[status]] = effective_at
+    updated = await api_post(f"/applications/{application_id}/status", payload)
+    return {
+        "previous_status": current_application.get("status"),
+        "application": compact_application(updated, include_description=False),
+    }
+
+
+@_tool()
+async def mark_application_rejected_from_email(
+    application_id: int,
+    email_from: str,
+    email_subject: str,
+    email_received_at: str,
+    notes: str | None = None,
+    confirm_write: bool = False,
+) -> dict[str, Any]:
+    """Mark an application rejected using concise Gmail or email evidence."""
+    require_write_confirmation("mark_application_rejected_from_email", confirm_write)
+    evidence_note = (
+        f"Rejected via email signal. From: {email_from}. "
+        f"Subject: {email_subject}. Received: {email_received_at}."
+    )
+    if notes:
+        evidence_note = f"{evidence_note} Notes: {notes}"
+    return await mark_application_status(
+        application_id=application_id,
+        status="rejected",
+        notes=evidence_note,
+        effective_at=email_received_at,
+        confirm_write=True,
+    )
+
+
+@_tool()
+async def add_interview_round(
+    application_id: int,
+    round_number: int,
+    stage_name: str | None = None,
+    status: str = "scheduled",
+    notes: str | None = None,
+    scheduled_at: str | None = None,
+    completed_at: str | None = None,
+    confirm_write: bool = False,
+) -> dict[str, Any]:
+    """Add an interview round to an application. This writes data and requires confirm_write=true."""
+    require_write_confirmation("add_interview_round", confirm_write)
+    payload = build_query(
+        round_number=round_number,
+        stage_name=stage_name,
+        status=status,
+        notes=notes,
+        scheduled_at=scheduled_at,
+        completed_at=completed_at,
+    )
+    return await api_post(f"/applications/{application_id}/interview-rounds", payload)
 
 
 def main() -> None:
