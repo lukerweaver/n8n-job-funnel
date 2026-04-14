@@ -187,20 +187,22 @@ export interface RunApplication {
   run_item_id: number;
   run_item_status: string;
   run_item_error_message: string | null;
-  job_application_id: number;
-  job_posting_id: number;
-  resume_id: number;
+  job_application_id: number | null;
+  job_posting_id: number | null;
+  resume_id: number | null;
   job_id: string | null;
   company_name: string | null;
   title: string | null;
   score: number | null;
   screening_likelihood: number | null;
   classification_key: string | null;
+  classification_error: string | null;
   apply_url: string | null;
   yearly_min_compensation: number | null;
   yearly_max_compensation: number | null;
   recommendation: string | null;
   resume_name: string | null;
+  classified_at: string | null;
   scored_at: string | null;
 }
 

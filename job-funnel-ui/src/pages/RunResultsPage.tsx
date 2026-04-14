@@ -24,7 +24,7 @@ export function RunResultsPage() {
       next.set("limit", String(DEFAULT_LIMIT));
     }
     if (!next.get("sort_by")) {
-      next.set("sort_by", "score");
+      next.set("sort_by", "created_at");
     }
     if (!next.get("sort_order")) {
       next.set("sort_order", "desc");
@@ -84,7 +84,7 @@ export function RunResultsPage() {
   function clearFilters() {
     setSearchParams({
       limit: String(DEFAULT_LIMIT),
-      sort_by: "score",
+      sort_by: "created_at",
       sort_order: "desc",
       offset: "0",
     });
@@ -93,6 +93,10 @@ export function RunResultsPage() {
   const limit = Number(params.get("limit") ?? String(DEFAULT_LIMIT));
   const offset = Number(params.get("offset") ?? "0");
   const selectedIndex = selected ? data.findIndex((item) => item.run_item_id === selected.run_item_id) : -1;
+  const previousApplication =
+    selectedIndex > 0 ? data.slice(0, selectedIndex).reverse().find((item) => item.job_application_id !== null) ?? null : null;
+  const nextApplication =
+    selectedIndex >= 0 ? data.slice(selectedIndex + 1).find((item) => item.job_application_id !== null) ?? null : null;
 
   useEffect(() => {
     if (!selected) {
@@ -103,17 +107,17 @@ export function RunResultsPage() {
       if (event.key === "Escape") {
         setSelected(null);
       }
-      if (event.key === "ArrowLeft" && selectedIndex > 0) {
-        setSelected(data[selectedIndex - 1]);
+      if (event.key === "ArrowLeft" && previousApplication) {
+        setSelected(previousApplication);
       }
-      if (event.key === "ArrowRight" && selectedIndex >= 0 && selectedIndex < data.length - 1) {
-        setSelected(data[selectedIndex + 1]);
+      if (event.key === "ArrowRight" && nextApplication) {
+        setSelected(nextApplication);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [data, selected, selectedIndex]);
+  }, [nextApplication, previousApplication, selected]);
 
   return (
     <section className="page-grid">
@@ -128,7 +132,7 @@ export function RunResultsPage() {
             {runId ? `Run #${runId}` : ""}
           </p>
         </div>
-        <div className="stat-chip">{total} application-linked rows</div>
+        <div className="stat-chip">{total} run items</div>
       </div>
 
       <div className="panel filter-panel">
@@ -171,13 +175,15 @@ export function RunResultsPage() {
 
           <label>
             Sort By
-            <select value={params.get("sort_by") ?? "score"} onChange={(event) => updateParam("sort_by", event.target.value)}>
+            <select value={params.get("sort_by") ?? "created_at"} onChange={(event) => updateParam("sort_by", event.target.value)}>
               <option value="score">Score</option>
               <option value="screening_likelihood">Screening Likelihood</option>
               <option value="company_name">Company</option>
               <option value="title">Title</option>
               <option value="classification_key">Classification</option>
+              <option value="classified_at">Classified At</option>
               <option value="scored_at">Scored At</option>
+              <option value="created_at">Run Item Created</option>
             </select>
           </label>
 
@@ -210,7 +216,7 @@ export function RunResultsPage() {
         {loading ? <p className="state-message">Loading run results...</p> : null}
         {error ? <p className="state-message error-message">{error}</p> : null}
         {!loading && !error && data.length === 0 ? (
-          <p className="state-message">This run has no scored applications to display for the current filters.</p>
+          <p className="state-message">This run has no items to display for the current filters.</p>
         ) : null}
 
         {!loading && !error && data.length > 0 ? (
@@ -225,12 +231,21 @@ export function RunResultsPage() {
                   <th>Classification</th>
                   <th>Resume</th>
                   <th>Run Item</th>
+                  <th>Issue</th>
                   <th>Compensation</th>
                 </tr>
               </thead>
               <tbody>
                 {data.map((item) => (
-                  <tr key={item.run_item_id} onClick={() => setSelected(item)}>
+                  <tr
+                    key={item.run_item_id}
+                    className={item.job_application_id === null ? "noninteractive-row" : undefined}
+                    onClick={() => {
+                      if (item.job_application_id !== null) {
+                        setSelected(item);
+                      }
+                    }}
+                  >
                     <td>{item.company_name ?? "Unknown"}</td>
                     <td>{item.title ?? "Untitled role"}</td>
                     <td>{item.score ?? "N/A"}</td>
@@ -240,6 +255,7 @@ export function RunResultsPage() {
                     <td>
                       <span className={`status-pill status-${item.run_item_status}`}>{item.run_item_status}</span>
                     </td>
+                    <td>{item.run_item_error_message ?? item.classification_error ?? "N/A"}</td>
                     <td>{moneyRange(item.yearly_min_compensation, item.yearly_max_compensation)}</td>
                   </tr>
                 ))}
@@ -256,16 +272,24 @@ export function RunResultsPage() {
         ) : null}
       </div>
 
-      {selected ? (
+      {selected && selected.job_application_id !== null ? (
         <ApplicationDetailModal
           applicationId={selected.job_application_id}
           fallbackTitle={selected.title ?? "Untitled role"}
           fallbackSubtitle={`Run item #${selected.run_item_id} · ${selected.company_name ?? "Unknown company"}`}
           onClose={() => setSelected(null)}
-          onPrevious={() => setSelected(data[selectedIndex - 1])}
-          onNext={() => setSelected(data[selectedIndex + 1])}
-          previousDisabled={selectedIndex <= 0}
-          nextDisabled={selectedIndex === -1 || selectedIndex >= data.length - 1}
+          onPrevious={() => {
+            if (previousApplication) {
+              setSelected(previousApplication);
+            }
+          }}
+          onNext={() => {
+            if (nextApplication) {
+              setSelected(nextApplication);
+            }
+          }}
+          previousDisabled={!previousApplication}
+          nextDisabled={!nextApplication}
         />
       ) : null}
     </section>

@@ -1572,6 +1572,60 @@ def test_list_run_applications_returns_joined_job_rows(db_session):
     assert response.items[0].resume_name == "PM Resume"
 
 
+def test_list_run_applications_returns_classification_job_rows_without_applications(db_session):
+    job = seed_job(db_session, job_id="classification-run-job-view")
+    job.company_name = "Acme Labs"
+    job.title = "Staff Product Manager"
+    job.classification_key = "Product Manager"
+    job.classified_at = datetime.now(timezone.utc)
+    job.apply_url = "https://example.com/apply/classification"
+
+    run = app_module.Run(
+        type="classification",
+        status="completed",
+        requested_status="",
+        requested_source=None,
+        classification_key=None,
+        prompt_key="classifier-v1",
+        force=False,
+        selected_count=1,
+    )
+    db_session.add(run)
+    db_session.flush()
+    run_item = app_module.RunItem(
+        run_id=run.id,
+        type="classification",
+        job_posting_id=job.id,
+        job_application_id=None,
+        status="classified",
+    )
+    db_session.add(run_item)
+    db_session.commit()
+
+    response = list_run_applications(
+        run.id,
+        db_session,
+        run_item_status=None,
+        score_min=None,
+        score_max=None,
+        sort_by="classified_at",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 1
+    assert response.items[0].run_item_id == run_item.id
+    assert response.items[0].job_application_id is None
+    assert response.items[0].job_posting_id == job.id
+    assert response.items[0].resume_id is None
+    assert response.items[0].company_name == "Acme Labs"
+    assert response.items[0].title == "Staff Product Manager"
+    assert response.items[0].classification_key == "Product Manager"
+    assert response.items[0].apply_url == "https://example.com/apply/classification"
+    assert response.items[0].classified_at == job.classified_at
+
+
 def test_list_run_applications_supports_filters_and_sorting(db_session):
     user = seed_user(db_session, name="Run Filter User", email="run-filter-user@example.com")
     low_job = seed_job(db_session, job_id="run-job-low")

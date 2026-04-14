@@ -321,6 +321,10 @@ textarea {
   background: rgba(219, 232, 222, 0.45);
 }
 
+.data-table tbody tr.noninteractive-row {
+  cursor: default;
+}
+
 .status-pill {
   display: inline-flex;
   padding: 0.35rem 0.65rem;
