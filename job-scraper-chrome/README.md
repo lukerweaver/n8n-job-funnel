@@ -99,7 +99,7 @@ The manifest currently includes:
 
 - LinkedIn host permissions
 - Hiring Cafe host permissions
-- local API host permissions for `http://localhost:8000/*` and `http://127.0.0.1:8000/*`
+- local/LAN API host permissions for `http://192.168.86.2:8000/*`, `http://localhost:8000/*`, and `http://127.0.0.1:8000/*`
 - a placeholder host permission for `https://your-endpoint.example.com/*`
 
 If your API is not local, update the API URL in the popup and add the relevant host permission in `manifest.json`.

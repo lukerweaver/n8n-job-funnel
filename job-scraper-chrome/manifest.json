@@ -10,6 +10,7 @@
     "http://hiring.cafe/*",
     "https://*.hiring.cafe/*",
     "http://*.hiring.cafe/*",
+    "http://192.168.86.2:8000/*",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",
     "https://your-endpoint.example.com/*"
