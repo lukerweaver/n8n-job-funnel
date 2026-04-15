@@ -9,6 +9,7 @@
   const descriptionSelectors = ['[class*="jobs-description-content__text"]', '.jobs-description__content', '[class*="show-more"][class*="jobs-description"]', '.jobs-description-content__text'];
   const compensationSelectors = ['[class*="job-details-jobs-unified-top-card__job-insight"][class*="salary"]', '.jobs-unified-top-card__bullet li', 'ul.job-criteria__list li', 'span.tvm__text--low-emphasis', '[aria-label*="minimum pay" i]', '[aria-label*="salary" i]'];
   const linkedInJobCardSelectors = ['[data-job-id]', '[data-occludable-job-id]', 'li.jobs-search-results__list-item', '.job-card-container'];
+  const linkedInActiveJobSelectors = ['.job-details-jobs-unified-top-card', '.jobs-unified-top-card', '.top-card-layout', '.jobs-details__main-content', '.jobs-search__job-details--container', 'main'];
 
   const isHiringCafeSearchPage = () => {
     const host = window.location.hostname.replace(/^www\./, '').toLowerCase();
@@ -91,17 +92,38 @@
 
   const linkedInPostedDateFromNodeText = (node) => {
     const relativeText = node?.textContent ? node.textContent.trim() : '';
-    if (!/\b(posted on|reposted)\b/i.test(relativeText)) return null;
+    const hasPostedKeyword = /\b(posted on|reposted)\b/i.test(relativeText);
+    const hasPlainRelativeDate = /^\d+\s*(minute|hour|day|week|month|year)s?\s+ago$/i.test(relativeText);
+    if (!hasPostedKeyword && !hasPlainRelativeDate) return null;
     return {
       absoluteDate: extractPostedDateFromText(relativeText) || null,
       relativeText
     };
   };
 
+  const activeLinkedInJobRoots = (root = document) => {
+    if (!root?.querySelectorAll) return [];
+    return Array.from(new Set(linkedInActiveJobSelectors.flatMap((selector) => Array.from(root.querySelectorAll(selector)))));
+  };
+
+  const appearsAfterActiveTitle = (node, root = document) => {
+    const titleNode = titleSelectors.map((selector) => root.querySelector?.(selector)).find(Boolean);
+    if (!titleNode || !node?.compareDocumentPosition) return true;
+    return Boolean(titleNode.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING);
+  };
+
   const extractLinkedInPostedDate = (root = document) => {
     if (!root?.querySelector) return { absoluteDate: null, relativeText: null };
 
-    const timeNode = root.querySelector('time[datetime]');
+    if (root === document) {
+      for (const activeRoot of activeLinkedInJobRoots(root)) {
+        const posted = extractLinkedInPostedDate(activeRoot);
+        if (posted.absoluteDate || posted.relativeText) return posted;
+      }
+    }
+
+    const timeNodes = Array.from(root.querySelectorAll('time[datetime]'));
+    const timeNode = timeNodes.find((node) => root !== document || appearsAfterActiveTitle(node, root));
     if (timeNode) {
       return {
         absoluteDate: timeNode.getAttribute('datetime') || null,

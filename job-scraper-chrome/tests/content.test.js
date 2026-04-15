@@ -106,6 +106,84 @@ describe('content.js', () => {
     });
   });
 
+  it('ignores unrelated document-level time elements before the active LinkedIn job', () => {
+    let env;
+    const dom = createDom({
+      url: 'https://www.linkedin.com/jobs/view/1234567890/',
+      html: `
+        <!doctype html>
+        <html>
+          <body>
+            <aside>
+              <time datetime="2026-03-01T00:00:00Z">old recommendation</time>
+            </aside>
+            <main class="jobs-details__main-content">
+              <a class="topcard__org-name-link">Acme</a>
+              <h1 class="topcard__title">Senior Product Manager</h1>
+              <a class="topcard__link" href="https://example.com/apply">Apply</a>
+              <div class="jobs-description-content__text">Lead roadmap execution.</div>
+              <time datetime="2026-04-10T00:00:00Z">3 days ago</time>
+            </main>
+          </body>
+        </html>
+      `,
+      beforeParse(window) {
+        env = installChrome(window);
+        window.setTimeout = vi.fn(() => 1);
+        window.clearTimeout = vi.fn();
+      }
+    });
+
+    evalScript(dom, 'content.js');
+
+    let payload;
+    env.getMessageListener()({ type: 'scrapeJob' }, null, (value) => {
+      payload = value;
+    });
+
+    expect(payload[0]).toMatchObject({
+      posted_at: '2026-04-10T00:00:00.000Z',
+      posted_at_raw: '3 days ago'
+    });
+  });
+
+  it('parses plain relative LinkedIn posted text when time metadata is missing', () => {
+    let env;
+    const expectedPostedAt = Date.now() - (3 * 24 * 60 * 60 * 1000);
+    const dom = createDom({
+      url: 'https://www.linkedin.com/jobs/view/1234567890/',
+      html: `
+        <!doctype html>
+        <html>
+          <body>
+            <main class="jobs-details__main-content">
+              <a class="topcard__org-name-link">Acme</a>
+              <h1 class="topcard__title">Senior Product Manager</h1>
+              <a class="topcard__link" href="https://example.com/apply">Apply</a>
+              <div class="jobs-description-content__text">Lead roadmap execution.</div>
+              <span>3 days ago</span>
+            </main>
+          </body>
+        </html>
+      `,
+      beforeParse(window) {
+        env = installChrome(window);
+        window.setTimeout = vi.fn(() => 1);
+        window.clearTimeout = vi.fn();
+      }
+    });
+
+    evalScript(dom, 'content.js');
+
+    let payload;
+    env.getMessageListener()({ type: 'scrapeJob' }, null, (value) => {
+      payload = value;
+    });
+
+    expect(payload[0].posted_at_raw).toBe('3 days ago');
+    expect(Math.abs(Date.parse(payload[0].posted_at) - expectedPostedAt)).toBeLessThan(2000);
+  });
+
   it('finds LinkedIn posted dates in multiple job card contexts', () => {
     let env;
     const dom = createDom({
