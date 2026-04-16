@@ -40,6 +40,8 @@ export interface JobApplication {
   yearly_max_compensation: number | null;
   apply_url: string | null;
   description: string | null;
+  posted_at: string | null;
+  posted_at_raw: string | null;
   classification_key: string | null;
   resume_name: string | null;
   status: ApplicationStatus;
@@ -89,6 +91,14 @@ export interface JobApplicationListResponse {
   items: JobApplication[];
 }
 
+export interface JobIngestResponse {
+  received: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  jobs: string[];
+}
+
 export interface JobPosting {
   id: number;
   job_id: string;
@@ -99,6 +109,8 @@ export interface JobPosting {
   yearly_max_compensation: number | null;
   apply_url: string | null;
   description: string | null;
+  posted_at: string | null;
+  posted_at_raw: string | null;
   classification_key: string | null;
   classification_prompt_version: number | null;
   classification_error: string | null;
@@ -200,6 +212,8 @@ export interface RunApplication {
   apply_url: string | null;
   yearly_min_compensation: number | null;
   yearly_max_compensation: number | null;
+  posted_at: string | null;
+  posted_at_raw: string | null;
   recommendation: string | null;
   resume_name: string | null;
   classified_at: string | null;

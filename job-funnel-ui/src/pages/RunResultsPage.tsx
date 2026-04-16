@@ -5,7 +5,7 @@ import { getRunApplications } from "../api";
 import { ApplicationDetailModal } from "../components/ApplicationDetailModal";
 import { PaginationControls } from "../components/PaginationControls";
 import type { RunApplication } from "../types";
-import { moneyRange } from "../utils";
+import { formatDateOnly, moneyRange } from "../utils";
 
 const DEFAULT_LIMIT = 25;
 
@@ -232,6 +232,7 @@ export function RunResultsPage() {
                   <th>Resume</th>
                   <th>Run Item</th>
                   <th>Issue</th>
+                  <th>Posted</th>
                   <th>Compensation</th>
                 </tr>
               </thead>
@@ -256,6 +257,7 @@ export function RunResultsPage() {
                       <span className={`status-pill status-${item.run_item_status}`}>{item.run_item_status}</span>
                     </td>
                     <td>{item.run_item_error_message ?? item.classification_error ?? "N/A"}</td>
+                    <td>{item.posted_at ? formatDateOnly(item.posted_at) : item.posted_at_raw ?? "N/A"}</td>
                     <td>{moneyRange(item.yearly_min_compensation, item.yearly_max_compensation)}</td>
                   </tr>
                 ))}

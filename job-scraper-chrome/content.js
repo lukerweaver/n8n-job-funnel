@@ -8,6 +8,8 @@
   const applySelectors = ['a.topcard__link', 'a[data-tracking-control-name="public_jobs_apply-top-card-apply-button"]', 'a[href*="/jobs/apply/"]', 'a.jobs-apply-button', 'button[role="link"]#jobs-apply-button-id', 'button[role="link"][aria-label*="Apply to"]', 'button[data-live-test-job-apply-button]', '[aria-label*="Apply to"]'];
   const descriptionSelectors = ['[class*="jobs-description-content__text"]', '.jobs-description__content', '[class*="show-more"][class*="jobs-description"]', '.jobs-description-content__text'];
   const compensationSelectors = ['[class*="job-details-jobs-unified-top-card__job-insight"][class*="salary"]', '.jobs-unified-top-card__bullet li', 'ul.job-criteria__list li', 'span.tvm__text--low-emphasis', '[aria-label*="minimum pay" i]', '[aria-label*="salary" i]'];
+  const linkedInJobCardSelectors = ['[data-job-id]', '[data-occludable-job-id]', 'li.jobs-search-results__list-item', '.job-card-container'];
+  const linkedInActiveJobSelectors = ['.job-details-jobs-unified-top-card', '.jobs-unified-top-card', '.top-card-layout', '.jobs-details__main-content', '.jobs-search__job-details--container', 'main'];
 
   const isHiringCafeSearchPage = () => {
     const host = window.location.hostname.replace(/^www\./, '').toLowerCase();
@@ -26,6 +28,159 @@
     if (!html || typeof html !== 'string') return '';
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   };
+
+  const normalizePostedAt = (value, now = new Date()) => {
+    if (value === null || value === undefined) return '';
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const date = new Date(value > 100000000000 ? value : value * 1000);
+      return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+    }
+
+    const text = stripHtml(String(value)).trim();
+    if (!text) return '';
+
+    if (/^\d{10,13}$/.test(text)) {
+      const numericValue = Number(text);
+      const date = new Date(text.length > 10 ? numericValue : numericValue * 1000);
+      return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+    }
+
+    const parsed = Date.parse(text);
+    if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
+
+    const relative = text.match(/(\d+)\s*(minute|hour|day|week|month|year)s?\s+ago/i);
+    if (!relative) return '';
+
+    const amount = Number(relative[1]);
+    const unit = relative[2].toLowerCase();
+    const date = new Date(now.getTime());
+    if (unit === 'minute') date.setUTCMinutes(date.getUTCMinutes() - amount);
+    if (unit === 'hour') date.setUTCHours(date.getUTCHours() - amount);
+    if (unit === 'day') date.setUTCDate(date.getUTCDate() - amount);
+    if (unit === 'week') date.setUTCDate(date.getUTCDate() - amount * 7);
+    if (unit === 'month') date.setUTCMonth(date.getUTCMonth() - amount);
+    if (unit === 'year') date.setUTCFullYear(date.getUTCFullYear() - amount);
+    return date.toISOString();
+  };
+
+  const postedMetadataFromRaw = (value) => {
+    const raw = value === null || value === undefined ? '' : stripHtml(String(value)).trim();
+    return {
+      posted_at: normalizePostedAt(raw) || null,
+      posted_at_raw: raw || null
+    };
+  };
+
+  const normalizeMonthDayYearAsUtc = (text) => {
+    const match = text.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Sept|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2}),\s+(\d{4})\b/i);
+    if (!match) return '';
+    const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const month = monthNames.indexOf(match[1].slice(0, 3).toLowerCase());
+    const day = Number(match[2]);
+    const year = Number(match[3]);
+    if (month < 0 || Number.isNaN(day) || Number.isNaN(year)) return '';
+    return new Date(Date.UTC(year, month, day)).toISOString();
+  };
+
+  const extractPostedDateFromText = (text) => {
+    const raw = stripHtml(text || '').trim();
+    if (!raw) return '';
+    const cleaned = raw.replace(/\b(re)?posted\s+on\b/i, '').replace(/\breposted\b/i, '').trim();
+    return normalizeMonthDayYearAsUtc(cleaned) || normalizeMonthDayYearAsUtc(raw) || normalizePostedAt(cleaned) || normalizePostedAt(raw);
+  };
+
+  const linkedInPostedDateFromNodeText = (node) => {
+    const relativeText = node?.textContent ? node.textContent.trim() : '';
+    const hasPostedKeyword = /\b(posted on|reposted)\b/i.test(relativeText);
+    const hasPlainRelativeDate = /^\d+\s*(minute|hour|day|week|month|year)s?\s+ago$/i.test(relativeText);
+    if (!hasPostedKeyword && !hasPlainRelativeDate) return null;
+    return {
+      absoluteDate: extractPostedDateFromText(relativeText) || null,
+      relativeText
+    };
+  };
+
+  const activeLinkedInJobRoots = (root = document) => {
+    if (!root?.querySelectorAll) return [];
+    return Array.from(new Set(linkedInActiveJobSelectors.flatMap((selector) => Array.from(root.querySelectorAll(selector)))));
+  };
+
+  const appearsAfterActiveTitle = (node, root = document) => {
+    const titleNode = titleSelectors.map((selector) => root.querySelector?.(selector)).find(Boolean);
+    if (!titleNode || !node?.compareDocumentPosition) return true;
+    return Boolean(titleNode.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING);
+  };
+
+  const extractLinkedInPostedDate = (root = document) => {
+    if (!root?.querySelector) return { absoluteDate: null, relativeText: null };
+
+    if (root === document) {
+      for (const activeRoot of activeLinkedInJobRoots(root)) {
+        const posted = extractLinkedInPostedDate(activeRoot);
+        if (posted.absoluteDate || posted.relativeText) return posted;
+      }
+    }
+
+    const timeNodes = Array.from(root.querySelectorAll('time[datetime]'));
+    const timeNode = timeNodes.find((node) => root !== document || appearsAfterActiveTitle(node, root));
+    if (timeNode) {
+      return {
+        absoluteDate: timeNode.getAttribute('datetime') || null,
+        relativeText: timeNode.textContent?.trim() || null
+      };
+    }
+
+    const classFallbackNodes = root.querySelectorAll('span._2a866d47');
+    for (const node of classFallbackNodes) {
+      const posted = linkedInPostedDateFromNodeText(node);
+      if (posted) return posted;
+    }
+
+    const fallbackNodes = root.querySelectorAll('time, span, div, li, p');
+    for (const node of fallbackNodes) {
+      const posted = linkedInPostedDateFromNodeText(node);
+      if (posted) return posted;
+    }
+
+    return { absoluteDate: null, relativeText: null };
+  };
+
+  const extractLinkedInPostedDates = (root = document) => {
+    if (!root?.querySelectorAll) return [];
+    const contexts = Array.from(new Set(linkedInJobCardSelectors.flatMap((selector) => Array.from(root.querySelectorAll(selector)))));
+    return (contexts.length ? contexts : [root])
+      .map((context) => extractLinkedInPostedDate(context))
+      .filter((posted) => posted.absoluteDate || posted.relativeText);
+  };
+
+  const postedMetadataFromLinkedInDate = (postedDate) => {
+    const absoluteDate = postedDate?.absoluteDate || '';
+    const relativeText = postedDate?.relativeText || '';
+    const normalized = normalizePostedAt(absoluteDate) || extractPostedDateFromText(relativeText);
+    return {
+      posted_at: normalized || null,
+      posted_at_raw: relativeText || absoluteDate || null
+    };
+  };
+
+  const firstStringValue = (candidates) => {
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+      if (typeof candidate === 'number' && Number.isFinite(candidate)) return String(candidate);
+    }
+    return '';
+  };
+
+  const getValueAtPath = (obj, path) => {
+    if (!obj || typeof obj !== 'object') return undefined;
+    return path.split('.').reduce((current, key) => {
+      if (!current || typeof current !== 'object') return undefined;
+      return current[key];
+    }, obj);
+  };
+
+  const firstStringValueAtPaths = (obj, paths) => firstStringValue(paths.map((path) => getValueAtPath(obj, path)));
 
   const seemsLikeCompensationText = (text) => {
     if (!text) return false;
@@ -259,6 +414,7 @@
     const compensationText = extractCompensationText();
     const compensation = parseCompensation(compensationText);
     const description = textOf(descriptionSelectors) || stripHtml(document.body?.innerText || '');
+    const posted = postedMetadataFromLinkedInDate(extractLinkedInPostedDate(document));
 
     const jobId = (() => {
       const idFromUrl = window.location.pathname.match(/\/jobs\/view\/([0-9]+)/i)?.[1];
@@ -275,6 +431,8 @@
       yearly_max_compensation: compensation.max || 0,
       apply_url: applyUrl,
       description,
+      posted_at: posted.posted_at,
+      posted_at_raw: posted.posted_at_raw,
       source: 'linkedin',
       source_url: window.location.href
     };
@@ -363,6 +521,22 @@
         const stableId = getHiringStableId(item);
         const applyUrl = item?.apply_url || item?.url || buildHiringApplyUrl(item) || '';
         const description = rawDescription || item?.job_description || item?.description || info?.summary || '';
+        const posted = postedMetadataFromRaw(firstStringValueAtPaths(item, [
+          'v5_processed_job_data.estimated_publish_date',
+          'v5_processed_job_data.estimated_publish_date_millis',
+          'posted_at',
+          'postedAt',
+          'date_posted',
+          'datePosted',
+          'job_information.posted_at',
+          'job_information.postedAt',
+          'job_information.date_posted',
+          'job_information.datePosted',
+          'v5_processed_job_data.posted_at',
+          'v5_processed_job_data.postedAt',
+          'v5_processed_job_data.date_posted',
+          'v5_processed_job_data.datePosted'
+        ]));
 
         return {
           job_id: stableId,
@@ -372,6 +546,8 @@
           yearly_max_compensation: compensation.max || 0,
           apply_url: applyUrl,
           description: stripHtml(description),
+          posted_at: posted.posted_at,
+          posted_at_raw: posted.posted_at_raw,
           source: 'hiring.cafe',
           source_url: sourceUrl,
           location,
@@ -714,6 +890,13 @@
 
     return [getLinkedInPayload()];
   };
+
+  if (window.__jobScraperDebug === true) {
+    window.__jobScraperDebugApi = {
+      extractLinkedInPostedDate,
+      extractLinkedInPostedDates
+    };
+  }
 
   if (window.chrome?.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

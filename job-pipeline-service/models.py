@@ -72,6 +72,8 @@ class JobPosting(Base):
     yearly_max_compensation: Mapped[float | None] = mapped_column(Float, nullable=True)
     apply_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    posted_at_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_payload: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
 
     classification_key: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)

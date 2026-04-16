@@ -8,6 +8,7 @@ import type {
   InterviewRoundListResponse,
   JobApplicationListResponse,
   JobApplication,
+  JobIngestResponse,
   AppSettings,
   OnboardingStatusResponse,
   PasteJobResponse,
@@ -217,6 +218,19 @@ export function deleteInterviewRound(applicationId: number, interviewRoundId: nu
     `/applications/${applicationId}/interview-rounds/${interviewRoundId}`,
     "DELETE",
   );
+}
+
+export function createJobDescription(payload: {
+  job_id: string;
+  company_name?: string | null;
+  title?: string | null;
+  apply_url?: string | null;
+  description: string;
+  posted_at?: string | null;
+  posted_at_raw?: string | null;
+  source?: string;
+}) {
+  return sendJson<JobIngestResponse>("/jobs/ingest", "POST", payload);
 }
 
 export function getRuns(params: URLSearchParams) {

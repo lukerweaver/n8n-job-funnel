@@ -108,12 +108,74 @@ def test_health():
 
 
 def test_jobs_ingest_single_and_duplicate(db_session):
-    payload = JobIngestItem(job_id="job-1", source="linkedin", description="desc")
+    posted_at = datetime(2026, 4, 10, tzinfo=timezone.utc)
+    stored_posted_at = posted_at.replace(tzinfo=None)
+    payload = JobIngestItem(
+        job_id="job-1",
+        source="linkedin",
+        description="desc",
+        posted_at=posted_at,
+        posted_at_raw="3 days ago",
+    )
     created = ingest_jobs(payload, db_session)
     duplicate = ingest_jobs(payload, db_session)
+    job = db_session.scalar(select(JobPosting).where(JobPosting.job_id == "job-1"))
 
     assert created.created == 1
     assert duplicate.skipped == 1
+    assert job is not None
+    assert job.posted_at == stored_posted_at
+    assert job.posted_at_raw == "3 days ago"
+
+
+def test_jobs_ingest_backfills_missing_posted_metadata_for_duplicate(db_session):
+    job = seed_job(db_session, job_id="job-backfill")
+    posted_at = datetime(2026, 4, 9, tzinfo=timezone.utc)
+    stored_posted_at = posted_at.replace(tzinfo=None)
+
+    result = ingest_jobs(
+        JobIngestItem(
+            job_id="job-backfill",
+            source="linkedin",
+            description="desc",
+            posted_at=posted_at,
+            posted_at_raw="4 days ago",
+        ),
+        db_session,
+    )
+    db_session.refresh(job)
+
+    assert result.created == 0
+    assert result.updated == 1
+    assert result.skipped == 0
+    assert job.posted_at == stored_posted_at
+    assert job.posted_at_raw == "4 days ago"
+
+
+def test_jobs_ingest_does_not_overwrite_existing_posted_metadata(db_session):
+    original_posted_at = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    stored_original_posted_at = original_posted_at.replace(tzinfo=None)
+    job = seed_job(db_session, job_id="job-no-overwrite")
+    job.posted_at = original_posted_at
+    job.posted_at_raw = "Apr 1, 2026"
+    db_session.commit()
+
+    result = ingest_jobs(
+        JobIngestItem(
+            job_id="job-no-overwrite",
+            source="linkedin",
+            description="desc",
+            posted_at=datetime(2026, 4, 12, tzinfo=timezone.utc),
+            posted_at_raw="yesterday",
+        ),
+        db_session,
+    )
+    db_session.refresh(job)
+
+    assert result.updated == 0
+    assert result.skipped == 1
+    assert job.posted_at == stored_original_posted_at
+    assert job.posted_at_raw == "Apr 1, 2026"
 
 
 def test_jobs_list_with_filters(db_session):
@@ -1402,6 +1464,8 @@ def test_application_reads_include_job_context(db_session):
     job.apply_url = "https://example.com/jobs/123"
     job.yearly_min_compensation = 150000
     job.yearly_max_compensation = 180000
+    job.posted_at = datetime(2026, 4, 11, tzinfo=timezone.utc)
+    job.posted_at_raw = "2 days ago"
     job.classification_key = "Product Manager"
     db_session.commit()
     resume = seed_resume(db_session, user=user, name="PM Resume", prompt_key="default")
@@ -1432,6 +1496,8 @@ def test_application_reads_include_job_context(db_session):
     assert listed.items[0].company_name == "Acme Labs"
     assert listed.items[0].title == "Senior PM"
     assert listed.items[0].apply_url == "https://example.com/jobs/123"
+    assert listed.items[0].posted_at == datetime(2026, 4, 11)
+    assert listed.items[0].posted_at_raw == "2 days ago"
     assert listed.items[0].classification_key == "Product Manager"
     assert listed.items[0].resume_name == "PM Resume"
     assert fetched.job_id == "job-app-read"
@@ -2026,6 +2092,8 @@ def test_ensure_job_postings_schema_executes_only_missing_columns(monkeypatch):
 
     assert any("ADD COLUMN classification_prompt_version INTEGER" in statement for statement in executed)
     assert any("ADD COLUMN classification_provider VARCHAR(100)" in statement for statement in executed)
+    assert any("ADD COLUMN posted_at DATETIME" in statement for statement in executed)
+    assert any("ADD COLUMN posted_at_raw TEXT" in statement for statement in executed)
     assert all("ADD COLUMN classification_key" not in statement for statement in executed)
 
 
@@ -2046,6 +2114,8 @@ def test_ensure_job_postings_schema_returns_when_no_statements(monkeypatch):
                 "classification_error",
                 "classification_raw_response",
                 "classified_at",
+                "posted_at",
+                "posted_at_raw",
             )]
         ),
     )
