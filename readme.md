@@ -7,6 +7,7 @@ This repository combines:
 - `job-scraper-chrome/`: the Chrome extension used to ingest jobs
 - `exports/`: prompt seed data
 - `docs/`: lightweight architecture artifacts
+- `docs/mcp-server.md`: Model Context Protocol setup for agent integrations
 
 The default flow is:
 
@@ -158,6 +159,13 @@ Codex:
 
 Agent rule of thumb: review is safe by default; ingestion, classification, scoring, status updates, notifications, prompt edits, provider edits, and automation changes should be explicit.
 
+MCP:
+
+- The backend includes a standalone Job Funnel MCP server at `job-pipeline-service/mcp_server.py`.
+- MCP clients can use it for read-only review, guarded writes, rejection-email matching, and human-gated application assist.
+- The MCP server wraps the FastAPI API and does not edit the database directly.
+- Setup and tool details are in [docs/mcp-server.md](docs/mcp-server.md).
+
 ## Deployment Modes
 
 There are now three practical ways to run this project:
@@ -211,6 +219,11 @@ n8n
 Agent CLI
     -> uses the API-first workflow in docs/agent-cli-playbook.md
     -> reviews, ingests, classifies, generates, and scores through HTTP routes
+
+Agent MCP
+    -> job-pipeline-service/mcp_server.py
+    -> wraps the same FastAPI routes for Claude/Codex-style MCP clients
+    -> exposes resources, prompts, read-only tools, guarded write tools, and human-gated application assist
 
 Service-managed automation:
     -> auto_process_jobs = true
@@ -416,6 +429,16 @@ When `auto_process_jobs` is false, the intended n8n sequence is:
 ## Agent CLI Workflows
 
 Codex, Claude Code, and other terminal agents should use the HTTP API instead of editing the database directly. The recommended prompts, PowerShell examples, and safe run sequence are in [docs/agent-cli-playbook.md](docs/agent-cli-playbook.md).
+
+Agent clients that support MCP can use the Job Funnel MCP server instead of hand-written HTTP calls. It exposes:
+
+- resources for settings, target roles, scoring preferences, agent playbook, applications, and runs
+- prompts for strong-application review, rejection-email investigation, and application assist
+- read-only tools for application and run review
+- guarded write tools requiring explicit confirmation flags
+- application-assist context that keeps final submission as a human action
+
+See [docs/mcp-server.md](docs/mcp-server.md) for setup and guardrails.
 
 Claude Code project skills are included under `.claude/skills/`:
 

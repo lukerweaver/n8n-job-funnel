@@ -16,8 +16,8 @@ except ImportError:  # pragma: no cover - exercised only before dependencies are
 DEFAULT_API_BASE = "http://localhost:8000"
 API_BASE_ENV = "JOB_FUNNEL_API_BASE"
 DESCRIPTION_PREVIEW_CHARS = 500
-ACTIVE_STATUSES = {"applied", "screening", "interview", "offer"}
-TERMINAL_STATUSES = {"rejected", "ghosted", "withdrawn", "pass"}
+ACTIVE_STATUSES = {"applied", "screening", "interview"}
+TERMINAL_STATUSES = {"offer", "rejected", "ghosted", "withdrawn", "pass"}
 HUMAN_GATED_APPLICATION_FIELDS = [
     "sponsorship",
     "work authorization",
@@ -490,8 +490,15 @@ async def get_run(run_id: int) -> dict[str, Any]:
 
 @_tool()
 async def list_run_items(run_id: int, limit: int = 100, offset: int = 0) -> dict[str, Any]:
-    """List items for one async Job Funnel run."""
-    return await api_get(f"/runs/{run_id}/items", params={"limit": limit, "offset": offset})
+    """List items for one async Job Funnel run with client-side pagination."""
+    response = await api_get(f"/runs/{run_id}/items")
+    items = response.get("items", [])
+    return {
+        "total": response.get("total", len(items)),
+        "limit": limit,
+        "offset": offset,
+        "items": items[offset:offset + limit],
+    }
 
 
 @_tool()

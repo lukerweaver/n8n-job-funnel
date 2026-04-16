@@ -9,6 +9,7 @@ FastAPI backend for:
 5. tracking notification, lifecycle, and interview state
 6. managing the default classification-to-scoring workflow
 7. exposing async run status for external orchestration such as n8n
+8. exposing a standalone MCP server for agent clients
 
 The current operator UI consumes this service directly for:
 
@@ -18,6 +19,9 @@ The current operator UI consumes this service directly for:
 - statistics for ingest volume and score spread
 - resume management
 - prompt library management
+
+Agent clients can also consume the service through `mcp_server.py`, which wraps
+the HTTP API without direct database access.
 
 ## Requirements
 
@@ -270,6 +274,47 @@ Optional threshold gate:
 ```bash
 .venv/bin/python scripts/coverage_gate.py coverage.json 80
 ```
+
+## MCP Server
+
+The service includes a standalone Model Context Protocol server at
+`mcp_server.py`. It is intended for Claude/Codex-style agents that should operate
+Job Funnel through controlled tools instead of raw shell commands.
+
+Run it from `job-pipeline-service/`:
+
+```bash
+export JOB_FUNNEL_API_BASE=http://localhost:8000
+python mcp_server.py
+```
+
+The API base defaults to `http://localhost:8000` when `JOB_FUNNEL_API_BASE` is
+not set.
+
+The MCP server exposes:
+
+- resources for settings, target roles, scoring preferences, the agent playbook,
+  applications, and runs
+- prompts for strong-application review, rejection-email investigation, and
+  human-gated application assist
+- read-only tools for application and run review
+- guarded write tools for ingestion, run queueing, status updates, rejection
+  email handling, and interview rounds
+- `prepare_application_assist`, which returns browser-assist context while
+  preserving final submission as a human action
+
+Safety rules:
+
+- MCP tools call FastAPI routes; they do not edit the database directly.
+- Write tools require `confirm_write=true`.
+- Tools that use `force=true` require `confirm_force=true`.
+- Agent-owned processing tools check service-managed automation before queueing
+  runs.
+- Provider settings, prompt-library writes, notification sends, and database
+  access are intentionally not exposed.
+
+Detailed setup and client configuration examples are in
+[`../docs/mcp-server.md`](../docs/mcp-server.md).
 
 ## API Summary
 

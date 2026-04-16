@@ -155,6 +155,51 @@ def test_score_email_candidate_uses_company_domain_and_status():
     assert "application is active" in candidate["reasons"]
 
 
+def test_score_email_candidate_treats_offer_as_terminal():
+    candidate = mcp_server.score_email_candidate(
+        {
+            "id": 1,
+            "company_name": "Example Co",
+            "title": "Senior Product Manager",
+            "status": "offer",
+            "rejected_at": None,
+        },
+        company_name="Example",
+        title="Product Manager",
+        email_from="jobs@example.com",
+        email_subject="Update on your Product Manager application",
+    )
+
+    assert "application is active" not in candidate["reasons"]
+    assert "application is already terminal" in candidate["reasons"]
+
+
+def test_list_run_items_paginates_client_side(monkeypatch):
+    captured = {}
+
+    async def fake_api_get(path, params=None):
+        captured["path"] = path
+        captured["params"] = params
+        return {
+            "total": 3,
+            "items": [
+                {"id": 1, "status": "queued"},
+                {"id": 2, "status": "running"},
+                {"id": 3, "status": "scored"},
+            ],
+        }
+
+    monkeypatch.setattr(mcp_server, "api_get", fake_api_get)
+
+    response = asyncio.run(mcp_server.list_run_items(run_id=42, limit=1, offset=1))
+
+    assert captured == {"path": "/runs/42/items", "params": None}
+    assert response["total"] == 3
+    assert response["limit"] == 1
+    assert response["offset"] == 1
+    assert response["items"] == [{"id": 2, "status": "running"}]
+
+
 def test_write_tools_require_confirmation():
     with pytest.raises(mcp_server.JobFunnelSafetyError, match="confirm_write=true"):
         asyncio.run(mcp_server.ingest_job(job_id="example_1"))
