@@ -11,7 +11,7 @@
 
   const isHiringCafeSearchPage = () => {
     const host = window.location.hostname.replace(/^www\./, '').toLowerCase();
-    return host === 'hiring.cafe' && (window.location.pathname.includes('/search-jobs') || window.location.pathname === '/' || window.location.search.includes('searchState'));
+    return host === 'hiring.cafe' && !window.location.pathname.startsWith('/viewjob/');
   };
 
   const textOf = (selectors) => {
@@ -283,13 +283,36 @@
   const normalizeHiringResponse = (data, sourceUrl = window.location.href) => {
     if (!data || typeof data !== 'object') return [];
 
+    const collectItems = (value, depth = 0, seen = new Set()) => {
+      if (!value || depth > 6 || typeof value !== 'object') return [];
+      if (seen.has(value)) return [];
+      seen.add(value);
+
+      if (Array.isArray(value)) {
+        if (value.some(looksLikeHiringJobItem)) return value.filter(looksLikeHiringJobItem);
+        return value.flatMap((item) => collectItems(item, depth + 1, seen));
+      }
+
+      const directItems = [
+        value.jobs,
+        value.hits,
+        value.results,
+        value.items,
+        value.data
+      ].find((candidate) => Array.isArray(candidate) && candidate.some(looksLikeHiringJobItem));
+      if (directItems) return directItems.filter(looksLikeHiringJobItem);
+
+      return Object.values(value).flatMap((child) => collectItems(child, depth + 1, seen));
+    };
+
     const items = (() => {
       if (Array.isArray(data)) return data;
       if (Array.isArray(data.jobs)) return data.jobs;
+      if (Array.isArray(data.hits)) return data.hits;
       if (Array.isArray(data.results)) return data.results;
       if (Array.isArray(data.items)) return data.items;
       if (Array.isArray(data.data)) return data.data;
-      return [];
+      return collectItems(data);
     })();
 
     if (!Array.isArray(items)) return [];
@@ -297,11 +320,16 @@
     return items
       .map((item) => {
         const info = item?.job_information || {};
+        const v5 = item?.v5_processed_job_data || {};
+        const v7 = item?.v7_processed_job_data || {};
+        const companyProfile = v7?.company_profile || {};
         const hiringCompanyName = (() => {
           const companyCandidates = [
-            item?.v5_processed_job_data?.company_name,
-            item?.v5_processed_job_data?.companyName,
-            item?.v5_processed_job_data?.company?.name,
+            companyProfile?.name,
+            item?.enriched_company_data?.name,
+            v5?.company_name,
+            v5?.companyName,
+            v5?.company?.name,
             item?.company_name,
             item?.companyName,
             item?.company?.name,
@@ -330,18 +358,20 @@
         })();
 
         const rawDescription = info.description || '';
-        const compensationText = extractCompensationFromHiringInfo(info) || stripHtml(String(rawDescription || ''));
-        const compensation = parseCompensation(compensationText);
-        const location = extractHiringLocation(info) || '';
+        const compensation = extractHiringCompensation(item, info);
+        const location = extractHiringLocation(item, info) || '';
+        const stableId = getHiringStableId(item);
+        const applyUrl = item?.apply_url || item?.url || buildHiringApplyUrl(item) || '';
+        const description = rawDescription || item?.job_description || item?.description || info?.summary || '';
 
         return {
-          job_id: item?.id ? `hiring_${item.id}` : `hiring_${Math.random().toString(36).slice(2, 11)}`,
+          job_id: stableId,
           company_name: hiringCompanyName || 'Unknown Company',
-          title: item?.job_title || item?.title || info?.title || info?.job_title_raw || 'Unknown Title',
+          title: item?.job_title || item?.title || info?.title || info?.job_title || info?.job_title_raw || 'Unknown Title',
           yearly_min_compensation: compensation.min || 0,
           yearly_max_compensation: compensation.max || 0,
-          apply_url: item?.apply_url || item?.url || '',
-          description: rawDescription ? stripHtml(rawDescription) : (stripHtml(info?.summary || '')),
+          apply_url: applyUrl,
+          description: stripHtml(description),
           source: 'hiring.cafe',
           source_url: sourceUrl,
           location,
@@ -349,11 +379,55 @@
           source_name: item?.source || ''
         };
       })
-      .filter((job) => job.title || job.company_name || job.job_id);
+      .filter((job) => job.title !== 'Unknown Title' || job.company_name !== 'Unknown Company' || job.description || job.apply_url);
   };
 
-  const extractHiringLocation = (info) => {
+  const looksLikeHiringJobItem = (item) => {
+    if (!item || typeof item !== 'object') return false;
+    return Boolean(
+      item.job_information ||
+      item.v5_processed_job_data ||
+      item.v7_processed_job_data ||
+      item.board_token ||
+      item.objectID ||
+      item.job_title
+    );
+  };
+
+  const getHiringStableId = (item) => {
+    const raw = item?.objectID || item?.id || item?.job_id;
+    if (raw) return `hiring_${String(raw)}`;
+
+    const fingerprint = [
+      item?.source,
+      item?.board_token,
+      item?.job_title || item?.title || item?.job_information?.title,
+      item?.apply_url || item?.url
+    ].filter(Boolean).join('|');
+
+    return `hiring_${hashCode(fingerprint || JSON.stringify(item).slice(0, 1000))}`;
+  };
+
+  const buildHiringApplyUrl = (item) => {
+    const source = String(item?.source || '').toLowerCase();
+    const boardToken = item?.board_token;
+    const jobId = item?.job_id || item?.id || item?.objectID;
+    if (!source || !boardToken || !jobId) return '';
+
+    if (source === 'grnhse') return `https://boards.greenhouse.io/embed/job_app?for=${boardToken}&token=${jobId}`;
+    if (source === 'ashby') return `https://jobs.ashbyhq.com/${boardToken}/${jobId}/application`;
+    if (source === 'lever') return `https://jobs.lever.co/${boardToken}/${jobId}/apply`;
+    if (source === 'eu_lever') return `https://jobs.eu.lever.co/${boardToken}/${jobId}/apply`;
+    if (source === 'breezy') return `https://${boardToken}.breezy.hr/p/${jobId}`;
+
+    return '';
+  };
+
+  const extractHiringLocation = (item, info) => {
     if (!info || typeof info !== 'object') return '';
+    if (item?.v5_processed_job_data?.formatted_workplace_location) return String(item.v5_processed_job_data.formatted_workplace_location);
+    if (item?.gpt_data?.formatted_location) return String(item.gpt_data.formatted_location);
+    if (item?.job_location) return String(item.job_location);
     if (info.location) return String(info.location);
     if (info.Location) return String(info.Location);
 
@@ -364,6 +438,27 @@
     if (m1) return m1[1].trim();
 
     return '';
+  };
+
+  const extractHiringCompensation = (item, info) => {
+    const processed = item?.v5_processed_job_data || {};
+    const directMin = Number(processed.yearly_min_compensation || item?.yearly_min_compensation || 0);
+    const directMax = Number(processed.yearly_max_compensation || item?.yearly_max_compensation || 0);
+    if (directMin || directMax) {
+      return {
+        min: directMin || directMax,
+        max: directMax || directMin
+      };
+    }
+
+    const compensationText = extractCompensationFromHiringInfo(info) ||
+      processed.listed_compensation_range ||
+      processed.compensation_range ||
+      item?.compensation_range ||
+      item?.salary ||
+      stripHtml(String(info?.description || item?.job_description || item?.description || ''));
+
+    return parseCompensation(compensationText);
   };
 
   const extractCompensationFromHiringInfo = (info) => {
@@ -580,9 +675,41 @@
 
     window.addEventListener('__jobScraperHiringPayload', onHiringPayloadEvent);
   };
+
+  const scrapeHiringPageData = () => {
+    const scripts = [
+      document.getElementById('__NEXT_DATA__'),
+      ...document.querySelectorAll('script[type="application/json"]')
+    ].filter(Boolean);
+
+    for (const script of scripts) {
+      const raw = script.textContent || '';
+      if (!raw || !/(job_information|v5_processed_job_data|v7_processed_job_data|objectID|job_title)/.test(raw)) continue;
+
+      try {
+        const data = JSON.parse(raw);
+        const jobs = normalizeHiringResponse(data, window.location.href);
+        if (jobs.length) return jobs;
+      } catch (_err) {
+        // ignore malformed page data
+      }
+    }
+
+    return [];
+  };
+
+  const scheduleHiringPageDataScrape = () => {
+    window.setTimeout(() => {
+      const jobs = scrapeHiringPageData();
+      if (jobs.length) {
+        handleHiringPayload({ jobs }, window.location.href);
+      }
+    }, AUTO_SEND_DELAY_MS);
+  };
+
   const scrapeJob = () => {
     if (isHiringCafeSearchPage()) {
-      return lastHiringPayload.length ? lastHiringPayload : [];
+      return lastHiringPayload.length ? lastHiringPayload : scrapeHiringPageData();
     }
 
     return [getLinkedInPayload()];
@@ -599,6 +726,7 @@
 
   if (isHiringCafeSearchPage()) {
     installHiringInterceptors();
+    scheduleHiringPageDataScrape();
   } else {
     installLinkedInAutoScrapeHooks();
   }
