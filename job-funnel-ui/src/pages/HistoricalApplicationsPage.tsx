@@ -5,7 +5,7 @@ import { getApplications } from "../api";
 import { ApplicationDetailModal } from "../components/ApplicationDetailModal";
 import { PaginationControls } from "../components/PaginationControls";
 import type { JobApplication } from "../types";
-import { formatDate } from "../utils";
+import { formatDate, formatDateOnly } from "../utils";
 
 const DEFAULT_LIMIT = 25;
 const HISTORICAL_APPLICATION_STATUSES = ["applied", "screening", "interview", "offer", "rejected", "ghosted", "withdrawn", "pass"];
@@ -262,8 +262,8 @@ export function HistoricalApplicationsPage() {
                     <td>
                       <span className={`status-pill status-${application.status}`}>{application.status}</span>
                     </td>
-                    <td>{formatDate(application.applied_at)}</td>
-                    <td>{formatDate(application.next_interview_at)}</td>
+                    <td>{formatDateOnly(application.applied_at)}</td>
+                    <td>{formatDateOnly(application.next_interview_at)}</td>
                     <td>{application.interview_rounds_total}</td>
                     <td>{application.resume_name ?? "N/A"}</td>
                     <td>{formatDate(application.updated_at)}</td>
