@@ -12,6 +12,7 @@ Codex:
 - Use this playbook for HTTP API workflows.
 - Prefer the read-only review flow unless the user explicitly asks for writes.
 - Portable Codex skills are included at `.codex/skills/job-funnel-onboarding/SKILL.md` and `.codex/skills/job-funnel-operator/SKILL.md`. If your Codex install does not auto-discover repo-local skills, copy or symlink the relevant folder into your personal Codex skills directory.
+- If the Job Funnel MCP server is configured, prefer its tools for health checks, settings, application review, run inspection, email-signal candidate lookup, guarded status/write workflows, and human-gated application assist. Use its resources and prompts for repeated review, rejection-email, and application-assist workflows. The HTTP API remains the canonical integration contract.
 
 Claude Code:
 
