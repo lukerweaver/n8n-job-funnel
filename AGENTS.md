@@ -17,6 +17,13 @@ This file applies to the entire repository unless a deeper `AGENTS.md` overrides
 - Avoid adding new runtime dependencies unless necessary.
 - Document any new scripts, workflows, or developer commands.
 
+## Secrets
+- Never commit secrets to this repository.
+- Do not add tokens, passwords, API keys, private keys, database URLs, private host paths, LAN-only URLs, Jenkins deployment values, or other environment-specific private configuration to tracked files in this repository.
+- Public repo files such as `Jenkinsfile`, docs, examples, tests, and application code must reference external configuration instead of hardcoding private values.
+- Use Jenkins credentials, Jenkins job environment variables, local untracked `.env` files, deployment-local compose files, or other secret stores for private deployment values.
+- If a secret or private deployment value is discovered in this repository, stop and ask the user how they want it removed and rotated.
+
 ## Testing expectations
 - Run tests for the area you changed.
 - If you cannot run a check due to environment limits, explicitly state what blocked execution.
