@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -15,6 +16,19 @@ except ImportError:  # pragma: no cover - exercised only before dependencies are
 DEFAULT_API_BASE = "http://localhost:8000"
 API_BASE_ENV = "JOB_FUNNEL_API_BASE"
 DESCRIPTION_PREVIEW_CHARS = 500
+ACTIVE_STATUSES = {"applied", "screening", "interview", "offer"}
+TERMINAL_STATUSES = {"rejected", "ghosted", "withdrawn", "pass"}
+HUMAN_GATED_APPLICATION_FIELDS = [
+    "sponsorship",
+    "work authorization",
+    "salary expectations",
+    "relocation",
+    "demographic questions",
+    "disability status",
+    "veteran status",
+    "legal attestations",
+    "final submission",
+]
 
 logger = logging.getLogger("job_funnel_mcp")
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -36,6 +50,24 @@ def _tool(*args: Any, **kwargs: Any):
 
         return decorator
     return mcp.tool(*args, **kwargs)
+
+
+def _resource(*args: Any, **kwargs: Any):
+    if mcp is None:
+        def decorator(func):
+            return func
+
+        return decorator
+    return mcp.resource(*args, **kwargs)
+
+
+def _prompt(*args: Any, **kwargs: Any):
+    if mcp is None:
+        def decorator(func):
+            return func
+
+        return decorator
+    return mcp.prompt(*args, **kwargs)
 
 
 def api_base_url() -> str:
@@ -107,6 +139,30 @@ def build_query(**kwargs: Any) -> dict[str, Any]:
     return {key: value for key, value in kwargs.items() if value is not None}
 
 
+def normalize_text(value: str | None) -> str:
+    return " ".join((value or "").lower().replace("-", " ").replace("_", " ").split())
+
+
+def extract_email_domain(email_or_sender: str | None) -> str | None:
+    if not email_or_sender or "@" not in email_or_sender:
+        return None
+    domain = email_or_sender.split("@", 1)[1].split(">", 1)[0].strip().lower()
+    return domain or None
+
+
+def public_domain_name(domain: str | None) -> str | None:
+    if not domain:
+        return None
+    parts = [part for part in domain.lower().split(".") if part]
+    if len(parts) < 2:
+        return domain
+    return parts[-2]
+
+
+def json_resource(payload: dict[str, Any] | list[Any]) -> str:
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
 async def api_get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(api_url(path), params=params)
@@ -174,6 +230,129 @@ def compact_run_response(response: dict[str, Any]) -> dict[str, Any]:
         "started_at": response.get("started_at"),
         "finished_at": response.get("finished_at"),
         "last_error": response.get("last_error"),
+    }
+
+
+def score_email_candidate(
+    application: dict[str, Any],
+    company_name: str | None = None,
+    title: str | None = None,
+    email_from: str | None = None,
+    email_subject: str | None = None,
+    email_received_at: str | None = None,
+) -> dict[str, Any]:
+    score = 0.0
+    reasons: list[str] = []
+    company = normalize_text(application.get("company_name"))
+    app_title = normalize_text(application.get("title"))
+    company_hint = normalize_text(company_name)
+    title_hint = normalize_text(title)
+    subject = normalize_text(email_subject)
+    sender_domain = extract_email_domain(email_from)
+    sender_org = normalize_text(public_domain_name(sender_domain))
+    status = application.get("status")
+
+    if company_hint and company_hint in company:
+        score += 0.35
+        reasons.append("company hint matched company name")
+    if sender_org and sender_org in company:
+        score += 0.25
+        reasons.append("email sender domain appears to match company name")
+    if title_hint and title_hint in app_title:
+        score += 0.25
+        reasons.append("title hint matched application title")
+    if subject and app_title and any(token for token in app_title.split() if len(token) >= 5 and token in subject):
+        score += 0.15
+        reasons.append("email subject overlaps application title")
+    if status in ACTIVE_STATUSES:
+        score += 0.15
+        reasons.append("application is active")
+    elif status in TERMINAL_STATUSES:
+        score -= 0.2
+        reasons.append("application is already terminal")
+    if email_received_at and application.get("applied_at"):
+        if str(application["applied_at"]) <= email_received_at:
+            score += 0.1
+            reasons.append("application applied timestamp is before email timestamp")
+    if application.get("rejected_at") is None:
+        score += 0.05
+        reasons.append("application is not already marked rejected")
+
+    confidence = max(0.0, min(0.99, round(score, 2)))
+    return {
+        "application": application,
+        "confidence": confidence,
+        "reasons": reasons,
+    }
+
+
+async def collect_email_signal_candidates(
+    company_name: str | None = None,
+    title: str | None = None,
+    q: str | None = None,
+    email_from: str | None = None,
+    email_subject: str | None = None,
+    email_received_at: str | None = None,
+    status_group: str | None = None,
+    created_since: str | None = None,
+    updated_since: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    search_values = [
+        " ".join(term for term in (q, company_name, title) if term),
+        company_name,
+        title,
+        public_domain_name(extract_email_domain(email_from)),
+    ]
+    seen: dict[int, dict[str, Any]] = {}
+    for search_value in search_values:
+        if not search_value:
+            continue
+        response = await list_applications(
+            q=search_value,
+            status_group=status_group,
+            created_since=created_since,
+            updated_since=updated_since,
+            sort_by="updated_at",
+            sort_order="desc",
+            limit=limit,
+            include_descriptions=False,
+        )
+        for item in response.get("items", []):
+            application_id = item.get("id")
+            if application_id is not None:
+                seen[application_id] = item
+
+    candidates = [
+        score_email_candidate(
+            application,
+            company_name=company_name,
+            title=title,
+            email_from=email_from,
+            email_subject=email_subject,
+            email_received_at=email_received_at,
+        )
+        for application in seen.values()
+    ]
+    candidates.sort(key=lambda item: (item["confidence"], item["application"].get("updated_at") or ""), reverse=True)
+    candidates = candidates[:limit]
+    strong_matches = [item for item in candidates if item["confidence"] >= 0.75]
+    return {
+        "matched_by": {
+            "company_name": company_name,
+            "title": title,
+            "q": q,
+            "email_from": email_from,
+            "email_subject": email_subject,
+            "email_received_at": email_received_at,
+            "status_group": status_group,
+            "created_since": created_since,
+            "updated_since": updated_since,
+        },
+        "requires_human_selection": len(strong_matches) != 1,
+        "total": len(candidates),
+        "candidates": candidates,
+        "items": [item["application"] for item in candidates],
     }
 
 
@@ -259,38 +438,27 @@ async def find_applications_for_email_signal(
     company_name: str | None = None,
     title: str | None = None,
     q: str | None = None,
+    email_from: str | None = None,
+    email_subject: str | None = None,
+    email_received_at: str | None = None,
     status_group: str | None = None,
     created_since: str | None = None,
     updated_since: str | None = None,
     limit: int = 10,
 ) -> dict[str, Any]:
     """Find candidate applications that may match an external email signal such as a rejection."""
-    search_terms = [term for term in (q, company_name, title) if term]
-    search_query = " ".join(search_terms) if search_terms else None
-    response = await list_applications(
-        q=search_query,
+    return await collect_email_signal_candidates(
+        company_name=company_name,
+        title=title,
+        q=q,
+        email_from=email_from,
+        email_subject=email_subject,
+        email_received_at=email_received_at,
         status_group=status_group,
         created_since=created_since,
         updated_since=updated_since,
-        sort_by="updated_at",
-        sort_order="desc",
         limit=limit,
-        include_descriptions=False,
     )
-    return {
-        "matched_by": {
-            "company_name": company_name,
-            "title": title,
-            "q": q,
-            "status_group": status_group,
-            "created_since": created_since,
-            "updated_since": updated_since,
-            "searched_q": search_query,
-        },
-        "requires_human_selection": response["total"] != 1,
-        "total": response["total"],
-        "items": response["items"],
-    }
 
 
 @_tool()
@@ -580,6 +748,139 @@ async def add_interview_round(
         completed_at=completed_at,
     )
     return await api_post(f"/applications/{application_id}/interview-rounds", payload)
+
+
+@_tool()
+async def prepare_application_assist(application_id: int) -> dict[str, Any]:
+    """Prepare context for a human-gated browser-assisted job application workflow."""
+    application = await get_application(application_id, include_description=False)
+    settings = await get_settings()
+    return {
+        "application": {
+            "id": application.get("id"),
+            "company_name": application.get("company_name"),
+            "title": application.get("title"),
+            "apply_url": application.get("apply_url"),
+            "status": application.get("status"),
+            "score": application.get("score"),
+            "recommendation": application.get("recommendation"),
+            "classification_key": application.get("classification_key"),
+            "resume_name": application.get("resume_name"),
+            "scored_at": application.get("scored_at"),
+            "applied_at": application.get("applied_at"),
+        },
+        "profile_context": {
+            "profile_name": settings.get("profile_name"),
+            "default_user_id": settings.get("default_user_id"),
+            "target_roles": settings.get("target_roles"),
+            "scoring_preferences": settings.get("scoring_preferences"),
+        },
+        "human_gate": {
+            "final_submission_must_be_human": True,
+            "agent_may_open_apply_url": True,
+            "agent_may_fill_low_risk_profile_fields": True,
+            "do_not_answer_without_user": HUMAN_GATED_APPLICATION_FIELDS,
+            "status_update_requires_confirmation": True,
+        },
+        "next_steps": [
+            "Open the apply_url in a browser controlled by the user or an approved browser connector.",
+            "Fill only low-risk factual fields from user-provided profile/resume context.",
+            "Ask the user before answering human-gated fields or uploading documents.",
+            "Stop before final submission and let the user submit.",
+            "After user confirmation, call mark_application_status with status='applied' and confirm_write=true.",
+        ],
+    }
+
+
+@_resource("job-funnel://settings", mime_type="application/json")
+async def settings_resource() -> str:
+    """Current Job Funnel settings with API-key secrets omitted by the API."""
+    return json_resource(await get_settings())
+
+
+@_resource("job-funnel://target-roles", mime_type="application/json")
+async def target_roles_resource() -> str:
+    """Configured target roles from Job Funnel settings."""
+    settings = await get_settings()
+    return json_resource({"target_roles": settings.get("target_roles") or []})
+
+
+@_resource("job-funnel://scoring-preferences", mime_type="application/json")
+async def scoring_preferences_resource() -> str:
+    """Configured scoring preferences from Job Funnel settings."""
+    settings = await get_settings()
+    return json_resource({"scoring_preferences": settings.get("scoring_preferences") or {}})
+
+
+@_resource("job-funnel://agent-playbook", mime_type="text/plain")
+async def agent_playbook_resource() -> str:
+    """Agent operating rules for Job Funnel."""
+    return "\n".join(
+        [
+            "Use Job Funnel through MCP tools or FastAPI routes only; do not edit the database directly.",
+            "Start operational sessions with health_check and get_settings.",
+            "Prefer read-only review unless the user explicitly asks for writes.",
+            "Write tools require confirm_write=true; force=true requires confirm_force=true.",
+            "Ask before changing statuses, lifecycle dates, interview rounds, notifications, prompts, provider settings, or automation settings.",
+            "Do not auto-submit job applications; final submission must remain a human action.",
+            "For email-derived updates, identify candidate records first and store concise evidence notes only.",
+        ]
+    )
+
+
+@_resource("job-funnel://applications/{application_id}", mime_type="application/json")
+async def application_resource(application_id: int) -> str:
+    """Application detail by internal application id."""
+    return json_resource(await get_application(application_id, include_description=True))
+
+
+@_resource("job-funnel://runs/{run_id}", mime_type="application/json")
+async def run_resource(run_id: int) -> str:
+    """Run detail by internal run id."""
+    return json_resource(await get_run(run_id))
+
+
+@_prompt()
+def review_strong_applications(score_min: float = 20.0, limit: int = 25) -> str:
+    """Prompt for reviewing high-scoring applications."""
+    return (
+        "Review Job Funnel applications with status='scored' and scores above the requested threshold. "
+        f"Call list_applications(status='scored', score_min={score_min}, sort_by='score', sort_order='desc', limit={limit}). "
+        "Summarize the strongest opportunities, include application ids, companies, titles, scores, recommendations, and scored_at timestamps. "
+        "Do not change statuses or queue processing."
+    )
+
+
+@_prompt()
+def investigate_rejection_email(
+    email_from: str,
+    email_subject: str,
+    email_received_at: str,
+    company_hint: str | None = None,
+    title_hint: str | None = None,
+) -> str:
+    """Prompt for matching a rejection email to Job Funnel records."""
+    return (
+        "Investigate a possible rejection email for a Job Funnel application. "
+        "First call find_applications_for_email_signal with the provided email metadata and hints. "
+        "If multiple candidates are returned, ask the user to choose the application. "
+        "If exactly one strong candidate is returned, summarize the evidence and ask before calling mark_application_rejected_from_email. "
+        "Do not store the full email body unless the user explicitly asks. "
+        f"email_from={email_from!r}; email_subject={email_subject!r}; email_received_at={email_received_at!r}; "
+        f"company_hint={company_hint!r}; title_hint={title_hint!r}."
+    )
+
+
+@_prompt()
+def prepare_application_review(application_id: int) -> str:
+    """Prompt for preparing a human-gated application workflow."""
+    return (
+        f"Prepare application id {application_id} for human-gated application assistance. "
+        "Call prepare_application_assist(application_id) and use the returned apply_url and human_gate rules. "
+        "You may help fill low-risk factual fields, but do not answer sponsorship, salary, demographic, legal, disability, veteran, or relocation questions without user input. "
+        "Stop before final submission and let the user submit. "
+        "Only mark the application applied after explicit user confirmation."
+    )
 
 
 def main() -> None:

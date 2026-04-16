@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -102,15 +103,15 @@ def test_get_application_apply_url_returns_limited_identity(monkeypatch):
 
 
 def test_find_applications_for_email_signal_requires_human_selection_for_ambiguous_matches(monkeypatch):
-    captured = {}
+    captured = []
 
     async def fake_list_applications(**kwargs):
-        captured.update(kwargs)
+        captured.append(kwargs)
         return {
             "total": 2,
             "items": [
-                {"id": 1, "company_name": "Example Co"},
-                {"id": 2, "company_name": "Example Co"},
+                {"id": 1, "company_name": "Example Co", "title": "Product Manager", "status": "applied"},
+                {"id": 2, "company_name": "Example Co", "title": "Product Manager", "status": "applied"},
             ],
         }
 
@@ -124,11 +125,34 @@ def test_find_applications_for_email_signal_requires_human_selection_for_ambiguo
         )
     )
 
-    assert captured["q"] == "Example Co Product Manager"
-    assert captured["status_group"] == "active"
-    assert captured["sort_by"] == "updated_at"
+    assert captured[0]["q"] == "Example Co Product Manager"
+    assert captured[0]["status_group"] == "active"
+    assert captured[0]["sort_by"] == "updated_at"
     assert response["requires_human_selection"] is True
     assert response["total"] == 2
+    assert response["candidates"][0]["confidence"] >= response["candidates"][1]["confidence"]
+
+
+def test_score_email_candidate_uses_company_domain_and_status():
+    candidate = mcp_server.score_email_candidate(
+        {
+            "id": 1,
+            "company_name": "Example Co",
+            "title": "Senior Product Manager",
+            "status": "applied",
+            "applied_at": "2026-04-14T10:00:00Z",
+            "rejected_at": None,
+        },
+        company_name="Example",
+        title="Product Manager",
+        email_from="Recruiting <jobs@example.com>",
+        email_subject="Update on your Product Manager application",
+        email_received_at="2026-04-15T10:00:00Z",
+    )
+
+    assert candidate["confidence"] >= 0.75
+    assert "company hint matched company name" in candidate["reasons"]
+    assert "application is active" in candidate["reasons"]
 
 
 def test_write_tools_require_confirmation():
@@ -309,3 +333,86 @@ def test_mark_application_rejected_from_email_posts_evidence_note(monkeypatch):
     assert "recruiting@example.com" in captured["notes"]
     assert "Application update" in captured["notes"]
     assert response["application"]["status"] == "rejected"
+
+
+def test_prepare_application_assist_returns_human_gate(monkeypatch):
+    async def fake_get_application(application_id, include_description=True):
+        assert application_id == 31008
+        assert include_description is False
+        return {
+            "id": 31008,
+            "company_name": "JustPark",
+            "title": "Technical Product Manager - Integrations",
+            "apply_url": "https://example.com/apply",
+            "status": "scored",
+            "score": 23,
+            "recommendation": "Strong Apply",
+            "classification_key": "Product Manager",
+            "resume_name": "Product Resume",
+            "scored_at": "2026-04-09T13:37:47Z",
+        }
+
+    async def fake_get_settings():
+        return {
+            "profile_name": "luke",
+            "default_user_id": 1,
+            "target_roles": ["Product Manager"],
+            "scoring_preferences": {"strong_apply_min_score": 20},
+        }
+
+    monkeypatch.setattr(mcp_server, "get_application", fake_get_application)
+    monkeypatch.setattr(mcp_server, "get_settings", fake_get_settings)
+
+    response = asyncio.run(mcp_server.prepare_application_assist(31008))
+
+    assert response["application"]["apply_url"] == "https://example.com/apply"
+    assert response["profile_context"]["target_roles"] == ["Product Manager"]
+    assert response["human_gate"]["final_submission_must_be_human"] is True
+    assert "sponsorship" in response["human_gate"]["do_not_answer_without_user"]
+
+
+def test_settings_resource_returns_json(monkeypatch):
+    async def fake_get_settings():
+        return {"target_roles": ["Product Manager"], "provider": {"has_api_key": False}}
+
+    monkeypatch.setattr(mcp_server, "get_settings", fake_get_settings)
+
+    payload = json.loads(asyncio.run(mcp_server.settings_resource()))
+
+    assert payload["target_roles"] == ["Product Manager"]
+    assert payload["provider"]["has_api_key"] is False
+
+
+def test_application_resource_returns_full_application_json(monkeypatch):
+    async def fake_get_application(application_id, include_description=True):
+        assert application_id == 123
+        assert include_description is True
+        return {"id": 123, "description": "Full job description"}
+
+    monkeypatch.setattr(mcp_server, "get_application", fake_get_application)
+
+    payload = json.loads(asyncio.run(mcp_server.application_resource(123)))
+
+    assert payload == {"id": 123, "description": "Full job description"}
+
+
+def test_review_strong_applications_prompt_mentions_read_only_review():
+    prompt = mcp_server.review_strong_applications(score_min=20, limit=10)
+
+    assert "list_applications" in prompt
+    assert "score_min=20" in prompt
+    assert "Do not change statuses" in prompt
+
+
+def test_investigate_rejection_email_prompt_preserves_human_gate():
+    prompt = mcp_server.investigate_rejection_email(
+        email_from="recruiting@example.com",
+        email_subject="Application update",
+        email_received_at="2026-04-15T10:00:00Z",
+        company_hint="Example",
+        title_hint="Product Manager",
+    )
+
+    assert "find_applications_for_email_signal" in prompt
+    assert "ask before calling mark_application_rejected_from_email" in prompt
+    assert "Do not store the full email body" in prompt

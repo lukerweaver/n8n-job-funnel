@@ -30,9 +30,26 @@ Phase 2 guarded write tools:
 - `mark_application_rejected_from_email`
 - `add_interview_round`
 
+Phase 3 workflow affordances:
+
+- Resources:
+  - `job-funnel://settings`
+  - `job-funnel://target-roles`
+  - `job-funnel://scoring-preferences`
+  - `job-funnel://agent-playbook`
+  - `job-funnel://applications/{application_id}`
+  - `job-funnel://runs/{run_id}`
+- Prompts:
+  - `review_strong_applications`
+  - `investigate_rejection_email`
+  - `prepare_application_review`
+- Tools:
+  - `prepare_application_assist`
+
 `find_applications_for_email_signal` is designed for workflows where another
 agent tool, such as Gmail, finds an application-related email and needs candidate
-Job Funnel records.
+Job Funnel records. It searches multiple hints, scores candidates, and returns
+confidence reasons.
 
 `mark_application_rejected_from_email` is the paired status update helper for
 that workflow. It requires an explicit `application_id`, email evidence fields,
@@ -89,13 +106,17 @@ JSON-RPC messages.
   stores a concise evidence note with sender, subject, and received timestamp.
 - Provider settings, prompt-library writes, notification sends, and database
   access are intentionally not exposed by this MCP server.
+- Browser/application-assist workflows must keep final submission as a human
+  action. `prepare_application_assist` returns explicit human-gate rules for
+  sponsorship, salary, demographic, legal, disability, veteran, relocation, and
+  final-submit fields.
 
 ## Rejection Email Workflow
 
 When an agent with Gmail access sees a rejection email:
 
 1. Call `find_applications_for_email_signal` with company/title/email-derived
-   search terms.
+   search terms and email metadata.
 2. If multiple candidates are returned, ask the user to choose the application.
 3. Call `mark_application_rejected_from_email` with the chosen `application_id`,
    `email_from`, `email_subject`, `email_received_at`, optional notes, and
@@ -103,3 +124,16 @@ When an agent with Gmail access sees a rejection email:
 
 Do not store full email bodies unless the user explicitly asks for that in a
 future workflow.
+
+## Application Assist Workflow
+
+When an agent has access to a browser connector such as Playwright:
+
+1. Call `prepare_application_assist(application_id)`.
+2. Open the returned `apply_url` in the approved browser context.
+3. Fill only low-risk factual fields from user-provided profile or resume
+   context.
+4. Ask the user before answering human-gated fields or uploading documents.
+5. Stop before final submission and let the user submit.
+6. After the user confirms submission, call `mark_application_status` with
+   `status="applied"`, an evidence note, and `confirm_write=true`.
