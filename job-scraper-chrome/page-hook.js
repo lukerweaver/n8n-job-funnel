@@ -7,6 +7,35 @@
     return /search-jobs/i.test(url) && !/get-total-count/i.test(url);
   };
 
+  const looksLikeHiringJob = (item) => {
+    if (!item || typeof item !== 'object') return false;
+    return Boolean(
+      item.job_information ||
+      item.v5_processed_job_data ||
+      item.v7_processed_job_data ||
+      item.board_token ||
+      item.objectID ||
+      item.job_title
+    );
+  };
+
+  const hasHiringJobs = (value, depth = 0, seen = new Set()) => {
+    if (!value || depth > 5) return false;
+    if (typeof value !== 'object') return false;
+    if (seen.has(value)) return false;
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      return value.some((item) => looksLikeHiringJob(item) || hasHiringJobs(item, depth + 1, seen));
+    }
+
+    for (const key of ['jobs', 'hits', 'results', 'items', 'data']) {
+      if (Array.isArray(value[key]) && value[key].some(looksLikeHiringJob)) return true;
+    }
+
+    return Object.values(value).some((child) => hasHiringJobs(child, depth + 1, seen));
+  };
+
   const emitPayload = (payload, sourceUrl) => {
     if (!payload) return;
 
@@ -27,7 +56,9 @@
     if (!text) return;
     try {
       const data = JSON.parse(text);
-      emitPayload(data, sourceUrl);
+      if (isHiringSearchApiUrl(sourceUrl) || hasHiringJobs(data)) {
+        emitPayload(data, sourceUrl);
+      }
     } catch (_err) {
       // ignore parse errors
     }
@@ -41,8 +72,6 @@
       : req?.url || '';
 
     const response = await originalFetch(...args);
-
-    if (!isHiringSearchApiUrl(requestUrl)) return response;
 
     try {
       const cloned = response.clone();
@@ -65,7 +94,6 @@
   XMLHttpRequest.prototype.send = function(body) {
     this.addEventListener('load', () => {
       const requestUrl = this.__jobScraperRequestUrl || '';
-      if (!isHiringSearchApiUrl(requestUrl)) return;
 
       const text = this.responseText || (typeof this.response === 'string' ? this.response : '');
       if (text) {
@@ -85,4 +113,3 @@
     return originalXHRSend.call(this, body);
   };
 })();
-

@@ -5,7 +5,7 @@ Chrome extension for collecting job data from LinkedIn and Hiring Cafe, normaliz
 The extension does more than a manual LinkedIn scrape:
 
 - `content.js` auto-detects LinkedIn job detail pages, scrapes them, and sends normalized payloads
-- `page-hook.js` runs in the page's main world on Hiring Cafe and intercepts search API responses
+- `page-hook.js` runs in the page's main world on Hiring Cafe and intercepts job-shaped search responses
 - `content.js` listens for captured Hiring Cafe payloads, normalizes them, and forwards them
 - `popup.js` supports manual scrape/send from the extension popup
 - `background.js` posts the normalized jobs to `POST /jobs/ingest`
@@ -91,8 +91,9 @@ Example normalized payload:
 ### Hiring Cafe
 
 - Watches Hiring Cafe search pages
-- Intercepts `/api/search-jobs` responses in the page context
-- Normalizes result batches into API ingest payloads
+- Intercepts job-shaped search responses in the page context, including renamed endpoints
+- Falls back to jobs embedded in Next page data when no search API request fires
+- Normalizes result batches from `jobs`, `hits`, and similar payloads into API ingest payloads
 - Pulls company names from `v5_processed_job_data.company_name` before falling back to older fields
 - Buffers and deduplicates jobs before sending arrays to the background worker for posting
 
