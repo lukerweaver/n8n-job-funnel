@@ -147,6 +147,43 @@ describe('content.js', () => {
     });
   });
 
+  it('uses precise LinkedIn relative time when metadata only has a date', () => {
+    let env;
+    const expectedPostedAt = Date.now() - (19 * 60 * 1000);
+    const dom = createDom({
+      url: 'https://www.linkedin.com/jobs/view/1234567890/',
+      html: `
+        <!doctype html>
+        <html>
+          <body>
+            <main class="jobs-details__main-content">
+              <a class="topcard__org-name-link">Jobgether</a>
+              <h1 class="topcard__title">Member of Product, Security</h1>
+              <a class="topcard__link" href="https://example.com/apply">Apply</a>
+              <div class="jobs-description-content__text">Lead product security.</div>
+              <time datetime="2026-04-17">19 minutes ago</time>
+            </main>
+          </body>
+        </html>
+      `,
+      beforeParse(window) {
+        env = installChrome(window);
+        window.setTimeout = vi.fn(() => 1);
+        window.clearTimeout = vi.fn();
+      }
+    });
+
+    evalScript(dom, 'content.js');
+
+    let payload;
+    env.getMessageListener()({ type: 'scrapeJob' }, null, (value) => {
+      payload = value;
+    });
+
+    expect(payload[0].posted_at_raw).toBe('19 minutes ago');
+    expect(Math.abs(Date.parse(payload[0].posted_at) - expectedPostedAt)).toBeLessThan(2000);
+  });
+
   it('parses plain relative LinkedIn posted text when time metadata is missing', () => {
     let env;
     const expectedPostedAt = Date.now() - (3 * 24 * 60 * 60 * 1000);
