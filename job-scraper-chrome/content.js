@@ -90,6 +90,10 @@
     return normalizeMonthDayYearAsUtc(cleaned) || normalizeMonthDayYearAsUtc(raw) || normalizePostedAt(cleaned) || normalizePostedAt(raw);
   };
 
+  const isDateOnly = (value) => /^\d{4}-\d{2}-\d{2}$/.test(stripHtml(value || '').trim());
+
+  const hasPreciseRelativeTime = (value) => /^\d+\s*(minute|hour)s?\s+ago$/i.test(stripHtml(value || '').trim());
+
   const linkedInPostedDateFromNodeText = (node) => {
     const relativeText = node?.textContent ? node.textContent.trim() : '';
     const hasPostedKeyword = /\b(posted on|reposted)\b/i.test(relativeText);
@@ -157,7 +161,9 @@
   const postedMetadataFromLinkedInDate = (postedDate) => {
     const absoluteDate = postedDate?.absoluteDate || '';
     const relativeText = postedDate?.relativeText || '';
-    const normalized = normalizePostedAt(absoluteDate) || extractPostedDateFromText(relativeText);
+    const normalized = isDateOnly(absoluteDate) && hasPreciseRelativeTime(relativeText)
+      ? extractPostedDateFromText(relativeText) || normalizePostedAt(absoluteDate)
+      : normalizePostedAt(absoluteDate) || extractPostedDateFromText(relativeText);
     return {
       posted_at: normalized || null,
       posted_at_raw: relativeText || absoluteDate || null
