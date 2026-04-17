@@ -11,7 +11,7 @@ import {
   updateInterviewRound,
 } from "../api";
 import type { ApplicationStatus, InterviewRound, InterviewRoundStatus, JobApplication } from "../types";
-import { formatDateOnly, moneyRange, renderListish } from "../utils";
+import { formatDate, formatDateOnly, moneyRange, renderListish } from "../utils";
 import { DetailModal } from "./DetailModal";
 
 const STATUS_LABELS: Record<ApplicationStatus, string> = {
@@ -684,7 +684,7 @@ export function ApplicationDetailModal({
               </div>
               <div>
                 <dt>Posted At</dt>
-                <dd>{application.posted_at ? formatDateOnly(application.posted_at) : application.posted_at_raw ?? "N/A"}</dd>
+                <dd>{application.posted_at ? formatDate(application.posted_at) : application.posted_at_raw ?? "N/A"}</dd>
               </div>
             </dl>
             <div className="detail-actions">

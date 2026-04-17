@@ -6,7 +6,7 @@ import { ApplicationDetailModal } from "../components/ApplicationDetailModal";
 import { DetailModal } from "../components/DetailModal";
 import { PaginationControls } from "../components/PaginationControls";
 import type { JobApplication } from "../types";
-import { formatDate, formatDateOnly } from "../utils";
+import { formatDate } from "../utils";
 
 const APPLICATION_STATUSES = ["", "scored", "new", "tailored", "notified", "applied", "screening", "interview", "offer", "rejected", "ghosted", "withdrawn", "pass"];
 const APPLICATION_RECOMMENDATIONS = ["", "Strong Apply", "Apply", "Selective Apply", "Pass"];
@@ -355,6 +355,7 @@ export function ApplicationsPage() {
             <select value={params.get("sort_by") ?? "score"} onChange={(event) => updateParam("sort_by", event.target.value)}>
               <option value="score">Score</option>
               <option value="scored_at">Scored At</option>
+              <option value="posted_at">Posted Date</option>
               <option value="created_at">Created At</option>
               <option value="updated_at">Updated At</option>
               <option value="status">Status</option>
@@ -395,7 +396,7 @@ export function ApplicationsPage() {
                   <th>Classification</th>
                   <th>Resume</th>
                   <th>Status</th>
-                  <th>Posted</th>
+                  <th>Posted At</th>
                   <th>Scored</th>
                   <th>Actions</th>
                 </tr>
@@ -413,7 +414,7 @@ export function ApplicationsPage() {
                     <td>
                       <span className={`status-pill status-${application.status}`}>{application.status}</span>
                     </td>
-                    <td>{application.posted_at ? formatDateOnly(application.posted_at) : application.posted_at_raw ?? "N/A"}</td>
+                    <td>{application.posted_at ? formatDate(application.posted_at) : application.posted_at_raw ?? "N/A"}</td>
                     <td>{formatDate(application.scored_at)}</td>
                     <td>
                       <button
