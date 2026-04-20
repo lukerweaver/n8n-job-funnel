@@ -2306,6 +2306,23 @@ def test_apply_application_status_preserves_supplied_timestamp():
     assert application.screening_at == timestamp
 
 
+@pytest.mark.parametrize(
+    ("status", "timestamp_field"),
+    [
+        ("screening", "screening_at"),
+        ("interview", None),
+    ],
+)
+def test_apply_application_status_allows_ghosted_to_reenter_active_lifecycle(status, timestamp_field):
+    application = JobApplication(status="ghosted")
+
+    app_module.apply_application_status(application, ApplicationStatusWrite(status=status))
+
+    assert application.status == status
+    if timestamp_field is not None:
+        assert getattr(application, timestamp_field) is not None
+
+
 def test_interview_round_update_rejects_null_required_fields():
     with pytest.raises(ValidationError, match="round_number may not be null"):
         InterviewRoundUpdate(round_number=None)
@@ -2414,14 +2431,16 @@ def test_list_applications_filters_active_status_group(db_session):
     job_one = seed_job(db_session, job_id="job-active-1")
     job_two = seed_job(db_session, job_id="job-active-2")
     job_three = seed_job(db_session, job_id="job-active-3")
+    job_four = seed_job(db_session, job_id="job-active-4")
     seed_application(db_session, user=user, job=job_one, resume=resume, status="applied")
     seed_application(db_session, user=user, job=job_two, resume=resume, status="screening")
     seed_application(db_session, user=user, job=job_three, resume=resume, status="rejected")
+    seed_application(db_session, user=user, job=job_four, resume=resume, status="ghosted")
 
     response = list_applications(db_session, user_id=user.id, status_group="active")
 
-    assert response.total == 2
-    assert {item.status for item in response.items} == {"applied", "screening"}
+    assert response.total == 3
+    assert {item.status for item in response.items} == {"applied", "ghosted", "screening"}
 
 
 def test_list_applications_sorts_active_by_funnel_position(db_session):
@@ -2447,6 +2466,16 @@ def test_list_applications_sorts_active_by_funnel_position(db_session):
         created_at=base_date,
     )
     applied_new.applied_at = base_date + timedelta(days=3)
+    ghosted = seed_application(
+        db_session,
+        user=user,
+        job=seed_job(db_session, job_id="active-sort-ghosted"),
+        resume=resume,
+        status="ghosted",
+        created_at=base_date,
+    )
+    ghosted.applied_at = base_date + timedelta(days=2)
+    ghosted.ghosted_at = base_date + timedelta(days=9)
 
     screening_old = seed_application(
         db_session,
@@ -2517,6 +2546,7 @@ def test_list_applications_sorts_active_by_funnel_position(db_session):
         "active-sort-screening-old",
         "active-sort-screening-new",
         "active-sort-applied-old",
+        "active-sort-ghosted",
         "active-sort-applied-new",
     ]
 
@@ -3040,6 +3070,23 @@ def test_create_interview_round_preserves_terminal_application_status(db_session
     db_session.refresh(application)
     assert interview_round.round_number == 1
     assert application.status == "rejected"
+
+
+def test_create_interview_round_promotes_ghosted_application_to_interview(db_session):
+    user = seed_user(db_session, name="Ghosted", email="ghosted-round@example.com")
+    job = seed_job(db_session, job_id="job-ghosted-round")
+    resume = seed_resume(db_session, user=user, prompt_key="default", content="Resume body")
+    application = seed_application(db_session, user=user, job=job, resume=resume, status="ghosted")
+
+    interview_round = create_interview_round(
+        application.id,
+        InterviewRoundCreate(round_number=1, stage_name="Recruiter"),
+        db_session,
+    )
+
+    db_session.refresh(application)
+    assert interview_round.round_number == 1
+    assert application.status == "interview"
 
 
 def test_update_application_lifecycle_dates_missing_application(db_session):
