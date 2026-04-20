@@ -729,6 +729,7 @@ def _resolve_application_sort(
         "score": JobApplication.score,
         "status": JobApplication.status,
         "scored_at": JobApplication.scored_at,
+        "posted_at": JobPosting.posted_at,
     }
     column = allowed_fields.get(sort_by)
     if column is None:
@@ -2205,6 +2206,8 @@ def list_applications(
         count_query = count_query.join(JobPosting, JobApplication.job_posting_id == JobPosting.id)
         joined_job_posting = True
 
+    if sort_by == "posted_at":
+        join_job_posting()
     if user_id is not None:
         query = query.where(JobApplication.user_id == user_id)
         count_query = count_query.where(JobApplication.user_id == user_id)

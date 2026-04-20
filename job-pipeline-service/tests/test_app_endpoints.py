@@ -1166,6 +1166,40 @@ def test_list_applications_filters_by_recommendation(db_session):
     assert response.items[0].id != other.id
 
 
+def test_list_applications_sorts_by_posted_at(db_session):
+    user = seed_user(db_session, name="Posted Sort", email="posted-sort@example.com")
+    older_job = seed_job(db_session, job_id="job-posted-older")
+    older_job.posted_at = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    newer_job = seed_job(db_session, job_id="job-posted-newer")
+    newer_job.posted_at = datetime(2026, 4, 12, tzinfo=timezone.utc)
+    resume = seed_resume(db_session, user=user, name="Posted Sort Resume", prompt_key="default")
+    older_application = seed_application(db_session, user=user, job=older_job, resume=resume, status="scored")
+    newer_application = seed_application(db_session, user=user, job=newer_job, resume=resume, status="scored")
+    db_session.commit()
+
+    response = list_applications(
+        db_session,
+        user_id=user.id,
+        resume_id=None,
+        job_posting_id=None,
+        q=None,
+        classification_key=None,
+        recommendation=None,
+        status="scored",
+        score_min=None,
+        score_max=None,
+        created_since=None,
+        updated_since=None,
+        sort_by="posted_at",
+        sort_order="desc",
+        limit=10,
+        offset=0,
+    )
+
+    assert response.total == 2
+    assert [item.id for item in response.items] == [newer_application.id, older_application.id]
+
+
 def test_list_applications_normalizes_legacy_scoring_json_shapes(db_session):
     user = seed_user(db_session, name="Legacy JSON", email="legacy-json@example.com")
     job = seed_job(db_session, job_id="job-legacy-json")
