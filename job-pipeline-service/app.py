@@ -143,8 +143,8 @@ ALLOWED_APPLICATION_STATUSES = {
     "withdrawn",
     "pass",
 }
-ACTIVE_APPLICATION_STATUSES = {"applied", "screening", "interview"}
-TERMINAL_APPLICATION_STATUSES = {"offer", "rejected", "ghosted", "withdrawn", "pass"}
+ACTIVE_APPLICATION_STATUSES = {"applied", "ghosted", "screening", "interview"}
+TERMINAL_APPLICATION_STATUSES = {"offer", "rejected", "withdrawn", "pass"}
 HISTORICAL_APPLICATION_STATUSES = ACTIVE_APPLICATION_STATUSES | TERMINAL_APPLICATION_STATUSES
 HIDDEN_APPLICATION_STATUSES = {"error"}
 APPLICATION_TRANSITIONS = {
@@ -155,6 +155,7 @@ APPLICATION_TRANSITIONS = {
     "applied": {"screening", "interview", "offer", "rejected", "ghosted", "withdrawn", "pass"},
     "screening": {"interview", "offer", "rejected", "ghosted", "withdrawn", "pass"},
     "interview": {"offer", "rejected", "ghosted", "withdrawn", "pass"},
+    "ghosted": {"screening", "interview", "offer", "rejected", "withdrawn", "pass"},
 }
 
 OPENAPI_TAGS = [
@@ -753,13 +754,14 @@ def _active_application_ordering():
     stage_rank = case(
         (has_interview, 0),
         (JobApplication.status == "screening", 1),
-        (JobApplication.status == "applied", 2),
+        (JobApplication.status.in_(("applied", "ghosted")), 2),
         else_=3,
     )
     stage_date = case(
         (has_interview, first_interview_at),
         (JobApplication.status == "screening", JobApplication.screening_at),
         (JobApplication.status == "applied", JobApplication.applied_at),
+        (JobApplication.status == "ghosted", func.coalesce(JobApplication.applied_at, JobApplication.ghosted_at)),
         else_=JobApplication.updated_at,
     )
     return (

@@ -37,6 +37,7 @@ const TRANSITIONS: Partial<Record<ApplicationStatus, ApplicationStatus[]>> = {
   applied: ["screening", "interview", "offer", "rejected", "ghosted", "withdrawn", "pass"],
   screening: ["interview", "offer", "rejected", "ghosted", "withdrawn", "pass"],
   interview: ["offer", "rejected", "ghosted", "withdrawn", "pass"],
+  ghosted: ["screening", "interview", "offer", "rejected", "withdrawn", "pass"],
 };
 
 interface InterviewRoundFormState {

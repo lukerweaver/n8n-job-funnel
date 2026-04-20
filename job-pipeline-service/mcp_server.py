@@ -16,8 +16,8 @@ except ImportError:  # pragma: no cover - exercised only before dependencies are
 DEFAULT_API_BASE = "http://localhost:8000"
 API_BASE_ENV = "JOB_FUNNEL_API_BASE"
 DESCRIPTION_PREVIEW_CHARS = 500
-ACTIVE_STATUSES = {"applied", "screening", "interview"}
-TERMINAL_STATUSES = {"offer", "rejected", "ghosted", "withdrawn", "pass"}
+ACTIVE_STATUSES = {"applied", "ghosted", "screening", "interview"}
+TERMINAL_STATUSES = {"offer", "rejected", "withdrawn", "pass"}
 HUMAN_GATED_APPLICATION_FIELDS = [
     "sponsorship",
     "work authorization",

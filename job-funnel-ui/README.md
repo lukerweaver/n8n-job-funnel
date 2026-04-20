@@ -6,8 +6,8 @@ Current operator pages:
 
 - `/paste-job` - manual job description entry with optional job URL, recommendation polling, and detail modal
 - `/applications` - All Applications table with detail modal
-- `/active-applications` - active lifecycle states with interview visibility
-- `/historical-applications` - applied and terminal-state review
+- `/active-applications` - active lifecycle states, including ghosted follow-ups, with interview visibility
+- `/historical-applications` - applied, active, and terminal-state review
 - `/runs` - run history table plus launch actions for classification and scoring runs
 - `/runs/:runId` - run results view backed by joined run/application rows
 - `/statistics` - ingest trend table/chart and scored-job distribution

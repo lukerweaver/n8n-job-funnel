@@ -8,6 +8,7 @@ import type { JobApplication } from "../types";
 import { formatDateOnly } from "../utils";
 
 const DEFAULT_LIMIT = 25;
+const ACTIVE_APPLICATION_STATUSES = ["applied", "ghosted", "screening", "interview"];
 
 export function ActiveApplicationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -271,10 +272,10 @@ export function ActiveApplicationsPage() {
             setData((current) => {
               const next = current
                 .map((item) => (item.id === updated.id ? updated : item))
-                .filter((item) => ["applied", "screening", "interview"].includes(item.status));
+                .filter((item) => ACTIVE_APPLICATION_STATUSES.includes(item.status));
               return next;
             });
-            if (["applied", "screening", "interview"].includes(updated.status)) {
+            if (ACTIVE_APPLICATION_STATUSES.includes(updated.status)) {
               setSelected(updated);
             } else {
               setSelected(null);
