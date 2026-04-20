@@ -174,6 +174,25 @@ def test_score_email_candidate_treats_offer_as_terminal():
     assert "application is already terminal" in candidate["reasons"]
 
 
+def test_score_email_candidate_treats_ghosted_as_active():
+    candidate = mcp_server.score_email_candidate(
+        {
+            "id": 1,
+            "company_name": "Example Co",
+            "title": "Senior Product Manager",
+            "status": "ghosted",
+            "rejected_at": None,
+        },
+        company_name="Example",
+        title="Product Manager",
+        email_from="jobs@example.com",
+        email_subject="Update on your Product Manager application",
+    )
+
+    assert "application is active" in candidate["reasons"]
+    assert "application is already terminal" not in candidate["reasons"]
+
+
 def test_list_run_items_paginates_client_side(monkeypatch):
     captured = {}
 
