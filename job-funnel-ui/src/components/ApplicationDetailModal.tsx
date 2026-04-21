@@ -106,7 +106,12 @@ interface ApplicationDetailModalProps {
 }
 
 function toInputDateTime(value: string | null) {
-  return toInputDate(value);
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function toInputDate(value: string | null) {
@@ -119,11 +124,11 @@ function toInputDate(value: string | null) {
 }
 
 function toIsoOrNull(value: string) {
-  return value ? `${value}T00:00:00Z` : null;
+  return value ? new Date(value).toISOString() : null;
 }
 
-function todayDateString() {
-  return toInputDate(new Date().toISOString());
+function currentDateTimeString() {
+  return toInputDateTime(new Date().toISOString());
 }
 
 function buildRoundForm(round?: InterviewRound): InterviewRoundFormState {
@@ -134,8 +139,8 @@ function buildRoundForm(round?: InterviewRound): InterviewRoundFormState {
     round_number: String(round.round_number),
     stage_name: round.stage_name ?? "",
     status: round.status,
-    scheduled_at: toInputDateTime(round.scheduled_at),
-    completed_at: toInputDateTime(round.completed_at),
+    scheduled_at: toInputDate(round.scheduled_at),
+    completed_at: toInputDate(round.completed_at),
     notes: round.notes ?? "",
   };
 }
@@ -157,7 +162,7 @@ export function ApplicationDetailModal({
   const [error, setError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [statusSubmitting, setStatusSubmitting] = useState<ApplicationStatus | null>(null);
-  const [actionDate, setActionDate] = useState(todayDateString());
+  const [actionDate, setActionDate] = useState(currentDateTimeString());
   const [actionNote, setActionNote] = useState("");
   const [editingLifecycleStatus, setEditingLifecycleStatus] = useState<ApplicationStatus | null>(null);
   const [lifecycleDate, setLifecycleDate] = useState("");
@@ -185,7 +190,7 @@ export function ApplicationDetailModal({
         }
         setApplication(applicationResponse);
         setInterviewRounds(roundsResponse.items);
-        setActionDate(todayDateString());
+        setActionDate(currentDateTimeString());
         setActionNote("");
       })
       .catch((requestError: Error) => {
@@ -291,7 +296,7 @@ export function ApplicationDetailModal({
 
   function startEditLifecycleDate(status: ApplicationStatus, value: string | null, note: string | null) {
     setEditingLifecycleStatus(status);
-    setLifecycleDate(toInputDate(value));
+    setLifecycleDate(toInputDateTime(value));
     setLifecycleNote(note ?? "");
   }
 
@@ -448,8 +453,8 @@ export function ApplicationDetailModal({
               <>
                 <div className="lifecycle-action-bar">
                   <label className="lifecycle-date-field">
-                    Effective Date
-                    <input type="date" value={actionDate} onChange={(event) => setActionDate(event.target.value)} />
+                    Effective At
+                    <input type="datetime-local" value={actionDate} onChange={(event) => setActionDate(event.target.value)} />
                   </label>
                   <label className="lifecycle-note-field">
                     Event Note
@@ -490,7 +495,7 @@ export function ApplicationDetailModal({
                     {editingLifecycleStatus === milestone.status ? (
                       <div className="lifecycle-edit-panel">
                         <input
-                          type="date"
+                          type="datetime-local"
                           value={lifecycleDate}
                           onChange={(event) => setLifecycleDate(event.target.value)}
                         />
