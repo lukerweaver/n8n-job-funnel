@@ -2473,8 +2473,8 @@ def test_list_applications_filters_active_status_group(db_session):
 
     response = list_applications(db_session, user_id=user.id, status_group="active")
 
-    assert response.total == 3
-    assert {item.status for item in response.items} == {"applied", "ghosted", "screening"}
+    assert response.total == 2
+    assert {item.status for item in response.items} == {"applied", "screening"}
 
 
 def test_list_applications_sorts_active_by_funnel_position(db_session):
@@ -2580,7 +2580,6 @@ def test_list_applications_sorts_active_by_funnel_position(db_session):
         "active-sort-screening-old",
         "active-sort-screening-new",
         "active-sort-applied-old",
-        "active-sort-ghosted",
         "active-sort-applied-new",
     ]
 
@@ -2591,15 +2590,17 @@ def test_list_applications_filters_historical_status_group(db_session):
     new_job = seed_job(db_session, job_id="job-new")
     applied_job = seed_job(db_session, job_id="job-applied")
     rejected_job = seed_job(db_session, job_id="job-rejected")
+    ghosted_job = seed_job(db_session, job_id="job-ghosted")
 
     seed_application(db_session, user=user, job=new_job, resume=resume, status="new")
     seed_application(db_session, user=user, job=applied_job, resume=resume, status="applied")
     seed_application(db_session, user=user, job=rejected_job, resume=resume, status="rejected")
+    seed_application(db_session, user=user, job=ghosted_job, resume=resume, status="ghosted")
 
     response = list_applications(db_session, user_id=user.id, status_group="historical")
 
-    assert response.total == 2
-    assert {item.status for item in response.items} == {"applied", "rejected"}
+    assert response.total == 3
+    assert {item.status for item in response.items} == {"applied", "ghosted", "rejected"}
 
 
 def test_list_applications_rejects_unsupported_status_group(db_session):

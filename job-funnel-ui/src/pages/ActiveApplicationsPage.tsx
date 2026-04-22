@@ -8,7 +8,7 @@ import type { JobApplication } from "../types";
 import { formatDateOnly } from "../utils";
 
 const DEFAULT_LIMIT = 25;
-const ACTIVE_APPLICATION_STATUSES = ["applied", "ghosted", "screening", "interview"];
+const ACTIVE_APPLICATION_STATUSES = ["applied", "screening", "interview"];
 
 export function ActiveApplicationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
